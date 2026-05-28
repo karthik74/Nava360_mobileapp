@@ -505,6 +505,655 @@ class StatTile extends StatelessWidget {
 // Misc
 // ------------------------------------------------------------------
 
+// ------------------------------------------------------------------
+// Dashboard widgets (v2)
+// ------------------------------------------------------------------
+
+/// Gradient hero card on top of the employee dashboard.
+/// Owns its own pulse animation; the live timer text is supplied
+/// by the parent so it can drive a 1s tick from a single Timer.
+class AttendanceHeroCard extends StatelessWidget {
+  const AttendanceHeroCard({
+    super.key,
+    required this.timerText,
+    required this.hasCheckedIn,
+    required this.hasCheckedOut,
+    required this.checkInTime,
+    required this.checkOutTime,
+    required this.onTap,
+    this.location = 'Hyderabad HQ',
+  });
+
+  final String timerText;
+  final bool hasCheckedIn;
+  final bool hasCheckedOut;
+  final String checkInTime;
+  final String checkOutTime;
+  final VoidCallback onTap;
+  final String location;
+
+  @override
+  Widget build(BuildContext context) {
+    final pillLabel = hasCheckedOut
+        ? 'Shift complete'
+        : hasCheckedIn
+            ? 'On the clock'
+            : 'Ready to start';
+    final dotColor = hasCheckedOut
+        ? Colors.white.withOpacity(0.9)
+        : hasCheckedIn
+            ? const Color(0xFF34D399)
+            : const Color(0xFFFBBF24);
+    final pulse = hasCheckedIn && !hasCheckedOut;
+    final caption = hasCheckedIn
+        ? 'Worked today · checked in at $checkInTime'
+        : 'Tap below to start your shift';
+    final ctaLabel = hasCheckedOut
+        ? 'Done for today'
+        : hasCheckedIn
+            ? 'Check out now'
+            : 'Check in now';
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: AppColors.heroGradient,
+        borderRadius: BorderRadius.circular(AppRadii.xl),
+        boxShadow: AppShadows.lifted,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _PulseDot(color: dotColor, animate: pulse),
+                    const SizedBox(width: 7),
+                    Text(
+                      pillLabel,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              Icon(
+                Icons.place_rounded,
+                size: 13,
+                color: Colors.white.withOpacity(0.85),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                location,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.85),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Text(
+            timerText,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 44,
+              fontWeight: FontWeight.w800,
+              fontFeatures: [FontFeature.tabularFigures()],
+              height: 1.0,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            caption,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.85),
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _HeroMiniCard(label: 'CHECK-IN', value: checkInTime),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _HeroMiniCard(label: 'CHECK-OUT', value: checkOutTime),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _HeroCta(label: ctaLabel, onTap: onTap),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroMiniCard extends StatelessWidget {
+  const _HeroMiniCard({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(AppRadii.md),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.7),
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroCta extends StatelessWidget {
+  const _HeroCta({required this.label, required this.onTap});
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.fingerprint_rounded,
+                size: 20,
+                color: AppColors.primary,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.primary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PulseDot extends StatefulWidget {
+  const _PulseDot({required this.color, required this.animate});
+  final Color color;
+  final bool animate;
+
+  @override
+  State<_PulseDot> createState() => _PulseDotState();
+}
+
+class _PulseDotState extends State<_PulseDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animate) _c.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant _PulseDot old) {
+    super.didUpdateWidget(old);
+    if (widget.animate && !_c.isAnimating) {
+      _c.repeat(reverse: true);
+    } else if (!widget.animate && _c.isAnimating) {
+      _c.stop();
+      _c.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (_, __) {
+        final t = _c.value;
+        return Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(
+            color: widget.color,
+            shape: BoxShape.circle,
+            boxShadow: widget.animate
+                ? [
+                    BoxShadow(
+                      color: widget.color.withOpacity(0.6 * (1 - t)),
+                      blurRadius: 6 + 6 * t,
+                      spreadRadius: 1 + 2 * t,
+                    ),
+                  ]
+                : null,
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Stat tile used in the dashboard 2×2 grid.
+class StatTileV2 extends StatelessWidget {
+  const StatTileV2({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+    this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        boxShadow: AppShadows.card,
+      ),
+      child: Material(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: color.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(icon, size: 18, color: color),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: onTap == null
+                          ? AppColors.hairline
+                          : AppColors.muted,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                FittedBox(
+                  alignment: Alignment.centerLeft,
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.ink,
+                      height: 1.1,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.inkSoft,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Quick action row used under "Quick actions".
+class QuickActionRow extends StatelessWidget {
+  const QuickActionRow({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        boxShadow: AppShadows.card,
+      ),
+      child: Material(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withOpacity(0.35),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(icon, color: Colors.white, size: 22),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.ink,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        description,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.muted,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: AppColors.muted,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class TodayScheduleItem {
+  const TodayScheduleItem({
+    required this.time,
+    required this.title,
+    required this.meta,
+    required this.tone,
+    this.onTap,
+  });
+  final String time;
+  final String title;
+  final String meta;
+  final Color tone;
+  final VoidCallback? onTap;
+}
+
+/// Card with hairline-divided rows used under "Today".
+class TodayScheduleList extends StatelessWidget {
+  const TodayScheduleList({super.key, required this.items});
+  final List<TodayScheduleItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      return GlassCard(
+        padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 18),
+        shadow: AppShadows.card,
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              alignment: Alignment.center,
+              child: const Icon(
+                Icons.event_available_rounded,
+                size: 18,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Nothing scheduled for today. Enjoy the calm.',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.inkSoft,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return GlassCard(
+      padding: EdgeInsets.zero,
+      shadow: AppShadows.card,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        child: Column(
+          children: [
+            for (int i = 0; i < items.length; i++) ...[
+              if (i > 0)
+                const Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: AppColors.hairline,
+                  indent: 16,
+                  endIndent: 16,
+                ),
+              _TodayRow(item: items[i]),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TodayRow extends StatelessWidget {
+  const _TodayRow({required this.item});
+  final TodayScheduleItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: item.onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 46,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.time,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'today',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                width: 4,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: item.tone,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      item.meta,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              if (item.onTap != null)
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: AppColors.muted,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class UserAvatar extends StatelessWidget {
   const UserAvatar({
     super.key,

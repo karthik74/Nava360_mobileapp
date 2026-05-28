@@ -7,6 +7,6 @@ class Env {
   /// `http://localhost:8080`; a physical device needs your LAN IP.
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://navachetanalivelihoods.com/backend/',
+    defaultValue: 'https://hrms.navachetanalivelihoods.com/',
   );
 }

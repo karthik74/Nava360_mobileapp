@@ -117,6 +117,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return _now.difference(inTime);
   }
 
+  String _humanLeaveType(String t) {
+    final s = t.toLowerCase().replaceAll('_', ' ');
+    return s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authUserProvider);
@@ -143,23 +148,44 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final timerText = _fmtTimer(_workDuration(todayRec));
 
     int pendingLeaves = 0;
+    List<LeaveRequest> leavesList = const [];
     leaves.whenData((list) {
+      leavesList = list;
       pendingLeaves = list.where((l) => l.status == 'PENDING').length;
     });
 
     int pendingTasks = 0;
     int inProgressTasks = 0;
+    List<Task> tasksList = const [];
     tasks.whenData((list) {
+      tasksList = list;
       pendingTasks = list.where((t) => t.status == 'PENDING').length;
       inProgressTasks = list.where((t) => t.status == 'IN_PROGRESS').length;
     });
 
     int pendingApprovals = 0;
+    List<LeaveRequest> teamLeavesList = const [];
     teamLeaves.whenData((list) {
+      teamLeavesList = list;
       pendingApprovals = list.where((l) => l.status == 'PENDING').length;
     });
 
     final isManager = user?.hasRole(const {'ADMIN', 'HR'}) ?? false;
+    final teamOnLeaveToday = teamLeavesList
+        .where((l) =>
+            l.status == 'APPROVED' &&
+            today.compareTo(l.fromDate) >= 0 &&
+            today.compareTo(l.toDate) <= 0)
+        .toList();
+    final todayItems = _buildTodayItems(
+      context,
+      todayRec: todayRec,
+      tasks: tasksList,
+      leaves: leavesList,
+      todayStr: today,
+    );
+
+    final activeTasks = pendingTasks + inProgressTasks;
 
     return RefreshIndicator(
       color: AppColors.primary,
@@ -179,7 +205,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           Text(
             '$_greeting,',
             style: const TextStyle(
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: FontWeight.w600,
               color: AppColors.inkSoft,
             ),
@@ -196,23 +222,22 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ),
           const SizedBox(height: 20),
 
-          // Attendance hero mini
-          _AttendanceMiniCard(
-            now: _now,
+          // Attendance hero
+          AttendanceHeroCard(
+            timerText: timerText,
             hasCheckedIn: hasCheckedIn,
             hasCheckedOut: hasCheckedOut,
-            timerText: timerText,
             checkInTime: _fmtTime(todayRec?.checkIn),
             checkOutTime: _fmtTime(todayRec?.checkOut),
             onTap: () => context.go('/attendance'),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
 
-          // Stats grid
+          // Stats grid (2×2, gap 12)
           Row(
             children: [
               Expanded(
-                child: StatTile(
+                child: StatTileV2(
                   label: 'Present days',
                   value: presentCount.toString(),
                   icon: Icons.check_circle_rounded,
@@ -222,7 +247,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: StatTile(
+                child: StatTileV2(
                   label: 'Hours this month',
                   value: _fmtDuration(totalHours),
                   icon: Icons.access_time_rounded,
@@ -236,7 +261,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           Row(
             children: [
               Expanded(
-                child: StatTile(
+                child: StatTileV2(
                   label: 'Pending leaves',
                   value: pendingLeaves.toString(),
                   icon: Icons.event_available_rounded,
@@ -246,9 +271,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: StatTile(
+                child: StatTileV2(
                   label: 'Active tasks',
-                  value: '${pendingTasks + inProgressTasks}',
+                  value: activeTasks.toString(),
                   icon: Icons.task_alt_rounded,
                   color: AppColors.accent,
                   onTap: () => context.go('/tasks'),
@@ -264,47 +289,57 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             subtitle: 'Get things done in a tap',
           ),
           const SizedBox(height: 14),
-          AppQuickAction(
+          QuickActionRow(
             icon: Icons.fingerprint_rounded,
-            label: hasCheckedOut
+            title: hasCheckedOut
                 ? 'Done for today'
                 : hasCheckedIn
                     ? 'Check out now'
                     : 'Check in now',
+            description: hasCheckedOut
+                ? 'Shift completed for today'
+                : hasCheckedIn
+                    ? 'Clock out and end your shift'
+                    : 'Open attendance to clock in',
             color: AppColors.primary,
             onTap: () => context.go('/attendance'),
           ),
           const SizedBox(height: 10),
-          AppQuickAction(
+          QuickActionRow(
             icon: Icons.event_available_rounded,
-            label: 'Apply for leave',
+            title: 'Apply for leave',
+            description: 'Submit a new leave request',
             color: AppColors.success,
             onTap: () => context.go('/leaves'),
           ),
           const SizedBox(height: 10),
-          AppQuickAction(
+          QuickActionRow(
             icon: Icons.task_alt_rounded,
-            label: 'View my tasks',
+            title: 'View tasks',
+            description: activeTasks > 0
+                ? '$activeTasks active · tap to review'
+                : 'See what\'s on your plate',
             color: AppColors.accent,
             onTap: () => context.go('/tasks'),
           ),
           if (isManager && pendingApprovals > 0) ...[
             const SizedBox(height: 10),
-            AppQuickAction(
+            QuickActionRow(
               icon: Icons.groups_2_rounded,
-              label:
-                  'Review $pendingApprovals team request${pendingApprovals == 1 ? '' : 's'}',
+              title: 'Review $pendingApprovals team request'
+                  '${pendingApprovals == 1 ? '' : 's'}',
+              description: 'Approve or decline pending leaves',
               color: AppColors.pink,
               onTap: () => context.go('/team'),
             ),
           ],
           const SizedBox(height: 28),
 
-          // Today's date
+          // Today
           AppSectionHeader(
             title: 'Today',
             trailing: Text(
-              DateFormat('EEEE, d MMMM').format(_now),
+              DateFormat('EEEE, d MMM').format(_now),
               style: const TextStyle(
                 fontSize: 13,
                 color: AppColors.muted,
@@ -313,415 +348,275 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ),
           ),
           const SizedBox(height: 14),
-
-          // Recent attendance
           attendance.when(
-            data: (list) {
-              final recent = list.where((r) => r.date != today).toList()
-                ..sort((a, b) => b.date.compareTo(a.date));
-              final shown = recent.take(3).toList();
-              if (shown.isEmpty) {
-                return const AppEmptyState(
-                  icon: Icons.calendar_month_rounded,
-                  message: 'No recent attendance records.',
-                );
-              }
-              return Column(
-                children: [
-                  for (final r in shown)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _RecentAttendanceTile(
-                        date: DateFormat('EEE, d MMM')
-                            .format(DateTime.parse(r.date)),
-                        inTime: _fmtTime(r.checkIn),
-                        outTime: _fmtTime(r.checkOut),
-                        hours: _fmtDuration(r.workingHours),
-                        status: r.status,
-                      ),
-                    ),
-                ],
-              );
-            },
-            loading: () => const AppLoadingBlock(height: 140),
+            data: (_) => TodayScheduleList(items: todayItems),
+            loading: () => const AppLoadingBlock(height: 120),
             error: (e, _) => AppErrorPanel(
               message: e.toString(),
               onRetry: () => ref.invalidate(_dashAttendanceProvider),
             ),
           ),
-          const SizedBox(height: 28),
 
-          // Upcoming leaves
-          const AppSectionHeader(
-            title: 'Upcoming leaves',
-            subtitle: 'Your scheduled time off',
+          // Team on leave (manager-aware, hide if empty)
+          if (isManager && teamOnLeaveToday.isNotEmpty) ...[
+            const SizedBox(height: 28),
+            const AppSectionHeader(
+              title: 'Team on leave',
+              subtitle: 'Out of office today',
+            ),
+            const SizedBox(height: 14),
+            _TeamOnLeaveCard(
+              leaves: teamOnLeaveToday,
+              onTapItem: () => context.go('/team'),
+              humanLeaveType: _humanLeaveType,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  List<TodayScheduleItem> _buildTodayItems(
+    BuildContext context, {
+    required AttendanceRecord? todayRec,
+    required List<Task> tasks,
+    required List<LeaveRequest> leaves,
+    required String todayStr,
+  }) {
+    final items = <TodayScheduleItem>[];
+    final timeFmt = DateFormat('HH:mm');
+
+    DateTime? parseLocal(String? iso) {
+      if (iso == null) return null;
+      try {
+        return DateTime.parse(iso).toLocal();
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final inTime = parseLocal(todayRec?.checkIn);
+    if (inTime != null) {
+      items.add(TodayScheduleItem(
+        time: timeFmt.format(inTime),
+        title: 'Checked in',
+        meta: 'Hyderabad HQ',
+        tone: AppColors.success,
+        onTap: () => context.go('/attendance'),
+      ));
+    }
+    final outTime = parseLocal(todayRec?.checkOut);
+    if (outTime != null) {
+      items.add(TodayScheduleItem(
+        time: timeFmt.format(outTime),
+        title: 'Checked out',
+        meta: 'Shift complete',
+        tone: AppColors.info,
+        onTap: () => context.go('/attendance'),
+      ));
+    }
+
+    for (final t in tasks) {
+      final due = t.dueDate?.toLocal();
+      if (due == null) continue;
+      final dueDay = DateFormat('yyyy-MM-dd').format(due);
+      if (dueDay != todayStr) continue;
+      items.add(TodayScheduleItem(
+        time: timeFmt.format(due),
+        title: t.title,
+        meta: 'Due · ${_humanTaskStatus(t.status)}',
+        tone: AppColors.warning,
+        onTap: () => context.go('/tasks'),
+      ));
+    }
+
+    for (final l in leaves) {
+      if (l.status != 'APPROVED') continue;
+      if (l.fromDate != todayStr) continue;
+      items.add(TodayScheduleItem(
+        time: 'All',
+        title: '${_humanLeaveType(l.leaveType)} starts',
+        meta: 'Until ${l.toDate}',
+        tone: AppColors.accent,
+        onTap: () => context.go('/leaves'),
+      ));
+    }
+
+    items.sort((a, b) {
+      if (a.time == 'All' && b.time != 'All') return -1;
+      if (b.time == 'All' && a.time != 'All') return 1;
+      return a.time.compareTo(b.time);
+    });
+    return items;
+  }
+
+  String _humanTaskStatus(String s) {
+    switch (s) {
+      case 'PENDING':
+        return 'Pending';
+      case 'IN_PROGRESS':
+        return 'In progress';
+      case 'COMPLETED':
+        return 'Completed';
+      case 'CANCELLED':
+        return 'Cancelled';
+      default:
+        return s.toLowerCase();
+    }
+  }
+}
+
+class _TeamOnLeaveCard extends StatelessWidget {
+  const _TeamOnLeaveCard({
+    required this.leaves,
+    required this.onTapItem,
+    required this.humanLeaveType,
+  });
+
+  final List<LeaveRequest> leaves;
+  final VoidCallback onTapItem;
+  final String Function(String) humanLeaveType;
+
+  @override
+  Widget build(BuildContext context) {
+    const maxAvatars = 5;
+    final overflow = leaves.length - maxAvatars;
+    final avatarsToShow = leaves.take(maxAvatars).toList();
+
+    return GlassCard(
+      padding: const EdgeInsets.all(16),
+      shadow: AppShadows.card,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            height: 36,
+            child: Stack(
+              children: [
+                for (int i = 0; i < avatarsToShow.length; i++)
+                  Positioned(
+                    left: i * 24.0,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: AppColors.surface,
+                          width: 2,
+                        ),
+                      ),
+                      child: UserAvatar(
+                        name: avatarsToShow[i].employeeName ?? '?',
+                        size: 36,
+                        radius: 18,
+                      ),
+                    ),
+                  ),
+                if (overflow > 0)
+                  Positioned(
+                    left: avatarsToShow.length * 24.0,
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceAlt,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: AppColors.surface,
+                          width: 2,
+                        ),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        '+$overflow',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.inkSoft,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
           const SizedBox(height: 14),
-          leaves.when(
-            data: (list) {
-              final upcoming = list
-                  .where((l) =>
-                      l.status == 'APPROVED' &&
-                      DateTime.tryParse(l.fromDate)?.isAfter(
-                            DateTime.now().subtract(const Duration(days: 1)),
-                          ) ==
-                          true)
-                  .toList()
-                ..sort((a, b) => a.fromDate.compareTo(b.fromDate));
-              final shown = upcoming.take(3).toList();
-              if (shown.isEmpty) {
-                return const AppEmptyState(
-                  icon: Icons.beach_access_rounded,
-                  message: 'No upcoming approved leaves.',
-                );
-              }
-              return Column(
-                children: [
-                  for (final l in shown)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _UpcomingLeaveTile(
-                        type: l.leaveType,
-                        from: l.fromDate,
-                        to: l.toDate,
-                        days: l.numberOfDays ?? 1,
-                      ),
-                    ),
-                ],
-              );
-            },
-            loading: () => const AppLoadingBlock(height: 140),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(_dashLeavesProvider),
+          for (int i = 0; i < leaves.length; i++) ...[
+            if (i > 0) const SizedBox(height: 8),
+            _TeamLeaveRow(
+              leave: leaves[i],
+              onTap: onTapItem,
+              humanLeaveType: humanLeaveType,
             ),
-          ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _AttendanceMiniCard extends StatelessWidget {
-  const _AttendanceMiniCard({
-    required this.now,
-    required this.hasCheckedIn,
-    required this.hasCheckedOut,
-    required this.timerText,
-    required this.checkInTime,
-    required this.checkOutTime,
+class _TeamLeaveRow extends StatelessWidget {
+  const _TeamLeaveRow({
+    required this.leave,
     required this.onTap,
+    required this.humanLeaveType,
   });
 
-  final DateTime now;
-  final bool hasCheckedIn;
-  final bool hasCheckedOut;
-  final String timerText;
-  final String checkInTime;
-  final String checkOutTime;
+  final LeaveRequest leave;
   final VoidCallback onTap;
+  final String Function(String) humanLeaveType;
 
   @override
   Widget build(BuildContext context) {
-    final badgeLabel = hasCheckedOut
-        ? 'DONE'
-        : hasCheckedIn
-            ? 'LIVE'
-            : 'READY';
-    final badgeColor = hasCheckedOut
-        ? Colors.white.withOpacity(0.85)
-        : hasCheckedIn
-            ? const Color(0xFF34D399)
-            : Colors.white.withOpacity(0.65);
-
-    return AnimatedGradientCard(
+    final name = leave.employeeName ?? 'Teammate';
+    return Material(
+      color: AppColors.surfaceAlt,
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.xl),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.18),
-                    borderRadius: BorderRadius.circular(AppRadii.pill),
-                    border: Border.all(color: Colors.white.withOpacity(0.25)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: badgeColor,
-                          shape: BoxShape.circle,
-                        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              UserAvatar(name: name, size: 32, radius: 16),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        badgeLabel,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                        ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${humanLeaveType(leave.leaveType)} · '
+                      '${leave.fromDate} → ${leave.toDate}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w500,
                       ),
-                    ],
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  DateFormat('EEE, d MMM').format(now),
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              timerText,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 40,
-                fontWeight: FontWeight.w800,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              hasCheckedOut
-                  ? 'Shift complete'
-                  : hasCheckedIn
-                      ? 'Timer running'
-                      : 'Tap to check in',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.85),
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.14),
-                borderRadius: BorderRadius.circular(AppRadii.lg),
-                border: Border.all(color: Colors.white.withOpacity(0.18)),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _MiniTimeBlock(
-                      icon: Icons.login_rounded,
-                      label: 'In',
-                      value: checkInTime,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                  Container(
-                    width: 1,
-                    height: 28,
-                    color: Colors.white.withOpacity(0.18),
-                  ),
-                  Expanded(
-                    child: _MiniTimeBlock(
-                      icon: Icons.logout_rounded,
-                      label: 'Out',
-                      value: checkOutTime,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+              const Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: AppColors.muted,
+              ),
+            ],
+          ),
         ),
-      ),
-    );
-  }
-}
-
-class _MiniTimeBlock extends StatelessWidget {
-  const _MiniTimeBlock({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(icon, size: 14, color: Colors.white.withOpacity(0.8)),
-        const SizedBox(width: 6),
-        Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.7),
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            Text(
-              value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _RecentAttendanceTile extends StatelessWidget {
-  const _RecentAttendanceTile({
-    required this.date,
-    required this.inTime,
-    required this.outTime,
-    required this.hours,
-    required this.status,
-  });
-
-  final String date;
-  final String inTime;
-  final String outTime;
-  final String hours;
-  final String status;
-
-  @override
-  Widget build(BuildContext context) {
-    final tone = StatusTone.forAttendance(status);
-    return GlassCard(
-      padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: tone.color.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            alignment: Alignment.center,
-            child: Icon(Icons.event_note_rounded, color: tone.color, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  date,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '$inTime → $outTime  ·  $hours',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.muted,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          StatusPill(label: tone.label, color: tone.color),
-        ],
-      ),
-    );
-  }
-}
-
-class _UpcomingLeaveTile extends StatelessWidget {
-  const _UpcomingLeaveTile({
-    required this.type,
-    required this.from,
-    required this.to,
-    required this.days,
-  });
-
-  final String type;
-  final String from;
-  final String to;
-  final int days;
-
-  String _humanType(String t) {
-    final s = t.toLowerCase().replaceAll('_', ' ');
-    return s[0].toUpperCase() + s.substring(1);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: AppColors.success.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            alignment: Alignment.center,
-            child: const Icon(
-              Icons.beach_access_rounded,
-              color: AppColors.success,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _humanType(type),
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '$from → $to  ·  $days day${days == 1 ? '' : 's'}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.muted,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const StatusPill(label: 'Approved', color: AppColors.success),
-        ],
       ),
     );
   }
