@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -29,13 +31,20 @@ class LeavesScreen extends ConsumerWidget {
     final balance = ref.watch(_myBalanceProvider);
     final leaves = ref.watch(_myLeavesProvider);
 
+    final mq = MediaQuery.of(context);
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      floatingActionButton: _NewRequestFab(
-        onTap: () => _openRequest(context, ref),
+      backgroundColor: Colors.transparent,
+      floatingActionButton: Padding(
+        padding: EdgeInsets.only(
+          bottom: mq.padding.bottom + AppChrome.bottomNavHeight + 8,
+        ),
+        child: _NewRequestFab(
+          onTap: () => _openRequest(context, ref),
+        ),
       ),
       body: RefreshIndicator(
         color: AppColors.primary,
+        backgroundColor: Colors.white.withOpacity(0.85),
         onRefresh: () async {
           ref.invalidate(_myBalanceProvider);
           ref.invalidate(_myLeavesProvider);
@@ -44,7 +53,12 @@ class LeavesScreen extends ConsumerWidget {
           physics: const BouncingScrollPhysics(
             parent: AlwaysScrollableScrollPhysics(),
           ),
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            mq.padding.top + 5,
+            16,
+            mq.padding.bottom + AppChrome.bottomNavHeight + 84,
+          ),
           children: [
             const AppSectionHeader(
               title: 'Leave balance',
@@ -60,12 +74,12 @@ class LeavesScreen extends ConsumerWidget {
                   );
                 }
                 return SizedBox(
-                  height: 130,
+                  height: 108,
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     physics: const BouncingScrollPhysics(),
                     itemCount: b.balances.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 12),
+                    separatorBuilder: (_, __) => const SizedBox(width: 10),
                     itemBuilder: (_, i) => _BalanceCard(b: b.balances[i]),
                   ),
                 );
@@ -168,16 +182,16 @@ class _BalanceCard extends StatelessWidget {
     final allowanceText = b.allowanceDays == null ? '∞' : '${b.allowanceDays}';
 
     return Container(
-      width: 200,
-      padding: const EdgeInsets.all(16),
+      width: 168,
+      padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
         gradient: gradient,
         borderRadius: BorderRadius.circular(AppRadii.lg),
         boxShadow: [
           BoxShadow(
-            color: (gradient.colors.first).withOpacity(0.30),
-            blurRadius: 22,
-            offset: const Offset(0, 10),
+            color: (gradient.colors.first).withOpacity(0.28),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
@@ -187,26 +201,29 @@ class _BalanceCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 32,
-                height: 32,
+                width: 26,
+                height: 26,
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.22),
-                  borderRadius: BorderRadius.circular(9),
+                  borderRadius: BorderRadius.circular(7),
                 ),
                 child: const Icon(
                   Icons.calendar_month_rounded,
                   color: Colors.white,
-                  size: 16,
+                  size: 14,
                 ),
               ),
               const Spacer(),
-              Text(
-                b.leaveTypeLabel.toUpperCase(),
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.9),
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.8,
+              Flexible(
+                child: Text(
+                  b.leaveTypeLabel.toUpperCase(),
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
+                  ),
                 ),
               ),
             ],
@@ -219,32 +236,32 @@ class _BalanceCard extends StatelessWidget {
                 balanceText,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 32,
+                  fontSize: 24,
                   fontWeight: FontWeight.w800,
-                  letterSpacing: 0,
+                  letterSpacing: -0.5,
                   height: 1,
                 ),
               ),
-              const SizedBox(width: 4),
+              const SizedBox(width: 3),
               Padding(
-                padding: const EdgeInsets.only(bottom: 4),
+                padding: const EdgeInsets.only(bottom: 3),
                 child: Text(
                   'days',
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.85),
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
             '${b.usedDays} used · $allowanceText total',
             style: TextStyle(
               color: Colors.white.withOpacity(0.85),
-              fontSize: 11,
+              fontSize: 10.5,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -262,7 +279,7 @@ class _LeaveTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final tone = StatusTone.forLeave(r.status);
     return GlassCard(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       shadow: AppShadows.soft,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -270,17 +287,18 @@ class _LeaveTile extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
                   color: tone.color.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(11),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: tone.color.withOpacity(0.22)),
                 ),
                 alignment: Alignment.center,
                 child: Icon(Icons.beach_access_rounded,
-                    color: tone.color, size: 20),
+                    color: tone.color, size: 17),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -288,16 +306,16 @@ class _LeaveTile extends StatelessWidget {
                     Text(
                       _humanType(r.leaveType),
                       style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
                         color: AppColors.ink,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     Text(
                       '${r.numberOfDays ?? "?"} day(s) · ${r.fromDate} → ${r.toDate}',
                       style: const TextStyle(
-                        fontSize: 12,
+                        fontSize: 11.5,
                         color: AppColors.muted,
                         fontWeight: FontWeight.w500,
                       ),
@@ -309,23 +327,24 @@ class _LeaveTile extends StatelessWidget {
             ],
           ),
           if (r.reason != null && r.reason!.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               decoration: BoxDecoration(
-                color: AppColors.bg,
+                color: Colors.white.withOpacity(0.45),
                 borderRadius: BorderRadius.circular(AppRadii.sm),
+                border: Border.all(color: Colors.white.withOpacity(0.55)),
               ),
               child: Row(
                 children: [
                   const Icon(Icons.format_quote_rounded,
-                      size: 14, color: AppColors.muted),
-                  const SizedBox(width: 6),
+                      size: 13, color: AppColors.muted),
+                  const SizedBox(width: 5),
                   Expanded(
                     child: Text(
                       r.reason!,
                       style: const TextStyle(
-                        fontSize: 12,
+                        fontSize: 11.5,
                         color: AppColors.inkSoft,
                         fontStyle: FontStyle.italic,
                       ),
@@ -355,29 +374,29 @@ class _NewRequestFab extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         decoration: BoxDecoration(
           gradient: AppColors.heroGradient,
           borderRadius: BorderRadius.circular(AppRadii.pill),
           boxShadow: [
             BoxShadow(
-              color: AppColors.primary.withOpacity(0.45),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
+              color: AppColors.primary.withOpacity(0.40),
+              blurRadius: 14,
+              offset: const Offset(0, 6),
             ),
           ],
         ),
         child: const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.add_rounded, color: Colors.white, size: 20),
-            SizedBox(width: 6),
+            Icon(Icons.add_rounded, color: Colors.white, size: 18),
+            SizedBox(width: 5),
             Text(
               'New request',
               style: TextStyle(
                 color: Colors.white,
-                fontWeight: FontWeight.w800,
-                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                fontSize: 12.5,
               ),
             ),
           ],
@@ -469,10 +488,17 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
   @override
   Widget build(BuildContext context) {
     final df = DateFormat('EEE, d MMM y');
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        child: Container(
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.86),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border(
+          top: BorderSide(color: Colors.white.withOpacity(0.7), width: 1),
+        ),
       ),
       padding: EdgeInsets.only(
         left: 20,
@@ -644,6 +670,8 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
             ),
           ),
         ],
+      ),
+        ),
       ),
     );
   }

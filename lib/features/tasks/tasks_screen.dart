@@ -114,10 +114,12 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
   Widget build(BuildContext context) {
     final tasks = ref.watch(_myTasksProvider(_selectedFilter.queryValue));
 
+    final mq = MediaQuery.of(context);
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Colors.transparent,
       body: RefreshIndicator(
         color: AppColors.primary,
+        backgroundColor: Colors.white.withOpacity(0.85),
         onRefresh: () async {
           ref.invalidate(_myTasksProvider(_selectedFilter.queryValue));
         },
@@ -125,7 +127,12 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
           physics: const BouncingScrollPhysics(
             parent: AlwaysScrollableScrollPhysics(),
           ),
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            mq.padding.top + 1,
+            16,
+            mq.padding.bottom + AppChrome.bottomNavHeight + 10,
+          ),
           children: [
             const SizedBox(height: 12),
             const AppSectionHeader(
@@ -145,9 +152,14 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                   showCheckmark: false,
                   labelStyle: TextStyle(
                     color: selected ? Colors.white : AppColors.inkSoft,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
                   ),
-                  backgroundColor: AppColors.surface,
+                  backgroundColor: Colors.white.withOpacity(0.55),
+                  side: BorderSide(
+                    color: selected
+                        ? AppColors.primary
+                        : Colors.white.withOpacity(0.55),
+                  ),
                   onSelected: (value) {
                     if (!value) return;
                     setState(() => _selectedFilter = filter);
@@ -232,14 +244,9 @@ class _TaskCard extends StatelessWidget {
         !task.status.toUpperCase().contains('DONE');
     final priority = task.priority?.trim();
 
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        border: Border.all(color: AppColors.hairline),
-        boxShadow: AppShadows.soft,
-      ),
-      padding: const EdgeInsets.all(16),
+    return GlassCard(
+      padding: const EdgeInsets.all(14),
+      shadow: AppShadows.soft,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -250,18 +257,18 @@ class _TaskCard extends StatelessWidget {
                 child: Text(
                   task.title,
                   style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
                     color: AppColors.ink,
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Flexible(child: _TaskStatusPill(status: task.status)),
             ],
           ),
           if (task.projectName != null || priority != null) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -282,11 +289,11 @@ class _TaskCard extends StatelessWidget {
             ),
           ],
           if (task.description != null && task.description!.isNotEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Text(
               task.description!,
               style: const TextStyle(
-                fontSize: 14,
+                fontSize: 12.5,
                 color: AppColors.inkSoft,
                 height: 1.4,
               ),
@@ -295,10 +302,10 @@ class _TaskCard extends StatelessWidget {
             ),
           ],
           if (due != null || task.assignedBy != null) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Wrap(
-              spacing: 12,
-              runSpacing: 8,
+              spacing: 10,
+              runSpacing: 6,
               children: [
                 if (due != null) ...[
                   _MetaText(
@@ -317,12 +324,12 @@ class _TaskCard extends StatelessWidget {
               ],
             ),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           const Align(
             alignment: Alignment.centerRight,
             child: Icon(
               Icons.arrow_forward_rounded,
-              size: 18,
+              size: 16,
               color: AppColors.muted,
             ),
           ),
@@ -340,11 +347,11 @@ class _TaskStatusPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = _statusColor(status);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withOpacity(0.14),
         borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: color.withOpacity(0.22)),
+        border: Border.all(color: color.withOpacity(0.28)),
       ),
       child: Text(
         status.replaceAll('_', ' ').toUpperCase(),
@@ -352,9 +359,9 @@ class _TaskStatusPill extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
           color: color,
-          fontSize: 11,
+          fontSize: 9.5,
           fontWeight: FontWeight.w800,
-          letterSpacing: 0,
+          letterSpacing: 0.3,
         ),
       ),
     );
@@ -375,16 +382,17 @@ class _MetaPill extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       constraints: const BoxConstraints(maxWidth: 190),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
+        color: color.withOpacity(0.12),
         borderRadius: BorderRadius.circular(AppRadii.pill),
+        border: Border.all(color: color.withOpacity(0.20)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 5),
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
           Flexible(
             child: Text(
               label,
@@ -392,8 +400,8 @@ class _MetaPill extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: color,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
@@ -420,15 +428,15 @@ class _MetaText extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 5),
           Flexible(
             child: Text(
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 11.5,
                 color: color,
                 fontWeight: FontWeight.w600,
               ),
@@ -491,13 +499,10 @@ class _DateRangeBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = from != null || to != null;
-    return Container(
+    return GlassCard(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: AppColors.hairline),
-      ),
+      shadow: AppShadows.soft,
+      radius: AppRadii.md,
       child: LayoutBuilder(
         builder: (context, constraints) {
           final dateControls = Row(
@@ -589,8 +594,9 @@ class _DatePill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: AppColors.bg,
+        color: Colors.white.withOpacity(0.45),
         borderRadius: BorderRadius.circular(AppRadii.sm),
+        border: Border.all(color: Colors.white.withOpacity(0.55)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

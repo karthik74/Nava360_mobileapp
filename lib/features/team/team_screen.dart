@@ -28,8 +28,10 @@ class _TeamScreenState extends ConsumerState<TeamScreen> {
     final canReview = user?.hasRole(const {'ADMIN', 'HR'}) ?? false;
     final leaves = ref.watch(_teamLeavesProvider);
 
+    final mq = MediaQuery.of(context);
     return RefreshIndicator(
       color: AppColors.primary,
+      backgroundColor: Colors.white.withOpacity(0.85),
       onRefresh: () async => ref.invalidate(_teamLeavesProvider),
       child: leaves.when(
         data: (rows) {
@@ -44,7 +46,12 @@ class _TeamScreenState extends ConsumerState<TeamScreen> {
             physics: const BouncingScrollPhysics(
               parent: AlwaysScrollableScrollPhysics(),
             ),
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              mq.padding.top + AppChrome.appBarHeight + 12,
+              16,
+              mq.padding.bottom + AppChrome.bottomNavHeight + 16,
+            ),
             children: [
               _TeamSummary(
                 total: rows.length,
@@ -153,7 +160,7 @@ class _TeamSummary extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.all(22),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -161,7 +168,7 @@ class _TeamSummary extends StatelessWidget {
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
+                          horizontal: 9, vertical: 4),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.18),
                         borderRadius: BorderRadius.circular(AppRadii.pill),
@@ -173,7 +180,7 @@ class _TeamSummary extends StatelessWidget {
                         'TEAM',
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 10,
+                          fontSize: 9.5,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 1.2,
                         ),
@@ -181,28 +188,28 @@ class _TeamSummary extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 Text(
                   '$total request${total == 1 ? '' : 's'}',
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 28,
+                    fontSize: 22,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: 0,
+                    letterSpacing: -0.3,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   pending > 0
                       ? '$pending pending your review'
                       : 'All caught up — nice work',
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.85),
-                    fontSize: 13,
+                    fontSize: 12,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 14),
                 Row(
                   children: [
                     Expanded(
@@ -265,27 +272,27 @@ class _MiniStat extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 6,
-              height: 6,
+              width: 5,
+              height: 5,
               decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 5),
             Text(
               value.toString(),
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 18,
+                fontSize: 15,
                 fontWeight: FontWeight.w800,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 1),
         Text(
           label,
           style: TextStyle(
             color: Colors.white.withOpacity(0.75),
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: FontWeight.w600,
             letterSpacing: 0.2,
           ),
@@ -353,12 +360,12 @@ class _FilterChip extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppRadii.pill),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: selected ? AppColors.ink : AppColors.surface,
+          color: selected ? AppColors.ink : Colors.white.withOpacity(0.55),
           borderRadius: BorderRadius.circular(AppRadii.pill),
           border: Border.all(
-            color: selected ? AppColors.ink : AppColors.hairline,
+            color: selected ? AppColors.ink : Colors.white.withOpacity(0.55),
           ),
         ),
         child: Row(
@@ -367,22 +374,24 @@ class _FilterChip extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 11.5,
                 fontWeight: FontWeight.w700,
                 color: selected ? Colors.white : AppColors.inkSoft,
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 5),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
-                color: selected ? Colors.white.withOpacity(0.18) : AppColors.bg,
+                color: selected
+                    ? Colors.white.withOpacity(0.18)
+                    : Colors.white.withOpacity(0.7),
                 borderRadius: BorderRadius.circular(AppRadii.pill),
               ),
               child: Text(
                 count.toString(),
                 style: TextStyle(
-                  fontSize: 10,
+                  fontSize: 9.5,
                   fontWeight: FontWeight.w800,
                   color: selected ? Colors.white : AppColors.muted,
                 ),
@@ -524,7 +533,7 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
     final avatarColor = _avatarColor(r.employeeName);
 
     return GlassCard(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       shadow: AppShadows.soft,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -532,8 +541,8 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
           Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
@@ -543,19 +552,19 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
                       avatarColor.withOpacity(0.7),
                     ],
                   ),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(11),
                 ),
                 alignment: Alignment.center,
                 child: Text(
                   _initials(r.employeeName),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -563,16 +572,16 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
                     Text(
                       r.employeeName ?? 'Employee',
                       style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
                         color: AppColors.ink,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     Text(
                       '${r.leaveType} · ${r.numberOfDays ?? "?"} day(s)',
                       style: const TextStyle(
-                        fontSize: 12,
+                        fontSize: 11.5,
                         color: AppColors.muted,
                         fontWeight: FontWeight.w600,
                       ),
@@ -583,23 +592,24 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
               StatusPill(label: tone.label, color: tone.color),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: AppColors.bg,
+              color: Colors.white.withOpacity(0.45),
               borderRadius: BorderRadius.circular(AppRadii.md),
+              border: Border.all(color: Colors.white.withOpacity(0.55)),
             ),
             child: Row(
               children: [
                 const Icon(Icons.calendar_today_rounded,
-                    size: 14, color: AppColors.primary),
-                const SizedBox(width: 8),
+                    size: 13, color: AppColors.primary),
+                const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     '${r.fromDate}  →  ${r.toDate}',
                     style: const TextStyle(
-                      fontSize: 12,
+                      fontSize: 11.5,
                       fontWeight: FontWeight.w700,
                       color: AppColors.ink,
                     ),
@@ -609,18 +619,18 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
             ),
           ),
           if (r.reason != null && r.reason!.isNotEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Icon(Icons.format_quote_rounded,
-                    size: 14, color: AppColors.muted),
-                const SizedBox(width: 6),
+                    size: 13, color: AppColors.muted),
+                const SizedBox(width: 5),
                 Expanded(
                   child: Text(
                     r.reason!,
                     style: const TextStyle(
-                      fontSize: 12,
+                      fontSize: 11.5,
                       color: AppColors.inkSoft,
                       fontStyle: FontStyle.italic,
                       height: 1.4,
@@ -631,7 +641,7 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
             ),
           ],
           if (widget.canReview) ...[
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
@@ -684,37 +694,37 @@ class _ActionButton extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadii.md),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: outlined
                 ? Colors.transparent
                 : (disabled ? color.withOpacity(0.4) : color),
             border: outlined
-                ? Border.all(color: color.withOpacity(0.5), width: 1.4)
+                ? Border.all(color: color.withOpacity(0.5), width: 1.3)
                 : null,
             borderRadius: BorderRadius.circular(AppRadii.md),
             boxShadow: outlined || disabled
                 ? null
                 : [
                     BoxShadow(
-                      color: color.withOpacity(0.3),
-                      blurRadius: 12,
-                      offset: const Offset(0, 6),
+                      color: color.withOpacity(0.28),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
                     ),
                   ],
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 16, color: outlined ? color : Colors.white),
-              const SizedBox(width: 6),
+              Icon(icon, size: 15, color: outlined ? color : Colors.white),
+              const SizedBox(width: 5),
               Text(
                 label,
                 style: TextStyle(
                   color: outlined ? color : Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
                   letterSpacing: 0.2,
                 ),
               ),

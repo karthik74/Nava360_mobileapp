@@ -3,6 +3,7 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.gms.google-services")
 }
 
 import java.io.FileInputStream
@@ -16,13 +17,15 @@ val keystoreProperties = Properties().apply {
 }
 
 android {
-    namespace = "com.hrms.hrms_mobile"
+    namespace = "com.hrms.nava_360"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Required by flutter_local_notifications (uses java.time on minSdk < 26).
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -30,10 +33,9 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.hrms.hrms_mobile"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        // Must match the Android app registered in Firebase
+        // (see android/app/google-services.json).
+        applicationId = "com.hrms.nava_360"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -65,4 +67,8 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

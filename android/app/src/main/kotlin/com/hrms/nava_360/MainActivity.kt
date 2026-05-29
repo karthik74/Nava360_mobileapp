@@ -1,4 +1,4 @@
-package com.hrms.hrms_mobile
+package com.hrms.nava_360
 
 import io.flutter.embedding.android.FlutterActivity
 

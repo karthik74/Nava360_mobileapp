@@ -1,9 +1,27 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
+import 'features/notifications/push_service.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const ProviderScope(child: HrmsApp()));
+
+  // Background message handler MUST be registered before runApp.
+  // Safe even if Firebase isn't yet initialised — the registration just
+  // remembers the handler for when a background push arrives.
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
+  final container = ProviderContainer();
+  // PushService.init() handles Firebase + local notifications and swallows
+  // any failures (e.g. missing google-services.json), so the UI always boots.
+  await container.read(pushServiceProvider).init();
+
+  runApp(
+    UncontrolledProviderScope(
+      container: container,
+      child: const HrmsApp(),
+    ),
+  );
 }

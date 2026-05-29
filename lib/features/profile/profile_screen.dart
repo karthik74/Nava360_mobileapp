@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -17,15 +19,28 @@ class ProfileScreen extends ConsumerWidget {
         body: Center(child: CircularProgressIndicator()),
       );
     }
+    final mq = MediaQuery.of(context);
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      body: CustomScrollView(
+      backgroundColor: Colors.transparent,
+      extendBodyBehindAppBar: true,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: const _BackButton(),
+      ),
+      body: GlassBackdrop(
+        child: CustomScrollView(
         physics: const BouncingScrollPhysics(),
         slivers: [
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              padding: EdgeInsets.fromLTRB(
+                16,
+                mq.padding.top + kToolbarHeight + 8,
+                16,
+                mq.padding.bottom + 16,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -33,25 +48,29 @@ class ProfileScreen extends ConsumerWidget {
                     title: 'Profile',
                     subtitle: 'Your account and preferences',
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 18),
 
                   // Avatar + name
                   Center(
                     child: Column(
                       children: [
                         Container(
-                          width: 96,
-                          height: 96,
+                          width: 76,
+                          height: 76,
                           decoration: BoxDecoration(
                             gradient: AppColors.heroGradient,
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: AppColors.primary.withOpacity(0.35),
-                                blurRadius: 24,
-                                offset: const Offset(0, 10),
+                                color: AppColors.primary.withOpacity(0.32),
+                                blurRadius: 18,
+                                offset: const Offset(0, 8),
                               ),
                             ],
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.55),
+                              width: 1.5,
+                            ),
                           ),
                           alignment: Alignment.center,
                           child: Text(
@@ -60,26 +79,26 @@ class ProfileScreen extends ConsumerWidget {
                                 : '?',
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 40,
+                              fontSize: 30,
                               fontWeight: FontWeight.w800,
                             ),
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 12),
                         Text(
                           user.username,
                           style: const TextStyle(
-                            fontSize: 22,
+                            fontSize: 17,
                             fontWeight: FontWeight.w800,
                             color: AppColors.ink,
-                            letterSpacing: 0,
+                            letterSpacing: -0.2,
                           ),
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 5),
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 5,
+                            horizontal: 10,
+                            vertical: 3,
                           ),
                           decoration: BoxDecoration(
                             color: AppColors.primary.withOpacity(0.10),
@@ -92,7 +111,7 @@ class ProfileScreen extends ConsumerWidget {
                             user.role,
                             style: const TextStyle(
                               color: AppColors.primary,
-                              fontSize: 12,
+                              fontSize: 10.5,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 0.5,
                             ),
@@ -101,54 +120,54 @@ class ProfileScreen extends ConsumerWidget {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 22),
 
                   // Info cards
                   const AppSectionHeader(title: 'Account info'),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 8),
                   _InfoCard(
                     icon: Icons.email_outlined,
                     label: 'Email',
                     value: user.email,
                     color: AppColors.info,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   _InfoCard(
                     icon: Icons.badge_outlined,
                     label: 'Employee ID',
                     value: user.employeeId?.toString() ?? 'Not linked',
                     color: AppColors.accent,
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   _InfoCard(
                     icon: Icons.person_outline,
                     label: 'User ID',
                     value: '#${user.userId}',
                     color: AppColors.success,
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 22),
 
                   // Settings
                   const AppSectionHeader(title: 'Settings'),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 8),
                   _SettingTile(
                     icon: Icons.notifications_outlined,
                     label: 'Notifications',
                     onTap: () => context.push('/notifications'),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   _SettingTile(
                     icon: Icons.security_outlined,
                     label: 'Privacy & security',
                     onTap: () {},
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   _SettingTile(
                     icon: Icons.help_outline_rounded,
                     label: 'Help & support',
                     onTap: () {},
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 22),
 
                   // Logout
                   SizedBox(
@@ -229,6 +248,46 @@ class ProfileScreen extends ConsumerWidget {
             ),
           ),
         ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BackButton extends StatelessWidget {
+  const _BackButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: SizedBox(
+        width: 44,
+        height: 44,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: Material(
+              color: Colors.white.withOpacity(0.55),
+              child: InkWell(
+                onTap: () => Navigator.of(context).maybePop(),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.white.withOpacity(0.55)),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Icon(
+                    Icons.arrow_back_rounded,
+                    size: 20,
+                    color: AppColors.inkSoft,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -250,21 +309,22 @@ class _InfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GlassCard(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       shadow: AppShadows.soft,
       child: Row(
         children: [
           Container(
-            width: 44,
-            height: 44,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(12),
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: color.withOpacity(0.22)),
             ),
             alignment: Alignment.center,
-            child: Icon(icon, color: color, size: 22),
+            child: Icon(icon, color: color, size: 18),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -272,16 +332,16 @@ class _InfoCard extends StatelessWidget {
                 Text(
                   label,
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 11,
                     color: AppColors.muted,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 1),
                 Text(
                   value,
                   style: const TextStyle(
-                    fontSize: 15,
+                    fontSize: 13.5,
                     fontWeight: FontWeight.w700,
                     color: AppColors.ink,
                   ),
@@ -314,26 +374,27 @@ class _SettingTile extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadii.lg),
         child: GlassCard(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(12),
           shadow: AppShadows.soft,
           child: Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
-                  color: AppColors.bg,
-                  borderRadius: BorderRadius.circular(11),
+                  color: Colors.white.withOpacity(0.55),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white.withOpacity(0.6)),
                 ),
                 alignment: Alignment.center,
-                child: Icon(icon, color: AppColors.inkSoft, size: 20),
+                child: Icon(icon, color: AppColors.inkSoft, size: 18),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   label,
                   style: const TextStyle(
-                    fontSize: 15,
+                    fontSize: 13.5,
                     fontWeight: FontWeight.w700,
                     color: AppColors.ink,
                   ),
@@ -341,7 +402,7 @@ class _SettingTile extends StatelessWidget {
               ),
               const Icon(
                 Icons.arrow_forward_ios_rounded,
-                size: 14,
+                size: 13,
                 color: AppColors.muted,
               ),
             ],

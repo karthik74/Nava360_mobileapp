@@ -52,10 +52,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     final size = MediaQuery.of(context).size;
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          // Gradient header
+          // Vibrant mesh background covers the whole screen.
+          const Positioned.fill(
+            child: _LoginBackdrop(),
+          ),
+          // Gradient hero band at the top, on top of the mesh.
           Container(
             height: size.height * 0.42,
             decoration: const BoxDecoration(gradient: AppColors.heroGradient),
@@ -65,7 +69,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   begin: Alignment.topRight,
                   end: Alignment.bottomLeft,
                   colors: [
-                    Colors.white.withOpacity(0.12),
+                    Colors.white.withOpacity(0.18),
                     Colors.transparent,
                     Colors.black.withOpacity(0.04),
                   ],
@@ -253,6 +257,79 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           ),
         ],
       ),
+    );
+  }
+}
+
+class _LoginBackdrop extends StatelessWidget {
+  const _LoginBackdrop();
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFFEDF1FB), Color(0xFFF4ECFB), Color(0xFFE8F4FB)],
+            ),
+          ),
+        ),
+        Positioned(
+          top: -100,
+          left: -100,
+          child: Container(
+            width: 360,
+            height: 360,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  AppColors.meshA.withOpacity(0.36),
+                  AppColors.meshA.withOpacity(0),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 60,
+          right: -120,
+          child: Container(
+            width: 320,
+            height: 320,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  AppColors.meshB.withOpacity(0.32),
+                  AppColors.meshB.withOpacity(0),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: -160,
+          left: -40,
+          child: Container(
+            width: 380,
+            height: 380,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  AppColors.meshC.withOpacity(0.32),
+                  AppColors.meshC.withOpacity(0),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

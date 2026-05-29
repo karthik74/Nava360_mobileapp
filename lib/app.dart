@@ -11,6 +11,7 @@ import 'features/home/dashboard_screen.dart';
 import 'features/home/home_shell.dart';
 import 'features/leaves/leaves_screen.dart';
 import 'features/notifications/notifications_screen.dart';
+import 'features/notifications/push_lifecycle.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/tasks/tasks_screen.dart';
 import 'features/team/team_screen.dart';
@@ -92,8 +93,9 @@ class HrmsApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(goRouterProvider);
-    // Activate the auth → location-tracker side effect once at the app root.
+    // Activate the auth → side-effect bindings once at the app root.
     ref.watch(locationLifecycleProvider);
+    ref.watch(pushLifecycleProvider);
     return MaterialApp.router(
       title: 'HRMS',
       debugShowCheckedModeBanner: false,

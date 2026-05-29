@@ -239,14 +239,21 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     final hasCheckedOut = todayRec?.checkOut != null;
     final timerText = _fmtTimer(_workDuration(todayRec));
 
+    final mq = MediaQuery.of(context);
     return RefreshIndicator(
       color: AppColors.primary,
+      backgroundColor: Colors.white.withOpacity(0.85),
       onRefresh: () async => ref.invalidate(_todayRecordsProvider),
       child: ListView(
         physics: const BouncingScrollPhysics(
           parent: AlwaysScrollableScrollPhysics(),
         ),
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          mq.padding.top + AppChrome.appBarHeight + 12,
+          16,
+          mq.padding.bottom + AppChrome.bottomNavHeight + 16,
+        ),
         children: [
           _HeroPunchCard(
             now: _now,
@@ -259,10 +266,10 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
             timerText: timerText,
           ),
           if (_statusMsg != null) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             _StatusBanner(message: _statusMsg!, isError: _statusIsError),
           ],
-          const SizedBox(height: 24),
+          const SizedBox(height: 18),
           Row(
             children: [
               Expanded(
@@ -273,7 +280,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                   color: AppColors.success,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: StatTile(
                   label: 'Hours this month',
@@ -284,30 +291,31 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 22),
           Row(
             children: [
               const Expanded(
                 child: Text(
                   'This month',
                   style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
                     color: AppColors.ink,
+                    letterSpacing: -0.1,
                   ),
                 ),
               ),
               Text(
                 DateFormat('MMMM yyyy').format(_now),
                 style: const TextStyle(
-                  fontSize: 13,
+                  fontSize: 11.5,
                   color: AppColors.muted,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           records.when(
             data: (list) {
               if (list.isEmpty) {
@@ -417,7 +425,7 @@ class _HeroPunchCard extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.all(22),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -425,7 +433,7 @@ class _HeroPunchCard extends StatelessWidget {
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
+                          horizontal: 9, vertical: 4),
                       decoration: BoxDecoration(
                         color: Colors.white.withOpacity(0.18),
                         borderRadius: BorderRadius.circular(AppRadii.pill),
@@ -437,21 +445,21 @@ class _HeroPunchCard extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Container(
-                            width: 6,
-                            height: 6,
+                            width: 5,
+                            height: 5,
                             decoration: BoxDecoration(
                               color: badgeColor,
                               shape: BoxShape.circle,
                             ),
                           ),
-                          const SizedBox(width: 6),
+                          const SizedBox(width: 5),
                           Text(
                             badgeLabel,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 10,
+                              fontSize: 9.5,
                               fontWeight: FontWeight.w800,
-                              letterSpacing: 0,
+                              letterSpacing: 0.4,
                             ),
                           ),
                         ],
@@ -462,40 +470,41 @@ class _HeroPunchCard extends StatelessWidget {
                       dateStr,
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.9),
-                        fontSize: 12,
+                        fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
                 Text(
                   timerText,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 44,
+                    fontSize: 34,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: 0,
+                    letterSpacing: -0.8,
+                    height: 1.0,
                     fontFeatures: [FontFeature.tabularFigures()],
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Text(
                   timerCaption,
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.85),
-                    fontSize: 13,
+                    fontSize: 11.5,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                const SizedBox(height: 22),
+                const SizedBox(height: 16),
                 Container(
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.14),
                     borderRadius: BorderRadius.circular(AppRadii.lg),
                     border: Border.all(
-                      color: Colors.white.withOpacity(0.18),
+                      color: Colors.white.withOpacity(0.20),
                     ),
                   ),
                   child: Row(
@@ -510,7 +519,7 @@ class _HeroPunchCard extends StatelessWidget {
                       ),
                       Container(
                         width: 1,
-                        height: 36,
+                        height: 30,
                         color: Colors.white.withOpacity(0.18),
                       ),
                       Expanded(
@@ -524,7 +533,7 @@ class _HeroPunchCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
                 _PunchButton(
                   hasCheckedIn: hasCheckedIn,
                   hasCheckedOut: hasCheckedOut,
@@ -555,25 +564,25 @@ class _TimeBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Row(
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: 30,
+            height: 30,
             decoration: BoxDecoration(
               color: active
                   ? Colors.white.withOpacity(0.25)
                   : Colors.white.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
               icon,
-              size: 18,
+              size: 16,
               color: Colors.white.withOpacity(active ? 1 : 0.7),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           Flexible(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -585,19 +594,18 @@ class _TimeBlock extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.75),
-                    fontSize: 11,
+                    fontSize: 10,
                     fontWeight: FontWeight.w600,
-                    letterSpacing: 0,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 1),
                 Text(
                   value,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 15,
+                    fontSize: 13,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -627,7 +635,7 @@ class _PunchButton extends StatelessWidget {
   Widget build(BuildContext context) {
     if (hasCheckedOut) {
       return Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.18),
@@ -637,14 +645,14 @@ class _PunchButton extends StatelessWidget {
         child: const Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
-            SizedBox(width: 8),
+            Icon(Icons.check_circle_rounded, color: Colors.white, size: 16),
+            SizedBox(width: 7),
             Text(
               "You're done for today",
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
-                fontSize: 14,
+                fontSize: 13,
               ),
             ),
           ],
@@ -664,14 +672,14 @@ class _PunchButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppRadii.md),
           ),
           child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 16),
+            padding: const EdgeInsets.symmetric(vertical: 12),
             alignment: Alignment.center,
             child: busy
                 ? const SizedBox(
-                    height: 22,
-                    width: 22,
+                    height: 18,
+                    width: 18,
                     child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
+                      strokeWidth: 2.2,
                       valueColor: AlwaysStoppedAnimation(AppColors.primary),
                     ),
                   )
@@ -683,16 +691,16 @@ class _PunchButton extends StatelessWidget {
                             ? Icons.logout_rounded
                             : Icons.fingerprint_rounded,
                         color: AppColors.primary,
-                        size: 20,
+                        size: 18,
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 7),
                       Text(
                         isCheckOut ? 'Check out' : 'Check in',
                         style: const TextStyle(
                           color: AppColors.primary,
-                          fontSize: 15,
+                          fontSize: 13.5,
                           fontWeight: FontWeight.w800,
-                          letterSpacing: 0,
+                          letterSpacing: 0.1,
                         ),
                       ),
                     ],
@@ -713,9 +721,9 @@ class _StatusBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = isError ? AppColors.danger : AppColors.success;
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withOpacity(0.10),
         borderRadius: BorderRadius.circular(AppRadii.md),
         border: Border.all(color: color.withOpacity(0.25)),
       ),
@@ -725,16 +733,16 @@ class _StatusBanner extends StatelessWidget {
             isError
                 ? Icons.error_outline_rounded
                 : Icons.check_circle_outline_rounded,
-            size: 18,
+            size: 16,
             color: color,
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               message,
               style: TextStyle(
                 color: color,
-                fontSize: 13,
+                fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -763,21 +771,22 @@ class _RecordTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final tone = StatusTone.forAttendance(status);
     return GlassCard(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       shadow: AppShadows.soft,
       child: Row(
         children: [
           Container(
-            width: 44,
-            height: 44,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
-              color: tone.color.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(12),
+              color: tone.color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: tone.color.withOpacity(0.22)),
             ),
             alignment: Alignment.center,
-            child: Icon(Icons.event_note_rounded, color: tone.color, size: 20),
+            child: Icon(Icons.event_note_rounded, color: tone.color, size: 17),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -785,16 +794,16 @@ class _RecordTile extends StatelessWidget {
                 Text(
                   date,
                   style: const TextStyle(
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: AppColors.ink,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 1),
                 Text(
                   '$inTime → $outTime  ·  $hours',
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 11.5,
                     color: AppColors.muted,
                     fontWeight: FontWeight.w500,
                   ),

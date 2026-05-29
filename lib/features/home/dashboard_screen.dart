@@ -74,13 +74,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     super.dispose();
   }
 
-  String get _greeting {
-    final h = _now.hour;
-    if (h < 12) return 'Good morning';
-    if (h < 17) return 'Good afternoon';
-    return 'Good evening';
-  }
-
   String _fmtTime(String? iso) {
     if (iso == null) return '—';
     try {
@@ -187,8 +180,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     final activeTasks = pendingTasks + inProgressTasks;
 
+    final mq = MediaQuery.of(context);
     return RefreshIndicator(
       color: AppColors.primary,
+      backgroundColor: Colors.white.withOpacity(0.85),
       onRefresh: () async {
         ref.invalidate(_dashAttendanceProvider);
         ref.invalidate(_dashLeavesProvider);
@@ -199,29 +194,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         physics: const BouncingScrollPhysics(
           parent: AlwaysScrollableScrollPhysics(),
         ),
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          mq.padding.top+ 8,
+          16,
+          mq.padding.bottom + AppChrome.bottomNavHeight + 10,
+        ),
         children: [
-          // Greeting
-          Text(
-            '$_greeting,',
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              color: AppColors.inkSoft,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            user?.username ?? 'User',
-            style: const TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-              color: AppColors.ink,
-              letterSpacing: 0,
-            ),
-          ),
-          const SizedBox(height: 20),
-
           // Attendance hero
           AttendanceHeroCard(
             timerText: timerText,
@@ -231,9 +210,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             checkOutTime: _fmtTime(todayRec?.checkOut),
             onTap: () => context.go('/attendance'),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 18),
 
-          // Stats grid (2×2, gap 12)
+          // Stats grid (2×2, gap 10)
           Row(
             children: [
               Expanded(
@@ -245,7 +224,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   onTap: () => context.go('/attendance'),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: StatTileV2(
                   label: 'Hours this month',
@@ -257,7 +236,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Row(
             children: [
               Expanded(
@@ -269,7 +248,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   onTap: () => context.go('/leaves'),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: StatTileV2(
                   label: 'Active tasks',
@@ -281,14 +260,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 28),
+          const SizedBox(height: 22),
 
           // Quick actions
           const AppSectionHeader(
             title: 'Quick actions',
             subtitle: 'Get things done in a tap',
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 8),
           QuickActionRow(
             icon: Icons.fingerprint_rounded,
             title: hasCheckedOut
@@ -304,7 +283,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             color: AppColors.primary,
             onTap: () => context.go('/attendance'),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           QuickActionRow(
             icon: Icons.event_available_rounded,
             title: 'Apply for leave',
@@ -312,7 +291,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             color: AppColors.success,
             onTap: () => context.go('/leaves'),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           QuickActionRow(
             icon: Icons.task_alt_rounded,
             title: 'View tasks',
@@ -333,7 +312,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               onTap: () => context.go('/team'),
             ),
           ],
-          const SizedBox(height: 28),
+          const SizedBox(height: 22),
 
           // Today
           AppSectionHeader(
@@ -341,13 +320,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             trailing: Text(
               DateFormat('EEEE, d MMM').format(_now),
               style: const TextStyle(
-                fontSize: 13,
+                fontSize: 11.5,
                 color: AppColors.muted,
                 fontWeight: FontWeight.w600,
               ),
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           attendance.when(
             data: (_) => TodayScheduleList(items: todayItems),
             loading: () => const AppLoadingBlock(height: 120),
@@ -359,12 +338,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
           // Team on leave (manager-aware, hide if empty)
           if (isManager && teamOnLeaveToday.isNotEmpty) ...[
-            const SizedBox(height: 28),
+            const SizedBox(height: 22),
             const AppSectionHeader(
               title: 'Team on leave',
               subtitle: 'Out of office today',
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 10),
             _TeamOnLeaveCard(
               leaves: teamOnLeaveToday,
               onTapItem: () => context.go('/team'),
@@ -500,7 +479,7 @@ class _TeamOnLeaveCard extends StatelessWidget {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: AppColors.surface,
+                          color: Colors.white.withOpacity(0.7),
                           width: 2,
                         ),
                       ),
@@ -518,10 +497,10 @@ class _TeamOnLeaveCard extends StatelessWidget {
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        color: AppColors.surfaceAlt,
+                        color: Colors.white.withOpacity(0.55),
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: AppColors.surface,
+                          color: Colors.white.withOpacity(0.7),
                           width: 2,
                         ),
                       ),
@@ -569,12 +548,16 @@ class _TeamLeaveRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final name = leave.employeeName ?? 'Teammate';
     return Material(
-      color: AppColors.surfaceAlt,
+      color: Colors.white.withOpacity(0.45),
       borderRadius: BorderRadius.circular(AppRadii.md),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        child: Padding(
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.white.withOpacity(0.55)),
+            borderRadius: BorderRadius.circular(AppRadii.md),
+          ),
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [

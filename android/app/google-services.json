@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "593693659664",
+    "project_id": "nava360-13da3",
+    "storage_bucket": "nava360-13da3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:593693659664:android:8f3563dac6f82928b67095",
+        "android_client_info": {
+          "package_name": "com.hrms.nava_360"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyADpXH2FeUNw1SB_zoNGIPEUqCFwkTb-zo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

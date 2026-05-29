@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'theme.dart';
 
@@ -20,33 +22,41 @@ class AppEmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GlassCard(
-      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 24),
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
       shadow: AppShadows.soft,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 64,
-            height: 64,
+            width: 52,
+            height: 52,
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.08),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  AppColors.primary.withOpacity(0.18),
+                  AppColors.accent.withOpacity(0.18),
+                ],
+              ),
               shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withOpacity(0.6)),
             ),
-            child: Icon(icon, color: AppColors.primary, size: 28),
+            child: Icon(icon, color: AppColors.primary, size: 22),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           Text(
             message,
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: AppColors.inkSoft,
-              fontSize: 14,
+              fontSize: 13,
               fontWeight: FontWeight.w500,
               height: 1.4,
             ),
           ),
           if (action != null) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             action!,
           ],
         ],
@@ -63,32 +73,32 @@ class AppErrorPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GlassCard(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       shadow: AppShadows.soft,
-      border: Border.all(color: AppColors.danger.withOpacity(0.2)),
+      border: Border.all(color: AppColors.danger.withOpacity(0.3)),
       child: Row(
         children: [
           Container(
-            width: 36,
-            height: 36,
+            width: 32,
+            height: 32,
             decoration: BoxDecoration(
-              color: AppColors.danger.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(10),
+              color: AppColors.danger.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(9),
             ),
             child: const Icon(
               Icons.error_outline_rounded,
               color: AppColors.danger,
-              size: 18,
+              size: 16,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
               message,
               style: const TextStyle(
                 color: AppColors.danger,
                 fontWeight: FontWeight.w600,
-                fontSize: 13,
+                fontSize: 12.5,
                 height: 1.4,
               ),
             ),
@@ -96,7 +106,10 @@ class AppErrorPanel extends StatelessWidget {
           if (onRetry != null)
             IconButton(
               onPressed: onRetry,
-              icon: const Icon(Icons.refresh_rounded, color: AppColors.danger),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              icon: const Icon(Icons.refresh_rounded,
+                  color: AppColors.danger, size: 18),
               tooltip: 'Retry',
             ),
         ],
@@ -147,7 +160,7 @@ class AppSectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
           child: Column(
@@ -156,18 +169,18 @@ class AppSectionHeader extends StatelessWidget {
               Text(
                 title,
                 style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
                   color: AppColors.ink,
-                  letterSpacing: 0,
+                  letterSpacing: -0.1,
                 ),
               ),
               if (subtitle != null) ...[
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   subtitle!,
                   style: const TextStyle(
-                    fontSize: 13,
+                    fontSize: 12,
                     color: AppColors.muted,
                     fontWeight: FontWeight.w500,
                   ),
@@ -190,25 +203,25 @@ class AppPageHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.only(bottom: 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
             style: const TextStyle(
-              fontSize: 28,
+              fontSize: 22,
               fontWeight: FontWeight.w800,
               color: AppColors.ink,
-              letterSpacing: 0,
+              letterSpacing: -0.3,
             ),
           ),
           if (subtitle != null) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             Text(
               subtitle!,
               style: const TextStyle(
-                fontSize: 15,
+                fontSize: 13,
                 color: AppColors.inkSoft,
                 fontWeight: FontWeight.w500,
               ),
@@ -240,56 +253,65 @@ class AppIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.hairline),
-                boxShadow: AppShadows.soft,
+    return SizedBox(
+      width: 38,
+      height: 38,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(11),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(
+                sigmaX: GlassBlur.chrome,
+                sigmaY: GlassBlur.chrome,
               ),
-              alignment: Alignment.center,
-              child: Icon(
-                icon,
-                size: 20,
-                color: color ?? AppColors.inkSoft,
-              ),
-            ),
-            if (badge > 0)
-              Positioned(
-                top: -2,
-                right: -2,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppColors.danger,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.surface, width: 1.5),
-                  ),
-                  constraints: const BoxConstraints(minWidth: 16),
-                  child: Text(
-                    badge > 99 ? '99+' : '$badge',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w800,
+              child: Material(
+                color: Colors.white.withOpacity(0.55),
+                child: InkWell(
+                  onTap: onTap,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.55),
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      icon,
+                      size: 18,
+                      color: color ?? AppColors.inkSoft,
                     ),
                   ),
                 ),
               ),
-          ],
-        ),
+            ),
+          ),
+          if (badge > 0)
+            Positioned(
+              top: -2,
+              right: -2,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.danger,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+                constraints: const BoxConstraints(minWidth: 16),
+                child: Text(
+                  badge > 99 ? '99+' : '$badge',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -311,49 +333,39 @@ class AppQuickAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadii.lg),
-            border: Border.all(color: AppColors.hairline),
-            boxShadow: AppShadows.soft,
+    return _TappableGlass(
+      onTap: onTap,
+      radius: AppRadii.lg,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.14),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: color.withOpacity(0.22)),
+            ),
+            child: Icon(icon, color: color, size: 22),
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: color, size: 22),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink,
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
-                  ),
-                ),
-              ),
-              const Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 14,
-                color: AppColors.muted,
-              ),
-            ],
+            ),
           ),
-        ),
+          const Icon(
+            Icons.arrow_forward_ios_rounded,
+            size: 14,
+            color: AppColors.muted,
+          ),
+        ],
       ),
     );
   }
@@ -401,7 +413,7 @@ class AnimatedGradientCard extends StatelessWidget {
                     begin: Alignment.topRight,
                     end: Alignment.bottomLeft,
                     colors: [
-                      Colors.white.withOpacity(0.14),
+                      Colors.white.withOpacity(0.18),
                       Colors.transparent,
                       Colors.black.withOpacity(0.05),
                     ],
@@ -439,61 +451,122 @@ class StatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        child: GlassCard(
-          padding: const EdgeInsets.all(16),
-          shadow: AppShadows.soft,
-          border: Border.all(color: AppColors.hairline),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return _TappableGlass(
+      onTap: onTap,
+      radius: AppRadii.lg,
+      padding: const EdgeInsets.all(14),
+      shadow: AppShadows.soft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: color.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    child: Icon(icon, color: color, size: 20),
-                  ),
-                  const Spacer(),
-                  Icon(
-                    Icons.arrow_outward_rounded,
-                    size: 16,
-                    color: onTap == null ? AppColors.hairline : AppColors.muted,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              FittedBox(
-                alignment: Alignment.centerLeft,
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                    letterSpacing: 0,
-                  ),
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: color.withOpacity(0.22)),
                 ),
+                child: Icon(icon, color: color, size: 17),
               ),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.muted,
-                  fontWeight: FontWeight.w600,
-                ),
+              const Spacer(),
+              Icon(
+                Icons.arrow_outward_rounded,
+                size: 14,
+                color: onTap == null
+                    ? AppColors.muted.withOpacity(0.3)
+                    : AppColors.muted,
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          FittedBox(
+            alignment: Alignment.centerLeft,
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: AppColors.ink,
+                letterSpacing: -0.3,
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.muted,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------------------
+// Internal: tappable glass surface used by StatTile etc.
+// ------------------------------------------------------------------
+
+class _TappableGlass extends StatelessWidget {
+  const _TappableGlass({
+    required this.child,
+    required this.padding,
+    required this.radius,
+    this.onTap,
+    this.shadow,
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final double radius;
+  final VoidCallback? onTap;
+  final List<BoxShadow>? shadow;
+
+  @override
+  Widget build(BuildContext context) {
+    final br = BorderRadius.circular(radius);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: br,
+        boxShadow: shadow ?? AppShadows.card,
+      ),
+      child: ClipRRect(
+        borderRadius: br,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(
+            sigmaX: GlassBlur.card,
+            sigmaY: GlassBlur.card,
+          ),
+          child: Material(
+            color: Colors.white.withOpacity(0.45),
+            child: InkWell(
+              onTap: onTap,
+              splashColor: AppColors.primary.withOpacity(0.10),
+              highlightColor: AppColors.primary.withOpacity(0.05),
+              child: Container(
+                padding: padding,
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.glassBorder),
+                  borderRadius: br,
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white.withOpacity(0.35),
+                      Colors.white.withOpacity(0.05),
+                    ],
+                  ),
+                ),
+                child: child,
+              ),
+            ),
           ),
         ),
       ),
@@ -502,16 +575,10 @@ class StatTile extends StatelessWidget {
 }
 
 // ------------------------------------------------------------------
-// Misc
-// ------------------------------------------------------------------
-
-// ------------------------------------------------------------------
 // Dashboard widgets (v2)
 // ------------------------------------------------------------------
 
 /// Gradient hero card on top of the employee dashboard.
-/// Owns its own pulse animation; the live timer text is supplied
-/// by the parent so it can drive a 1s tick from a single Timer.
 class AttendanceHeroCard extends StatelessWidget {
   const AttendanceHeroCard({
     super.key,
@@ -555,95 +622,166 @@ class AttendanceHeroCard extends StatelessWidget {
             : 'Check in now';
 
     return Container(
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: AppColors.heroGradient,
         borderRadius: BorderRadius.circular(AppRadii.xl),
         boxShadow: AppShadows.lifted,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadii.xl),
+        child: Stack(
+          children: [
+            // Subtle decorative orbs to give the gradient depth.
+            Positioned(
+              top: -60,
+              right: -40,
+              child: Container(
+                width: 180,
+                height: 180,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(AppRadii.pill),
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      Colors.white.withOpacity(0.22),
+                      Colors.white.withOpacity(0),
+                    ],
+                  ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _PulseDot(color: dotColor, animate: pulse),
-                    const SizedBox(width: 7),
-                    Text(
-                      pillLabel,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.2,
+              ),
+            ),
+            Positioned(
+              bottom: -80,
+              left: -30,
+              child: Container(
+                width: 200,
+                height: 200,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      AppColors.meshC.withOpacity(0.30),
+                      AppColors.meshC.withOpacity(0),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            // Inner highlight overlay.
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white.withOpacity(0.16),
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.06),
+                    ],
+                    stops: const [0, 0.5, 1],
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(AppRadii.pill),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.30),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _PulseDot(color: dotColor, animate: pulse),
+                            const SizedBox(width: 6),
+                            Text(
+                              pillLabel,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
+                      const Spacer(),
+                      Icon(
+                        Icons.place_rounded,
+                        size: 12,
+                        color: Colors.white.withOpacity(0.85),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        location,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.85),
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    timerText,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 34,
+                      fontWeight: FontWeight.w800,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                      height: 1.0,
+                      letterSpacing: -0.8,
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    caption,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.85),
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _HeroMiniCard(
+                          label: 'CHECK-IN',
+                          value: checkInTime,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _HeroMiniCard(
+                          label: 'CHECK-OUT',
+                          value: checkOutTime,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _HeroCta(label: ctaLabel, onTap: onTap),
+                ],
               ),
-              const Spacer(),
-              Icon(
-                Icons.place_rounded,
-                size: 13,
-                color: Colors.white.withOpacity(0.85),
-              ),
-              const SizedBox(width: 4),
-              Text(
-                location,
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.85),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Text(
-            timerText,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 44,
-              fontWeight: FontWeight.w800,
-              fontFeatures: [FontFeature.tabularFigures()],
-              height: 1.0,
             ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            caption,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.85),
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _HeroMiniCard(label: 'CHECK-IN', value: checkInTime),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _HeroMiniCard(label: 'CHECK-OUT', value: checkOutTime),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          _HeroCta(label: ctaLabel, onTap: onTap),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -656,35 +794,42 @@ class _HeroMiniCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(AppRadii.md),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.7),
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.8,
-            ),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.16),
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            border: Border.all(color: Colors.white.withOpacity(0.22)),
           ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              fontFeatures: [FontFeature.tabularFigures()],
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.7),
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -704,13 +849,13 @@ class _HeroCta extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Icon(
                 Icons.fingerprint_rounded,
-                size: 20,
+                size: 18,
                 color: AppColors.primary,
               ),
               const SizedBox(width: 8),
@@ -718,7 +863,7 @@ class _HeroCta extends StatelessWidget {
                 label,
                 style: const TextStyle(
                   color: AppColors.primary,
-                  fontSize: 15,
+                  fontSize: 14,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 0.1,
                 ),
@@ -817,71 +962,68 @@ class StatTileV2 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        boxShadow: AppShadows.card,
-      ),
-      child: Material(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: color.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      alignment: Alignment.center,
-                      child: Icon(icon, size: 18, color: color),
-                    ),
-                    const Spacer(),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      size: 18,
-                      color: onTap == null
-                          ? AppColors.hairline
-                          : AppColors.muted,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                FittedBox(
-                  alignment: Alignment.centerLeft,
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    value,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.ink,
-                      height: 1.1,
-                    ),
+    return _TappableGlass(
+      onTap: onTap,
+      radius: AppRadii.lg,
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      color.withOpacity(0.22),
+                      color.withOpacity(0.10),
+                    ],
                   ),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: color.withOpacity(0.28)),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.inkSoft,
-                  ),
-                ),
-              ],
+                alignment: Alignment.center,
+                child: Icon(icon, size: 16, color: color),
+              ),
+              const Spacer(),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: 16,
+                color: onTap == null
+                    ? AppColors.muted.withOpacity(0.3)
+                    : AppColors.muted,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          FittedBox(
+            alignment: Alignment.centerLeft,
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+                color: AppColors.ink,
+                height: 1.1,
+                letterSpacing: -0.2,
+              ),
             ),
           ),
-        ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: AppColors.muted,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -906,74 +1048,66 @@ class QuickActionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        boxShadow: AppShadows.card,
-      ),
-      child: Material(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
+    return _TappableGlass(
+      onTap: onTap,
+      radius: AppRadii.lg,
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [color, color.withOpacity(0.75)],
+              ),
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withOpacity(0.32),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, color: Colors.white, size: 19),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: color,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: color.withOpacity(0.35),
-                        blurRadius: 12,
-                        offset: const Offset(0, 6),
-                      ),
-                    ],
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(icon, color: Colors.white, size: 22),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.ink,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        description,
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w500,
-                          color: AppColors.muted,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.ink,
                   ),
                 ),
-                const SizedBox(width: 8),
-                const Icon(
-                  Icons.chevron_right_rounded,
-                  size: 20,
-                  color: AppColors.muted,
+                const SizedBox(height: 2),
+                Text(
+                  description,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.muted,
+                    height: 1.3,
+                  ),
                 ),
               ],
             ),
           ),
-        ),
+          const SizedBox(width: 6),
+          const Icon(
+            Icons.chevron_right_rounded,
+            size: 18,
+            color: AppColors.muted,
+          ),
+        ],
       ),
     );
   }
@@ -1003,30 +1137,33 @@ class TodayScheduleList extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) {
       return GlassCard(
-        padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 18),
-        shadow: AppShadows.card,
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
+        shadow: AppShadows.soft,
         child: Row(
           children: [
             Container(
-              width: 36,
-              height: 36,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(10),
+                color: AppColors.primary.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(
+                  color: AppColors.primary.withOpacity(0.2),
+                ),
               ),
               alignment: Alignment.center,
               child: const Icon(
                 Icons.event_available_rounded,
-                size: 18,
+                size: 16,
                 color: AppColors.primary,
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             const Expanded(
               child: Text(
                 'Nothing scheduled for today. Enjoy the calm.',
                 style: TextStyle(
-                  fontSize: 13,
+                  fontSize: 12.5,
                   fontWeight: FontWeight.w500,
                   color: AppColors.inkSoft,
                   height: 1.35,
@@ -1040,23 +1177,20 @@ class TodayScheduleList extends StatelessWidget {
     return GlassCard(
       padding: EdgeInsets.zero,
       shadow: AppShadows.card,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        child: Column(
-          children: [
-            for (int i = 0; i < items.length; i++) ...[
-              if (i > 0)
-                const Divider(
-                  height: 1,
-                  thickness: 1,
-                  color: AppColors.hairline,
-                  indent: 16,
-                  endIndent: 16,
-                ),
-              _TodayRow(item: items[i]),
-            ],
+      child: Column(
+        children: [
+          for (int i = 0; i < items.length; i++) ...[
+            if (i > 0)
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: Colors.white.withOpacity(0.45),
+                indent: 16,
+                endIndent: 16,
+              ),
+            _TodayRow(item: items[i]),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -1073,28 +1207,28 @@ class _TodayRow extends StatelessWidget {
       child: InkWell(
         onTap: item.onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
             children: [
               SizedBox(
-                width: 46,
+                width: 42,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       item.time,
                       style: const TextStyle(
-                        fontSize: 13,
+                        fontSize: 12.5,
                         fontWeight: FontWeight.w700,
                         color: AppColors.ink,
                         fontFeatures: [FontFeature.tabularFigures()],
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     const Text(
                       'today',
                       style: TextStyle(
-                        fontSize: 10,
+                        fontSize: 9.5,
                         color: AppColors.muted,
                         fontWeight: FontWeight.w500,
                       ),
@@ -1102,16 +1236,20 @@ class _TodayRow extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Container(
-                width: 4,
-                height: 36,
+                width: 3,
+                height: 30,
                 decoration: BoxDecoration(
-                  color: item.tone,
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [item.tone, item.tone.withOpacity(0.55)],
+                  ),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1119,18 +1257,18 @@ class _TodayRow extends StatelessWidget {
                     Text(
                       item.title,
                       style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
                         color: AppColors.ink,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     Text(
                       item.meta,
                       style: const TextStyle(
-                        fontSize: 12,
+                        fontSize: 11.5,
                         color: AppColors.muted,
                         fontWeight: FontWeight.w500,
                       ),
@@ -1143,7 +1281,7 @@ class _TodayRow extends StatelessWidget {
               if (item.onTap != null)
                 const Icon(
                   Icons.chevron_right_rounded,
-                  size: 18,
+                  size: 16,
                   color: AppColors.muted,
                 ),
             ],
@@ -1158,8 +1296,8 @@ class UserAvatar extends StatelessWidget {
   const UserAvatar({
     super.key,
     required this.name,
-    this.size = 42,
-    this.radius = 14,
+    this.size = 38,
+    this.radius = 11,
   });
 
   final String name;
@@ -1179,10 +1317,11 @@ class UserAvatar extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: AppColors.primary.withOpacity(0.35),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
         ],
+        border: Border.all(color: Colors.white.withOpacity(0.55)),
       ),
       alignment: Alignment.center,
       child: Text(
