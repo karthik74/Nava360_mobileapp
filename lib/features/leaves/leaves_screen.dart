@@ -34,17 +34,9 @@ class LeavesScreen extends ConsumerWidget {
     final mq = MediaQuery.of(context);
     return Scaffold(
       backgroundColor: Colors.transparent,
-      floatingActionButton: Padding(
-        padding: EdgeInsets.only(
-          bottom: mq.padding.bottom + AppChrome.bottomNavHeight + 8,
-        ),
-        child: _NewRequestFab(
-          onTap: () => _openRequest(context, ref),
-        ),
-      ),
       body: RefreshIndicator(
         color: AppColors.primary,
-        backgroundColor: Colors.white.withOpacity(0.85),
+        backgroundColor: Colors.white.withOpacity(0.92),
         onRefresh: () async {
           ref.invalidate(_myBalanceProvider);
           ref.invalidate(_myLeavesProvider);
@@ -55,14 +47,19 @@ class LeavesScreen extends ConsumerWidget {
           ),
           padding: EdgeInsets.fromLTRB(
             16,
-            mq.padding.top + 5,
+            mq.padding.top + AppChrome.appBarHeight + 12,
             16,
-            mq.padding.bottom + AppChrome.bottomNavHeight + 84,
+            mq.padding.bottom + AppChrome.bottomNavHeight + 20,
           ),
           children: [
+            _ApplyForLeaveButton(
+              onTap: () => _openRequest(context, ref),
+            ),
+            const SizedBox(height: 22),
             const AppSectionHeader(
               title: 'Leave balance',
               subtitle: 'Days available for each category',
+              onDark: false,
             ),
             const SizedBox(height: 12),
             balance.when(
@@ -94,6 +91,7 @@ class LeavesScreen extends ConsumerWidget {
             const AppSectionHeader(
               title: 'My requests',
               subtitle: 'Track the status of your leaves',
+              onDark: false,
             ),
             const SizedBox(height: 12),
             leaves.when(
@@ -101,7 +99,7 @@ class LeavesScreen extends ConsumerWidget {
                 if (rows.isEmpty) {
                   return const AppEmptyState(
                     icon: Icons.event_note_rounded,
-                    message: 'No leave requests yet. Tap + to create one.',
+                    message: 'No leave requests yet. Tap the button above to create one.',
                   );
                 }
                 return Column(
@@ -132,6 +130,7 @@ class LeavesScreen extends ConsumerWidget {
     final result = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      useRootNavigator: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => _RequestSheet(employeeId: user!.employeeId!),
     );
@@ -365,41 +364,49 @@ class _LeaveTile extends StatelessWidget {
   }
 }
 
-class _NewRequestFab extends StatelessWidget {
-  const _NewRequestFab({required this.onTap});
+class _ApplyForLeaveButton extends StatelessWidget {
+  const _ApplyForLeaveButton({required this.onTap});
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-        decoration: BoxDecoration(
-          gradient: AppColors.heroGradient,
-          borderRadius: BorderRadius.circular(AppRadii.pill),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.primary.withOpacity(0.40),
-              blurRadius: 14,
-              offset: const Offset(0, 6),
+    return Container(
+      decoration: BoxDecoration(
+        gradient: AppColors.heroGradient,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withOpacity(0.34),
+            blurRadius: 26,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            alignment: Alignment.center,
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.add_rounded, color: Colors.white, size: 19),
+                SizedBox(width: 8),
+                Text(
+                  'Apply for leave',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.add_rounded, color: Colors.white, size: 18),
-            SizedBox(width: 5),
-            Text(
-              'New request',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 12.5,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -504,7 +511,9 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
         left: 20,
         right: 20,
         top: 12,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom +
+            MediaQuery.of(context).padding.bottom +
+            20,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

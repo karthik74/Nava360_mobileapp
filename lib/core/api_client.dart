@@ -51,6 +51,7 @@ class ApiClient {
         if (token != null && token.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $token';
         }
+        options.headers['X-Device-Type'] = 'MOBILE';
         handler.next(options);
       },
       onError: (e, handler) {
@@ -84,6 +85,24 @@ class ApiClient {
     try {
       final res = await _dio.get<Map<String, dynamic>>(path, queryParameters: query);
       return ApiEnvelope.fromJson(res.data!, parse).data;
+    } on DioException catch (e) {
+      throw _mapError(e);
+    }
+  }
+
+  /// Fetches a raw binary body (e.g. a PDF). Unlike [get], this does NOT unwrap
+  /// the JSON `ApiResponse` envelope — the endpoint returns the bytes directly.
+  Future<Uint8List> getBytes(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    try {
+      final res = await _dio.get<List<int>>(
+        path,
+        queryParameters: query,
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return Uint8List.fromList(res.data ?? const []);
     } on DioException catch (e) {
       throw _mapError(e);
     }

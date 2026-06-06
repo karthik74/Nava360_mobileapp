@@ -21,6 +21,9 @@ dependencies:
   # Networking
   dio: ^5.4.3+1
 
+  # WebSocket for real-time chat
+  web_socket_channel: ^3.0.1
+
   # Storage
   flutter_secure_storage: ^9.2.2
 
@@ -29,6 +32,13 @@ dependencies:
 
   # Formatting
   intl: ^0.19.0
+
+  # URL Launcher
+  url_launcher: ^6.3.0
+
+  # Payslip PDF download: save to disk + open in the system viewer
+  path_provider: ^2.1.4
+  open_filex: ^4.5.0
 
   # Push notifications
   firebase_core: ^3.6.0
@@ -42,3 +52,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/logo-mark.png
+    - assets/logo.png

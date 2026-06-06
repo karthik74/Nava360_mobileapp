@@ -8,6 +8,10 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Saving payslip PDFs to public Downloads on Android <= 9 (API 28).
+         API 29+ uses scoped MediaStore and needs no permission. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28"/>
     <application
         android:label="Nava360"
         android:name="${applicationName}"

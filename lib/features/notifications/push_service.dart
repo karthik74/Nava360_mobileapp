@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:firebase_core/firebase_core.dart';
@@ -39,10 +40,26 @@ class PushService {
       FlutterLocalNotificationsPlugin();
 
   StreamSubscription<RemoteMessage>? _foregroundSub;
+  StreamSubscription<RemoteMessage>? _openedSub;
   StreamSubscription<String>? _tokenRefreshSub;
   bool _started = false;
   bool _firebaseReady = false;
   bool _localReady = false;
+
+  /// Called with a conversationId when a chat notification is tapped. Set by the
+  /// app root (where the router is available). Any tap that arrives before this
+  /// is wired is buffered and flushed once the callback is set.
+  void Function(int conversationId)? _onOpenChat;
+  int? _pendingChatId;
+
+  set onOpenChat(void Function(int conversationId)? cb) {
+    _onOpenChat = cb;
+    final pending = _pendingChatId;
+    if (cb != null && pending != null) {
+      _pendingChatId = null;
+      cb(pending);
+    }
+  }
 
   /// True once Firebase initialised AND local notifications are wired up.
   /// Use this to short-circuit FCM calls when the native plugin is missing
@@ -65,6 +82,7 @@ class PushService {
             requestSoundPermission: false,
           ),
         ),
+        onDidReceiveNotificationResponse: _onLocalTap,
       );
       await _local
           .resolvePlatformSpecificImplementation<
@@ -123,6 +141,11 @@ class PushService {
         onError: (Object e) => debugPrint('FCM token refresh error: $e'),
       );
       _foregroundSub = FirebaseMessaging.onMessage.listen(_showLocal);
+      // Tap handling: app in background → onMessageOpenedApp; app launched cold
+      // from a tapped notification → getInitialMessage.
+      _openedSub = FirebaseMessaging.onMessageOpenedApp.listen(_handleRemoteTap);
+      final initial = await FirebaseMessaging.instance.getInitialMessage();
+      if (initial != null) _handleRemoteTap(initial);
     } catch (e) {
       debugPrint('PushService.start subscribe failed: $e');
     }
@@ -131,10 +154,40 @@ class PushService {
   /// Stops listeners. Call on logout.
   Future<void> stop() async {
     await _foregroundSub?.cancel();
+    await _openedSub?.cancel();
     await _tokenRefreshSub?.cancel();
     _foregroundSub = null;
+    _openedSub = null;
     _tokenRefreshSub = null;
     _started = false;
+  }
+
+  // ── Notification tap → open chat ──────────────────────────────────────────
+
+  void _handleRemoteTap(RemoteMessage message) => _handleTapData(message.data);
+
+  void _onLocalTap(NotificationResponse response) {
+    final payload = response.payload;
+    if (payload == null || payload.isEmpty) return;
+    try {
+      final data = (jsonDecode(payload) as Map).cast<String, dynamic>();
+      _handleTapData(data);
+    } catch (_) {
+      // Non-JSON payloads (older notifications) are ignored.
+    }
+  }
+
+  void _handleTapData(Map<String, dynamic> data) {
+    if (data['type']?.toString() != 'CHAT') return;
+    final id = int.tryParse('${data['conversationId']}');
+    if (id == null) return;
+    final cb = _onOpenChat;
+    if (cb != null) {
+      cb(id);
+    } else {
+      // Router not wired yet (cold start) — flush once onOpenChat is set.
+      _pendingChatId = id;
+    }
   }
 
   Future<void> _registerCurrentToken() async {
@@ -187,7 +240,7 @@ class PushService {
             presentSound: true,
           ),
         ),
-        payload: message.data.isEmpty ? null : message.data.toString(),
+        payload: message.data.isEmpty ? null : jsonEncode(message.data),
       );
     } catch (e) {
       debugPrint('Local notification show failed: $e');

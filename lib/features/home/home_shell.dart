@@ -4,9 +4,60 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/api_client.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
+import '../chat/chat_controller.dart';
+import '../leaves/leave_repository.dart';
+import '../tasks/task_repository.dart';
+
+// ─────────────────────────────────────────────────────────────────────
+// Drawer badge counters — populated when the drawer is on screen.
+// autoDispose so they don't keep firing on every screen.
+// ─────────────────────────────────────────────────────────────────────
+
+final _drawerPendingLeavesProvider = FutureProvider.autoDispose<int>((ref) async {
+  final user = ref.watch(authUserProvider);
+  if (user?.employeeId == null) return 0;
+  final leaves = await ref
+      .watch(leaveRepositoryProvider)
+      .listForEmployee(user!.employeeId!);
+  return leaves.where((l) => l.status == 'PENDING').length;
+});
+
+final _drawerActiveTasksProvider = FutureProvider.autoDispose<int>((ref) async {
+  final user = ref.watch(authUserProvider);
+  if (user?.employeeId == null) return 0;
+  final tasks = await ref
+      .watch(taskRepositoryProvider)
+      .listForEmployee(user!.employeeId!);
+  return tasks
+      .where((t) => t.status == 'PENDING' || t.status == 'IN_PROGRESS')
+      .length;
+});
+
+final employeeProfileProvider =
+    FutureProvider.autoDispose.family<Map<String, dynamic>?, int>((ref, employeeId) async {
+  final api = ref.watch(apiClientProvider);
+  try {
+    return await api.get<Map<String, dynamic>>(
+      '/api/employees/$employeeId',
+      parse: (d) => d as Map<String, dynamic>,
+    );
+  } catch (_) {
+    return null;
+  }
+});
+
+final _drawerPendingApprovalsProvider =
+    FutureProvider.autoDispose<int>((ref) async {
+  final user = ref.watch(authUserProvider);
+  final isManager = user?.hasRole(const {'ADMIN', 'HR'}) ?? false;
+  if (!isManager) return 0;
+  final leaves = await ref.watch(leaveRepositoryProvider).listForTeam();
+  return leaves.where((l) => l.status == 'PENDING').length;
+});
 
 class HomeShell extends ConsumerWidget {
   const HomeShell({super.key, required this.child});
@@ -133,11 +184,6 @@ class HomeShell extends ConsumerWidget {
                           ],
                         ),
                       ),
-                      AppIconButton(
-                        icon: Icons.notifications_none_rounded,
-                        onTap: () => context.push('/notifications'),
-                        badge: 0,
-                      ),
                     ],
                   ),
                 ),
@@ -251,17 +297,149 @@ class _HamburgerButton extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────
 // Left Navigation Drawer
+//
+// Layout (top → bottom):
+//   • Brand row     (gradient mark + workspace + close)
+//   • Search field  (filters nav items locally)
+//   • Nav           (Overview / Workspace sections with badges)
+//   • + New leave   (dashed-bordered action)
+//   • Footer nav    (Settings, Help)
+//   • User card     (avatar + status dot + email + sign-out)
 // ─────────────────────────────────────────────────────────────────────
 
-class _AppDrawer extends ConsumerWidget {
+/// Single nav-item descriptor used to drive both the visible link and the
+/// search filter without restating fields each time.
+class _NavItemData {
+  const _NavItemData({
+    required this.label,
+    required this.icon,
+    required this.path,
+    this.accent,
+    this.badge,
+    this.badgeAsString = false,
+    this.isPush = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final String path;
+  final Color? accent;
+
+  /// Numeric badge (rendered with ring tint). Pass null/0 to hide.
+  final int? badge;
+
+  /// When true, treat `badge` as 0/1 boolean rendered as "New" (emerald tint).
+  final bool badgeAsString;
+  final bool isPush;
+}
+
+class _AppDrawer extends ConsumerStatefulWidget {
   const _AppDrawer({required this.currentPath, required this.isManager});
   final String currentPath;
   final bool isManager;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_AppDrawer> createState() => _AppDrawerState();
+}
+
+class _AppDrawerState extends ConsumerState<_AppDrawer> {
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final user = ref.watch(authUserProvider);
     final mq = MediaQuery.of(context);
+
+    final pendingLeaves =
+        ref.watch(_drawerPendingLeavesProvider).asData?.value ?? 0;
+    final activeTasks =
+        ref.watch(_drawerActiveTasksProvider).asData?.value ?? 0;
+    final pendingApprovals =
+        ref.watch(_drawerPendingApprovalsProvider).asData?.value ?? 0;
+
+    final overviewItems = <_NavItemData>[
+      const _NavItemData(
+        label: 'Dashboard',
+        icon: Icons.home_rounded,
+        path: '/home',
+      ),
+      const _NavItemData(
+        label: 'Attendance',
+        icon: Icons.fingerprint_rounded,
+        path: '/attendance',
+        accent: AppColors.accent,
+      ),
+      _NavItemData(
+        label: 'Leaves',
+        icon: Icons.event_available_rounded,
+        path: '/leaves',
+        accent: AppColors.success,
+        badge: pendingLeaves > 0 ? pendingLeaves : null,
+      ),
+      _NavItemData(
+        label: 'Tasks',
+        icon: Icons.task_alt_rounded,
+        path: '/tasks',
+        accent: AppColors.warning,
+        badge: activeTasks > 0 ? activeTasks : null,
+      ),
+    ];
+
+    final unreadChats = ref.watch(totalUnreadProvider);
+
+    final workspaceItems = <_NavItemData>[
+      _NavItemData(
+        label: 'Chats',
+        icon: Icons.chat_rounded,
+        path: '/chats',
+        accent: AppColors.accent,
+        badge: unreadChats > 0 ? unreadChats : null,
+        isPush: true,
+      ),
+      if (widget.isManager)
+        _NavItemData(
+          label: 'Team',
+          icon: Icons.groups_2_rounded,
+          path: '/team',
+          accent: AppColors.pink,
+          badge: pendingApprovals > 0 ? pendingApprovals : null,
+        ),
+      const _NavItemData(
+        label: 'My Meetings',
+        icon: Icons.event_rounded,
+        path: '/my-meetings',
+        accent: AppColors.primary,
+        isPush: true,
+      ),
+      const _NavItemData(
+        label: 'My Trainings',
+        icon: Icons.school_rounded,
+        path: '/my-trainings',
+        accent: AppColors.warning,
+        isPush: true,
+      ),
+      const _NavItemData(
+        label: 'My Payslips',
+        icon: Icons.receipt_long_rounded,
+        path: '/my-payslips',
+        accent: AppColors.success,
+        isPush: true,
+      ),
+    ];
+
+    // Local fuzzy filter on label.
+    final query = _query.trim().toLowerCase();
+    bool matches(_NavItemData item) =>
+        query.isEmpty || item.label.toLowerCase().contains(query);
+    final filteredOverview = overviewItems.where(matches).toList();
+    final filteredWorkspace = workspaceItems.where(matches).toList();
 
     return Drawer(
       backgroundColor: Colors.transparent,
@@ -279,294 +457,97 @@ class _AppDrawer extends ConsumerWidget {
             filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.35),
+                color: Colors.white.withOpacity(0.42),
                 border: Border(
                   right: BorderSide(color: Colors.white.withOpacity(0.55)),
                 ),
               ),
               child: Column(
                 children: [
-                  // ── Header with gradient ──
-                  Container(
-                    width: double.infinity,
-                    padding: EdgeInsets.fromLTRB(
-                      20,
-                      mq.padding.top + 20,
-                      20,
-                      18,
-                    ),
-                    decoration: const BoxDecoration(
-                      gradient: AppColors.heroGradient,
-                      borderRadius: BorderRadius.only(
-                        bottomRight: Radius.circular(26),
-                      ),
-                    ),
-                    child: Stack(
-                      children: [
-                        Positioned(
-                          top: -40,
-                          right: -30,
-                          child: Container(
-                            width: 140,
-                            height: 140,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: RadialGradient(
-                                colors: [
-                                  Colors.white.withOpacity(0.22),
-                                  Colors.white.withOpacity(0),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Align(
-                              alignment: Alignment.topRight,
-                              child: GestureDetector(
-                                onTap: () => Navigator.pop(context),
-                                child: Container(
-                                  width: 28,
-                                  height: 28,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.18),
-                                    borderRadius: BorderRadius.circular(9),
-                                    border: Border.all(
-                                      color: Colors.white.withOpacity(0.32),
-                                    ),
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: const Icon(
-                                    Icons.close_rounded,
-                                    size: 16,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              width: 52,
-                              height: 52,
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.18),
-                                borderRadius: BorderRadius.circular(15),
-                                border: Border.all(
-                                  color: Colors.white.withOpacity(0.40),
-                                  width: 1.5,
-                                ),
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                (user?.username.isNotEmpty ?? false)
-                                    ? user!.username[0].toUpperCase()
-                                    : '?',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Text(
-                              user?.username ?? 'User',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.2,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              user?.email ?? '',
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.80),
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 9,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.18),
-                                borderRadius:
-                                    BorderRadius.circular(AppRadii.pill),
-                                border: Border.all(
-                                  color: Colors.white.withOpacity(0.30),
-                                ),
-                              ),
-                              child: Text(
-                                user?.role ?? 'EMPLOYEE',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.8,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                  SizedBox(height: mq.padding.top + 10),
+                  _DrawerBrandRow(
+                    onClose: () => Navigator.pop(context),
+                    onOpenProfile: () {
+                      Navigator.pop(context);
+                      context.push('/profile');
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+                    child: _DrawerSearchField(
+                      controller: _searchCtrl,
+                      onChanged: (v) => setState(() => _query = v),
                     ),
                   ),
-
-                  const SizedBox(height: 12),
-
-                  // ── Navigation items ──
+                  const SizedBox(height: 6),
                   Expanded(
                     child: ListView(
                       padding:
-                          const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       children: [
-                        _DrawerLabel(label: 'MENU'),
-                        _DrawerNavTile(
-                          icon: Icons.home_rounded,
-                          label: 'Dashboard',
-                          path: '/home',
-                          currentPath: currentPath,
+                        if (filteredOverview.isNotEmpty) ...[
+                          const _DrawerSectionLabel(label: 'OVERVIEW'),
+                          for (final item in filteredOverview)
+                            _DrawerNavTile(
+                              item: item,
+                              currentPath: widget.currentPath,
+                            ),
+                        ],
+                        if (filteredWorkspace.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          const _DrawerSectionLabel(label: 'WORKSPACE'),
+                          for (final item in filteredWorkspace)
+                            _DrawerNavTile(
+                              item: item,
+                              currentPath: widget.currentPath,
+                            ),
+                        ],
+                        const SizedBox(height: 12),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+                    child: Container(
+                      height: 1,
+                      color: Colors.white.withOpacity(0.55),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Column(
+                      children: [
+                        _DrawerFooterLink(
+                          icon: Icons.settings_outlined,
+                          label: 'Settings',
+                          onTap: () => Navigator.pop(context),
                         ),
-                        _DrawerNavTile(
-                          icon: Icons.fingerprint_rounded,
-                          label: 'Attendance',
-                          path: '/attendance',
-                          currentPath: currentPath,
-                          accentColor: AppColors.accent,
-                        ),
-                        _DrawerNavTile(
-                          icon: Icons.event_available_rounded,
-                          label: 'Leaves',
-                          path: '/leaves',
-                          currentPath: currentPath,
-                          accentColor: AppColors.success,
-                        ),
-                        _DrawerNavTile(
-                          icon: Icons.task_alt_rounded,
-                          label: 'Tasks',
-                          path: '/tasks',
-                          currentPath: currentPath,
-                          accentColor: AppColors.warning,
-                        ),
-                        if (isManager)
-                          _DrawerNavTile(
-                            icon: Icons.groups_2_rounded,
-                            label: 'Team',
-                            path: '/team',
-                            currentPath: currentPath,
-                            accentColor: AppColors.pink,
-                          ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          child: Divider(
-                            height: 1,
-                            color: Colors.white.withOpacity(0.6),
-                          ),
-                        ),
-                        _DrawerLabel(label: 'OTHER'),
-                        _DrawerNavTile(
-                          icon: Icons.person_outline_rounded,
-                          label: 'Profile',
-                          path: '/profile',
-                          currentPath: currentPath,
-                          isPush: true,
-                        ),
-                        _DrawerNavTile(
-                          icon: Icons.notifications_none_rounded,
-                          label: 'Notifications',
-                          path: '/notifications',
-                          currentPath: currentPath,
-                          isPush: true,
+                        _DrawerFooterLink(
+                          icon: Icons.help_outline_rounded,
+                          label: 'Help & support',
+                          onTap: () => Navigator.pop(context),
                         ),
                       ],
                     ),
                   ),
-
-                  // ── Footer ──
-                  Container(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        top: BorderSide(
-                          color: Colors.white.withOpacity(0.55),
-                        ),
-                      ),
+                  const SizedBox(height: 10),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      12,
+                      0,
+                      12,
+                      mq.padding.bottom + 12,
                     ),
-                    child: SafeArea(
-                      top: false,
-                      child: Column(
-                        children: [
-                          SizedBox(
-                            width: double.infinity,
-                            child: Material(
-                              color: AppColors.danger.withOpacity(0.10),
-                              borderRadius: BorderRadius.circular(AppRadii.md),
-                              clipBehavior: Clip.antiAlias,
-                              child: InkWell(
-                                onTap: () {
-                                  Navigator.pop(context);
-                                  _showLogoutDialog(context, ref);
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 12,
-                                    horizontal: 14,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: AppColors.danger.withOpacity(0.25),
-                                    ),
-                                    borderRadius:
-                                        BorderRadius.circular(AppRadii.md),
-                                  ),
-                                  child: Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.center,
-                                    children: [
-                                      Icon(
-                                        Icons.logout_rounded,
-                                        size: 18,
-                                        color:
-                                            AppColors.danger.withOpacity(0.85),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        'Sign out',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w800,
-                                          color: AppColors.danger
-                                              .withOpacity(0.85),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            'Nava360 · v1.0',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: AppColors.muted.withOpacity(0.7),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                        ],
-                      ),
+                    child: _DrawerUserCard(
+                      name: user?.username ?? 'User',
+                      email: user?.email ?? '',
+                      role: user?.role ?? 'EMPLOYEE',
+                      onSignOut: () {
+                        Navigator.pop(context);
+                        _showLogoutDialog(context, ref);
+                      },
                     ),
                   ),
                 ],
@@ -614,23 +595,249 @@ class _AppDrawer extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Drawer section label
+// Brand row (top of drawer)
 // ─────────────────────────────────────────────────────────────────────
 
-class _DrawerLabel extends StatelessWidget {
-  const _DrawerLabel({required this.label});
+class _DrawerBrandRow extends ConsumerWidget {
+  const _DrawerBrandRow({required this.onClose, required this.onOpenProfile});
+  final VoidCallback onClose;
+  final VoidCallback onOpenProfile;
+
+  String _formatEmployeeCode(int? id) {
+    if (id == null) return 'Not linked';
+    return 'EMP-${id.toString().padLeft(4, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(authUserProvider);
+    
+    final profileAsync = user?.employeeId != null
+        ? ref.watch(employeeProfileProvider(user!.employeeId!))
+        : null;
+    final profile = profileAsync?.value;
+    
+    final rawCode = profile != null ? profile['employeeCode'] as String? : null;
+    final code = rawCode != null && rawCode.isNotEmpty
+        ? rawCode
+        : _formatEmployeeCode(user?.employeeId);
+        
+    final rawName = profile != null
+        ? '${profile['firstName'] ?? ''} ${profile['lastName'] ?? ''}'.trim()
+        : (user?.username ?? 'User');
+    final name = rawName.isNotEmpty ? rawName : (user?.username ?? 'User');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+      child: Row(
+        children: [
+          // Tappable employee chip → profile.
+          Expanded(
+            child: Semantics(
+              button: true,
+              label: 'View profile for $name, employee code $code',
+              child: Material(
+                color: Colors.white.withOpacity(0.35),
+                borderRadius: BorderRadius.circular(12),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: onOpenProfile,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.55),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        UserAvatar(name: name, size: 36, radius: 10),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.ink,
+                                  letterSpacing: 0.1,
+                                ),
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                code,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: AppColors.muted,
+                                  letterSpacing: 0.3,
+                                  fontFeatures: [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          size: 18,
+                          color: AppColors.muted,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Close — icon-only, accessible label.
+          Semantics(
+            button: true,
+            label: 'Close navigation drawer',
+            child: SizedBox(
+              width: 36,
+              height: 36,
+              child: Material(
+                color: Colors.white.withOpacity(0.55),
+                borderRadius: BorderRadius.circular(10),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: onClose,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.55),
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: const Icon(
+                      Icons.close_rounded,
+                      size: 18,
+                      color: AppColors.inkSoft,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Search field (filters nav items locally)
+// ─────────────────────────────────────────────────────────────────────
+
+class _DrawerSearchField extends StatelessWidget {
+  const _DrawerSearchField({
+    required this.controller,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 44, // touch target ≥44px
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: Colors.white.withOpacity(0.6)),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 12),
+          const Icon(
+            Icons.search_rounded,
+            size: 17,
+            color: AppColors.muted,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              onChanged: onChanged,
+              cursorColor: AppColors.primary,
+              cursorWidth: 1.5,
+              style: const TextStyle(
+                fontSize: 13.5,
+                color: AppColors.ink,
+                fontWeight: FontWeight.w500,
+              ),
+              decoration: const InputDecoration(
+                isCollapsed: true,
+                contentPadding: EdgeInsets.symmetric(vertical: 13),
+                border: InputBorder.none,
+                hintText: 'Search workspace…',
+                hintStyle: TextStyle(
+                  color: AppColors.muted,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+          if (controller.text.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: IconButton(
+                splashRadius: 16,
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Clear search',
+                icon: const Icon(
+                  Icons.close_rounded,
+                  size: 16,
+                  color: AppColors.muted,
+                ),
+                onPressed: () {
+                  controller.clear();
+                  onChanged('');
+                },
+              ),
+            )
+          else
+            const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Section header label (uppercase, muted)
+// ─────────────────────────────────────────────────────────────────────
+
+class _DrawerSectionLabel extends StatelessWidget {
+  const _DrawerSectionLabel({required this.label});
   final String label;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 16, 14, 8),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
       child: Text(
         label,
         style: const TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w800,
-          letterSpacing: 1.2,
+          letterSpacing: 1.4,
           color: AppColors.muted,
         ),
       ),
@@ -639,114 +846,367 @@ class _DrawerLabel extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Drawer nav tile
+// Nav tile with optional badge + active accent bar
 // ─────────────────────────────────────────────────────────────────────
 
 class _DrawerNavTile extends StatelessWidget {
   const _DrawerNavTile({
-    required this.icon,
-    required this.label,
-    required this.path,
+    required this.item,
     required this.currentPath,
-    this.accentColor,
-    this.isPush = false,
   });
 
-  final IconData icon;
-  final String label;
-  final String path;
+  final _NavItemData item;
   final String currentPath;
-  final Color? accentColor;
-  final bool isPush;
 
-  bool get _selected => currentPath.startsWith(path);
+  bool get _isActive => currentPath.startsWith(item.path);
 
   @override
   Widget build(BuildContext context) {
-    final color = accentColor ?? AppColors.primary;
-    final isActive = _selected;
+    final color = item.accent ?? AppColors.primary;
+    final isActive = _isActive;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Material(
-        color: isActive
-            ? color.withOpacity(0.14)
-            : Colors.white.withOpacity(0.0),
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(AppRadii.md),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           borderRadius: BorderRadius.circular(AppRadii.md),
           onTap: () {
             Navigator.pop(context);
-            if (isPush) {
-              context.push(path);
+            if (item.isPush) {
+              context.push(item.path);
             } else {
-              context.go(path);
+              context.go(item.path);
             }
           },
           child: Container(
             decoration: BoxDecoration(
+              gradient: isActive
+                  ? LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        color.withOpacity(0.18),
+                        color.withOpacity(0.06),
+                      ],
+                    )
+                  : null,
               borderRadius: BorderRadius.circular(AppRadii.md),
-              border: isActive
-                  ? Border.all(color: color.withOpacity(0.28))
-                  : Border.all(color: Colors.transparent),
+              border: Border.all(
+                color: isActive
+                    ? color.withOpacity(0.28)
+                    : Colors.transparent,
+              ),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-            child: Row(
-              children: [
-                Container(
-                  width: 30,
-                  height: 30,
-                  decoration: BoxDecoration(
-                    gradient: isActive
-                        ? LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              color.withOpacity(0.30),
-                              color.withOpacity(0.16),
-                            ],
-                          )
-                        : null,
-                    color: isActive ? null : Colors.white.withOpacity(0.45),
-                    borderRadius: BorderRadius.circular(9),
-                    border: Border.all(
-                      color: isActive
-                          ? color.withOpacity(0.30)
-                          : Colors.white.withOpacity(0.55),
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(
-                    icon,
-                    size: 17,
-                    color: isActive ? color : AppColors.muted,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w600,
-                      color: isActive ? color : AppColors.inkSoft,
-                    ),
-                  ),
-                ),
-                if (isActive)
-                  Container(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 44),
+              child: Row(
+                children: [
+                  // 3px left accent bar — visible only when active.
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
                     width: 3,
-                    height: 16,
+                    height: 22,
+                    margin: const EdgeInsets.only(left: 4, right: 7),
                     decoration: BoxDecoration(
-                      color: color,
+                      color: isActive ? color : Colors.transparent,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      gradient: isActive
+                          ? LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                color.withOpacity(0.30),
+                                color.withOpacity(0.16),
+                              ],
+                            )
+                          : null,
+                      color: isActive
+                          ? null
+                          : Colors.white.withOpacity(0.45),
+                      borderRadius: BorderRadius.circular(9),
+                      border: Border.all(
+                        color: isActive
+                            ? color.withOpacity(0.30)
+                            : Colors.white.withOpacity(0.55),
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      item.icon,
+                      size: 17,
+                      color: isActive ? color : AppColors.muted,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      item.label,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight:
+                            isActive ? FontWeight.w700 : FontWeight.w600,
+                        color: isActive ? color : AppColors.inkSoft,
+                      ),
+                    ),
+                  ),
+                  if (item.badge != null && item.badge! > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _DrawerBadge(
+                        value: item.badge!,
+                        asString: item.badgeAsString,
+                        tone: color,
+                      ),
+                    )
+                  else
+                    const SizedBox(width: 8),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Badge — numeric (ring tint) or string-style "New" (emerald)
+// ─────────────────────────────────────────────────────────────────────
+
+class _DrawerBadge extends StatelessWidget {
+  const _DrawerBadge({
+    required this.value,
+    required this.asString,
+    required this.tone,
+  });
+
+  final int value;
+  final bool asString;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final isStringStyle = asString;
+    final color = isStringStyle ? AppColors.success : tone;
+    final label = isStringStyle ? 'New' : (value > 99 ? '99+' : '$value');
+
+    return Container(
+      constraints: const BoxConstraints(minWidth: 22),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+        border: Border.all(color: color.withOpacity(0.32)),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w800,
+          color: color,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Footer link (small, muted)
+// ─────────────────────────────────────────────────────────────────────
+
+class _DrawerFooterLink extends StatelessWidget {
+  const _DrawerFooterLink({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 40),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                Icon(icon, size: 16, color: AppColors.muted),
+                const SizedBox(width: 12),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.inkSoft,
+                  ),
+                ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// User card at the bottom (avatar + status dot + name/email + sign-out)
+// ─────────────────────────────────────────────────────────────────────
+
+class _DrawerUserCard extends StatelessWidget {
+  const _DrawerUserCard({
+    required this.name,
+    required this.email,
+    required this.role,
+    required this.onSignOut,
+  });
+
+  final String name;
+  final String email;
+  final String role;
+  final VoidCallback onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassCard(
+      padding: const EdgeInsets.fromLTRB(10, 10, 8, 10),
+      shadow: AppShadows.soft,
+      child: Row(
+        children: [
+          // Avatar with online status dot.
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              UserAvatar(name: name, size: 38, radius: 11),
+              Positioned(
+                right: -1,
+                bottom: -1,
+                child: Container(
+                  width: 11,
+                  height: 11,
+                  decoration: BoxDecoration(
+                    color: AppColors.success,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 1.5),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.ink,
+                          letterSpacing: -0.1,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(AppRadii.pill),
+                        border: Border.all(
+                          color: AppColors.primary.withOpacity(0.25),
+                        ),
+                      ),
+                      child: Text(
+                        role,
+                        style: const TextStyle(
+                          color: AppColors.primary,
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  email.isEmpty ? 'Signed in' : email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 4),
+          Semantics(
+            button: true,
+            label: 'Sign out',
+            child: SizedBox(
+              width: 36,
+              height: 36,
+              child: Material(
+                color: AppColors.danger.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(10),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: onSignOut,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: AppColors.danger.withOpacity(0.30),
+                      ),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(
+                      Icons.logout_rounded,
+                      size: 17,
+                      color: AppColors.danger.withOpacity(0.85),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

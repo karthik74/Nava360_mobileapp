@@ -6,33 +6,93 @@ import 'core/theme.dart';
 import 'features/attendance/attendance_screen.dart';
 import 'features/attendance/location_lifecycle.dart';
 import 'features/auth/auth_controller.dart';
+import 'features/auth/welcome_seen_controller.dart';
+import 'features/auth/forgot_password_screen.dart';
 import 'features/auth/login_screen.dart';
+import 'features/auth/reset_password_screen.dart';
+import 'features/auth/welcome_screen.dart';
 import 'features/home/dashboard_screen.dart';
 import 'features/home/home_shell.dart';
 import 'features/leaves/leaves_screen.dart';
 import 'features/notifications/notifications_screen.dart';
 import 'features/notifications/push_lifecycle.dart';
+import 'features/notifications/push_service.dart';
+import 'features/placeholders/coming_soon_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/tasks/tasks_screen.dart';
 import 'features/team/team_screen.dart';
+import 'features/chat/chat_list_screen.dart';
+import 'features/chat/chat_thread_by_id_screen.dart';
+import 'features/meetings/meetings_screen.dart';
+import 'features/trainings/trainings_screen.dart';
+import 'features/payslips/payslips_screen.dart';
 
 final goRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/home',
     redirect: (context, state) {
       final auth = ref.read(authControllerProvider);
+      final welcome = ref.read(welcomeSeenProvider);
+
+      // Still bootstrapping either flag — sit on the splash.
+      if (auth.isLoading || welcome.isLoading) return '/splash';
+
       final loggedIn = auth.asData?.value != null;
-      final loggingIn = state.matchedLocation == '/login';
-      if (auth.isLoading) return '/splash';
-      if (!loggedIn && !loggingIn) return '/login';
-      if (loggedIn && loggingIn) return '/home';
-      if (loggedIn && state.matchedLocation == '/splash') return '/home';
-      return null;
+      final welcomeSeen = welcome.asData?.value ?? false;
+      final loc = state.matchedLocation;
+
+      // Signed-in users never see welcome/login/splash.
+      if (loggedIn) {
+        if (loc == '/welcome' || loc == '/login' || loc == '/splash') {
+          return '/home';
+        }
+        return null;
+      }
+
+      const authRoutes = {
+        '/welcome',
+        '/login',
+        '/forgot-password',
+        '/reset-password',
+      };
+
+      // Signed-out users.
+      if (!welcomeSeen) {
+        // First-launch flow: pin to /welcome until they tap Get Started.
+        if (!authRoutes.contains(loc)) return '/welcome';
+        return null;
+      }
+
+      // Returning user — skip welcome.
+      if (loc == '/splash' || loc == '/welcome') return '/login';
+      if (authRoutes.contains(loc)) return null;
+      return '/login';
     },
     refreshListenable: _GoRouterRefresh(ref),
     routes: [
       GoRoute(path: '/splash', builder: (_, __) => const _SplashScreen()),
-      GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
+      GoRoute(path: '/welcome', builder: (_, __) => const WelcomeScreen()),
+      GoRoute(
+        path: '/login',
+        builder: (_, state) {
+          final flash = state.extra is String ? state.extra as String : null;
+          return LoginScreen(flash: flash);
+        },
+      ),
+      GoRoute(
+        path: '/forgot-password',
+        builder: (_, state) {
+          final user = state.extra is String ? state.extra as String : null;
+          return ForgotPasswordScreen(initialUsername: user);
+        },
+      ),
+      GoRoute(
+        path: '/reset-password',
+        builder: (_, state) {
+          final user = state.extra is String ? state.extra as String : null;
+          return ResetPasswordScreen(username: user);
+        },
+      ),
       GoRoute(
         path: '/profile',
         builder: (_, __) => const ProfileScreen(),
@@ -40,6 +100,28 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/notifications',
         builder: (_, __) => const NotificationsScreen(),
+      ),
+      GoRoute(
+        path: '/chats',
+        builder: (_, __) => const ChatListScreen(),
+      ),
+      GoRoute(
+        path: '/chats/:id',
+        builder: (_, state) => ChatThreadByIdScreen(
+          conversationId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/my-meetings',
+        builder: (_, __) => const MeetingsScreen(),
+      ),
+      GoRoute(
+        path: '/my-trainings',
+        builder: (_, __) => const TrainingsScreen(),
+      ),
+      GoRoute(
+        path: '/my-payslips',
+        builder: (_, __) => const PayslipsScreen(),
       ),
       ShellRoute(
         builder: (_, __, child) => HomeShell(child: child),
@@ -61,6 +143,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
 class _GoRouterRefresh extends ChangeNotifier {
   _GoRouterRefresh(Ref ref) {
     ref.listen(authControllerProvider, (_, __) => notifyListeners());
+    ref.listen(welcomeSeenProvider, (_, __) => notifyListeners());
   }
 }
 
@@ -96,6 +179,8 @@ class HrmsApp extends ConsumerWidget {
     // Activate the auth → side-effect bindings once at the app root.
     ref.watch(locationLifecycleProvider);
     ref.watch(pushLifecycleProvider);
+    // Let push-notification taps deep-link into a chat thread.
+    ref.read(pushServiceProvider).onOpenChat = (id) => router.push('/chats/$id');
     return MaterialApp.router(
       title: 'HRMS',
       debugShowCheckedModeBanner: false,

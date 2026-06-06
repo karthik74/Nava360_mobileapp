@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
@@ -9,6 +10,7 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../attendance/attendance_models.dart';
 import '../attendance/attendance_repository.dart';
+import '../attendance/location_tracker.dart';
 import '../auth/auth_controller.dart';
 import '../leaves/leave_models.dart';
 import '../leaves/leave_repository.dart';
@@ -59,6 +61,7 @@ class DashboardScreen extends ConsumerStatefulWidget {
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Timer? _clockTimer;
   DateTime _now = DateTime.now();
+  bool _attendanceActionBusy = false;
 
   @override
   void initState() {
@@ -115,6 +118,85 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
   }
 
+  Future<void> _runAttendanceAction({
+    required bool hasCheckedIn,
+    required bool hasCheckedOut,
+  }) async {
+    if (_attendanceActionBusy) return;
+    if (hasCheckedOut) {
+      context.go('/attendance');
+      return;
+    }
+
+    final employeeId = ref.read(authUserProvider)?.employeeId;
+    if (employeeId == null) {
+      _showSnack('Employee profile is missing. Please sign in again.');
+      return;
+    }
+
+    setState(() => _attendanceActionBusy = true);
+    try {
+      if (hasCheckedIn) {
+        final position = await _tryCurrentPosition();
+        await ref.read(attendanceRepositoryProvider).checkOut(
+              employeeId,
+              latitude: position?.latitude,
+              longitude: position?.longitude,
+            );
+        await ref.read(locationTrackerProvider.notifier).stop();
+        _showSnack('Checked out successfully.');
+      } else {
+        await ref.read(locationTrackerProvider.notifier).start(employeeId);
+        final tracker = ref.read(locationTrackerProvider);
+        if (!tracker.active) {
+          _showSnack(
+            tracker.lastError ?? 'Location permission is required to check in.',
+          );
+          return;
+        }
+
+        final position = await _tryCurrentPosition();
+        try {
+          await ref.read(attendanceRepositoryProvider).checkIn(
+                employeeId,
+                latitude: position?.latitude,
+                longitude: position?.longitude,
+              );
+          _showSnack('Checked in successfully.');
+        } catch (_) {
+          await ref
+              .read(locationTrackerProvider.notifier)
+              .stop(flushBuffer: false);
+          rethrow;
+        }
+      }
+
+      ref.invalidate(_dashAttendanceProvider);
+    } catch (e) {
+      _showSnack(e.toString());
+    } finally {
+      if (mounted) setState(() => _attendanceActionBusy = false);
+    }
+  }
+
+  Future<Position?> _tryCurrentPosition() async {
+    try {
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 10),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _showSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authUserProvider);
@@ -139,6 +221,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final hasCheckedIn = todayRec?.checkIn != null;
     final hasCheckedOut = todayRec?.checkOut != null;
     final timerText = _fmtTimer(_workDuration(todayRec));
+    final attendanceActionTitle = _attendanceActionBusy
+        ? 'Please wait...'
+        : hasCheckedOut
+            ? 'Done for today'
+            : hasCheckedIn
+                ? 'Check out now'
+                : 'Check in now';
 
     int pendingLeaves = 0;
     List<LeaveRequest> leavesList = const [];
@@ -196,7 +285,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ),
         padding: EdgeInsets.fromLTRB(
           16,
-          mq.padding.top+ 8,
+          mq.padding.top + 8,
           16,
           mq.padding.bottom + AppChrome.bottomNavHeight + 10,
         ),
@@ -208,7 +297,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             hasCheckedOut: hasCheckedOut,
             checkInTime: _fmtTime(todayRec?.checkIn),
             checkOutTime: _fmtTime(todayRec?.checkOut),
-            onTap: () => context.go('/attendance'),
+            onTap: () => _runAttendanceAction(
+              hasCheckedIn: hasCheckedIn,
+              hasCheckedOut: hasCheckedOut,
+            ),
           ),
           const SizedBox(height: 18),
 
@@ -270,18 +362,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           const SizedBox(height: 8),
           QuickActionRow(
             icon: Icons.fingerprint_rounded,
-            title: hasCheckedOut
-                ? 'Done for today'
-                : hasCheckedIn
-                    ? 'Check out now'
-                    : 'Check in now',
+            title: attendanceActionTitle,
             description: hasCheckedOut
                 ? 'Shift completed for today'
                 : hasCheckedIn
                     ? 'Clock out and end your shift'
-                    : 'Open attendance to clock in',
+                    : 'Start your shift and background location tracking',
             color: AppColors.primary,
-            onTap: () => context.go('/attendance'),
+            onTap: () => _runAttendanceAction(
+              hasCheckedIn: hasCheckedIn,
+              hasCheckedOut: hasCheckedOut,
+            ),
           ),
           const SizedBox(height: 8),
           QuickActionRow(

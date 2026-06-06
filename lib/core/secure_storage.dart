@@ -8,6 +8,7 @@ class SecureStorage {
 
   static const _kToken = 'auth.token';
   static const _kUserJson = 'auth.user';
+  static const _kWelcomeSeen = 'onboarding.welcome_seen';
 
   static Future<void> writeToken(String token) =>
       _storage.write(key: _kToken, value: token);
@@ -19,6 +20,18 @@ class SecureStorage {
 
   static Future<String?> readUserJson() => _storage.read(key: _kUserJson);
 
+  /// Has the user seen the welcome / onboarding screen at least once?
+  /// Returns false on a fresh install.
+  static Future<bool> readWelcomeSeen() async {
+    final v = await _storage.read(key: _kWelcomeSeen);
+    return v == '1';
+  }
+
+  static Future<void> markWelcomeSeen() =>
+      _storage.write(key: _kWelcomeSeen, value: '1');
+
+  /// Clears auth credentials. The welcome flag is intentionally preserved
+  /// so signing out doesn't replay the welcome screen.
   static Future<void> clear() async {
     await _storage.delete(key: _kToken);
     await _storage.delete(key: _kUserJson);

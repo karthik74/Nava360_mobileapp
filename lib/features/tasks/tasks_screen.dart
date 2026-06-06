@@ -8,6 +8,7 @@ import '../auth/auth_controller.dart';
 import 'task_detail_screen.dart';
 import 'task_models.dart';
 import 'task_repository.dart';
+import 'task_status_ui.dart';
 
 final _myTasksProvider =
     FutureProvider.autoDispose.family<List<Task>, String?>((ref, status) {
@@ -18,17 +19,24 @@ final _myTasksProvider =
       .listForEmployee(user!.employeeId!, status: status);
 });
 
-enum _TaskFilter { all, pending, inProgress, done }
+final _taskDashboardProvider =
+    FutureProvider.autoDispose<TaskDashboard>((ref) {
+  return ref.watch(taskRepositoryProvider).dashboard();
+});
+
+enum _TaskFilter { all, toDo, inProgress, inReview, done }
 
 extension on _TaskFilter {
   String get label {
     switch (this) {
       case _TaskFilter.all:
         return 'All';
-      case _TaskFilter.pending:
-        return 'Pending';
+      case _TaskFilter.toDo:
+        return 'To do';
       case _TaskFilter.inProgress:
         return 'In progress';
+      case _TaskFilter.inReview:
+        return 'In review';
       case _TaskFilter.done:
         return 'Done';
     }
@@ -38,12 +46,14 @@ extension on _TaskFilter {
     switch (this) {
       case _TaskFilter.all:
         return null;
-      case _TaskFilter.pending:
-        return 'PENDING';
+      case _TaskFilter.toDo:
+        return TaskStatuses.todo;
       case _TaskFilter.inProgress:
-        return 'IN_PROGRESS';
+        return TaskStatuses.inProgress;
+      case _TaskFilter.inReview:
+        return TaskStatuses.inReview;
       case _TaskFilter.done:
-        return 'DONE';
+        return TaskStatuses.done;
     }
   }
 }
@@ -67,7 +77,6 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
     return tasks.where((t) {
       final ref = t.dueDate ?? t.startDate;
       if (ref == null) return false;
-      // Compare on calendar-day boundaries, ignoring time.
       final day = DateTime(ref.year, ref.month, ref.day);
       if (_fromDate != null && day.isBefore(_fromDate!)) return false;
       if (_toDate != null && day.isAfter(_toDate!)) return false;
@@ -110,9 +119,15 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
     });
   }
 
+  void _refresh() {
+    ref.invalidate(_myTasksProvider(_selectedFilter.queryValue));
+    ref.invalidate(_taskDashboardProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     final tasks = ref.watch(_myTasksProvider(_selectedFilter.queryValue));
+    final dashboard = ref.watch(_taskDashboardProvider);
 
     final mq = MediaQuery.of(context);
     return Scaffold(
@@ -120,9 +135,7 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
       body: RefreshIndicator(
         color: AppColors.primary,
         backgroundColor: Colors.white.withOpacity(0.85),
-        onRefresh: () async {
-          ref.invalidate(_myTasksProvider(_selectedFilter.queryValue));
-        },
+        onRefresh: () async => _refresh(),
         child: ListView(
           physics: const BouncingScrollPhysics(
             parent: AlwaysScrollableScrollPhysics(),
@@ -139,7 +152,14 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
               title: 'My tasks',
               subtitle: 'Tasks assigned to your employee account',
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
+            _DashboardStrip(
+              async: dashboard,
+              onTapFilter: (filter) {
+                setState(() => _selectedFilter = filter);
+              },
+            ),
+            const SizedBox(height: 16),
             Wrap(
               spacing: 10,
               runSpacing: 10,
@@ -163,8 +183,6 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                   onSelected: (value) {
                     if (!value) return;
                     setState(() => _selectedFilter = filter);
-                    ref.invalidate(
-                        _myTasksProvider(_selectedFilter.queryValue));
                   },
                 );
               }).toList(),
@@ -203,9 +221,7 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                                     TaskDetailScreen(taskId: task.id),
                               ),
                             );
-                            ref.invalidate(
-                              _myTasksProvider(_selectedFilter.queryValue),
-                            );
+                            _refresh();
                           },
                           child: _TaskCard(task: task),
                         ),
@@ -216,8 +232,8 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
               loading: () => const AppLoadingBlock(height: 140),
               error: (err, _) => AppErrorPanel(
                 message: err.toString(),
-                onRetry: () => ref
-                    .invalidate(_myTasksProvider(_selectedFilter.queryValue)),
+                onRetry: () =>
+                    ref.invalidate(_myTasksProvider(_selectedFilter.queryValue)),
               ),
             ),
           ],
@@ -227,6 +243,139 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
   }
 }
 
+// ───────────────────────────── Dashboard strip ─────────────────────────────
+
+class _DashboardStrip extends StatelessWidget {
+  const _DashboardStrip({required this.async, required this.onTapFilter});
+
+  final AsyncValue<TaskDashboard> async;
+  final ValueChanged<_TaskFilter> onTapFilter;
+
+  @override
+  Widget build(BuildContext context) {
+    return async.when(
+      loading: () => const AppLoadingBlock(height: 96),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (d) {
+        final items = <Widget>[
+          _MiniStat(
+            label: 'To do',
+            value: d.myPending,
+            icon: Icons.radio_button_unchecked_rounded,
+            color: AppColors.info,
+            onTap: () => onTapFilter(_TaskFilter.toDo),
+          ),
+          _MiniStat(
+            label: 'In progress',
+            value: d.myInProgress,
+            icon: Icons.timelapse_rounded,
+            color: AppColors.warning,
+            onTap: () => onTapFilter(_TaskFilter.inProgress),
+          ),
+          _MiniStat(
+            label: 'In review',
+            value: d.myInReview,
+            icon: Icons.rate_review_outlined,
+            color: AppColors.accent,
+            onTap: () => onTapFilter(_TaskFilter.inReview),
+          ),
+          _MiniStat(
+            label: 'Overdue',
+            value: d.myOverdue,
+            icon: Icons.error_outline_rounded,
+            color: AppColors.danger,
+          ),
+          _MiniStat(
+            label: 'Urgent',
+            value: d.urgentTasks,
+            icon: Icons.priority_high_rounded,
+            color: AppColors.pink,
+          ),
+          _MiniStat(
+            label: 'Done (mo)',
+            value: d.myDoneThisMonth,
+            icon: Icons.check_circle_outline_rounded,
+            color: AppColors.success,
+            onTap: () => onTapFilter(_TaskFilter.done),
+          ),
+        ];
+        return SizedBox(
+          height: 86,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: items.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (_, i) => items[i],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _MiniStat extends StatelessWidget {
+  const _MiniStat({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+    this.onTap,
+  });
+
+  final String label;
+  final int value;
+  final IconData icon;
+  final Color color;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      child: GlassCard(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        radius: AppRadii.md,
+        shadow: AppShadows.soft,
+        child: SizedBox(
+          width: 96,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 18, color: color),
+              const Spacer(),
+              Text(
+                '$value',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.muted,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ───────────────────────────────── Task card ───────────────────────────────
+
 class _TaskCard extends StatelessWidget {
   const _TaskCard({required this.task});
   final Task task;
@@ -235,14 +384,16 @@ class _TaskCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final due =
         task.dueDate == null ? null : DateFormat.yMMMd().format(task.dueDate!);
+    final dueTime = formatDueTime(task.dueTime);
     final dueDate = task.dueDate;
     final today = DateTime.now();
     final isOverdue = dueDate != null &&
         DateTime(dueDate.year, dueDate.month, dueDate.day).isBefore(
           DateTime(today.year, today.month, today.day),
         ) &&
-        !task.status.toUpperCase().contains('DONE');
+        !task.isClosed;
     final priority = task.priority?.trim();
+    final showProgress = task.completionPercentage > 0 && !task.isDone;
 
     return GlassCard(
       padding: const EdgeInsets.all(14),
@@ -254,36 +405,51 @@ class _TaskCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(
-                  task.title,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (task.taskCode != null && task.taskCode!.isNotEmpty)
+                      Text(
+                        task.taskCode!,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.muted,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                    Text(
+                      task.title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),
-              Flexible(child: _TaskStatusPill(status: task.status)),
+              Flexible(child: TaskStatusPill(status: task.status)),
             ],
           ),
-          if (task.projectName != null || priority != null) ...[
+          if (task.categoryName != null || priority != null) ...[
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (task.projectName != null)
+                if (task.categoryName != null)
                   _MetaPill(
                     icon: Icons.folder_open_rounded,
-                    label: task.projectName!,
+                    label: task.categoryName!,
                     color: AppColors.primary,
                   ),
                 if (priority != null)
                   _MetaPill(
                     icon: Icons.flag_rounded,
-                    label: _humanPriority(priority),
-                    color: _priorityColor(priority),
+                    label: humanizeEnum(priority),
+                    color: priorityColor(priority),
                   ),
               ],
             ),
@@ -301,26 +467,29 @@ class _TaskCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ],
-          if (due != null || task.assignedBy != null) ...[
+          if (showProgress) ...[
+            const SizedBox(height: 10),
+            _ProgressBar(percent: task.completionPercentage),
+          ],
+          if (due != null || task.assignedByName != null) ...[
             const SizedBox(height: 10),
             Wrap(
               spacing: 10,
               runSpacing: 6,
               children: [
-                if (due != null) ...[
+                if (due != null)
                   _MetaText(
                     icon: Icons.calendar_today_outlined,
-                    label: isOverdue ? 'Overdue $due' : 'Due $due',
+                    label: (isOverdue ? 'Overdue $due' : 'Due $due') +
+                        (dueTime != null ? ' · $dueTime' : ''),
                     color: isOverdue ? AppColors.danger : AppColors.muted,
                   ),
-                ],
-                if (task.assignedBy != null) ...[
+                if (task.assignedByName != null)
                   _MetaText(
                     icon: Icons.person_outline,
-                    label: 'Assigned by ${task.assignedBy!}',
+                    label: 'Assigned by ${task.assignedByName!}',
                     color: AppColors.muted,
                   ),
-                ],
               ],
             ),
           ],
@@ -339,31 +508,48 @@ class _TaskCard extends StatelessWidget {
   }
 }
 
-class _TaskStatusPill extends StatelessWidget {
-  const _TaskStatusPill({required this.status});
-  final String status;
+class _ProgressBar extends StatelessWidget {
+  const _ProgressBar({required this.percent});
+  final int percent;
 
   @override
   Widget build(BuildContext context) {
-    final color = _statusColor(status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.14),
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: color.withOpacity(0.28)),
-      ),
-      child: Text(
-        status.replaceAll('_', ' ').toUpperCase(),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: color,
-          fontSize: 9.5,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.3,
+    final clamped = percent.clamp(0, 100);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Progress',
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.muted,
+              ),
+            ),
+            Text(
+              '$clamped%',
+              style: const TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w800,
+                color: AppColors.primary,
+              ),
+            ),
+          ],
         ),
-      ),
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: clamped / 100,
+            minHeight: 6,
+            backgroundColor: AppColors.primary.withOpacity(0.12),
+            valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -448,36 +634,6 @@ class _MetaText extends StatelessWidget {
   }
 }
 
-Color _statusColor(String status) {
-  final normalized = status.toUpperCase();
-  if (normalized.contains('DONE')) return AppColors.success;
-  if (normalized.contains('IN_PROGRESS')) return AppColors.warning;
-  if (normalized.contains('CANCEL') || normalized.contains('REJECT')) {
-    return AppColors.danger;
-  }
-  return AppColors.info;
-}
-
-String _humanPriority(String priority) {
-  final cleaned = priority.trim().replaceAll('_', ' ').toLowerCase();
-  if (cleaned.isEmpty) return priority;
-  return cleaned[0].toUpperCase() + cleaned.substring(1);
-}
-
-Color _priorityColor(String priority) {
-  switch (priority.toUpperCase()) {
-    case 'HIGH':
-    case 'URGENT':
-      return AppColors.danger;
-    case 'MEDIUM':
-      return AppColors.warning;
-    case 'LOW':
-      return AppColors.success;
-    default:
-      return AppColors.info;
-  }
-}
-
 class _DateRangeBar extends StatelessWidget {
   const _DateRangeBar({
     required this.from,
@@ -511,10 +667,7 @@ class _DateRangeBar extends StatelessWidget {
                 child: InkWell(
                   onTap: onPickFrom,
                   borderRadius: BorderRadius.circular(AppRadii.sm),
-                  child: _DatePill(
-                    label: 'From',
-                    value: _fmt(from),
-                  ),
+                  child: _DatePill(label: 'From', value: _fmt(from)),
                 ),
               ),
               const Padding(
@@ -529,10 +682,7 @@ class _DateRangeBar extends StatelessWidget {
                 child: InkWell(
                   onTap: onPickTo,
                   borderRadius: BorderRadius.circular(AppRadii.sm),
-                  child: _DatePill(
-                    label: 'To',
-                    value: _fmt(to),
-                  ),
+                  child: _DatePill(label: 'To', value: _fmt(to)),
                 ),
               ),
             ],

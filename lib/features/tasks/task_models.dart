@@ -1,67 +1,249 @@
 import 'dart:convert';
 
+/// The task lifecycle states exposed by the new backend API.
+/// (`PENDING` no longer exists — the initial state is `TODO`.)
+class TaskStatuses {
+  static const todo = 'TODO';
+  static const inProgress = 'IN_PROGRESS';
+  static const inReview = 'IN_REVIEW';
+  static const done = 'DONE';
+  static const cancelled = 'CANCELLED';
+  static const rejected = 'REJECTED';
+}
+
+DateTime? _parseDate(dynamic v) {
+  if (v is String && v.isNotEmpty) return DateTime.tryParse(v);
+  return null;
+}
+
+double? _parseDouble(dynamic v) {
+  if (v is num) return v.toDouble();
+  if (v is String && v.isNotEmpty) return double.tryParse(v);
+  return null;
+}
+
 class Task {
   Task({
     required this.id,
     required this.title,
     required this.status,
+    this.taskCode,
     this.description,
     this.dueDate,
+    this.dueTime,
     this.assignedToId,
     this.assignedToName,
     this.assignedById,
     this.assignedByName,
+    this.reviewerId,
+    this.reviewerName,
+    this.categoryId,
+    this.categoryName,
     this.priority,
     this.startDate,
+    this.estimatedHours,
     this.completedAt,
+    this.completionLat,
+    this.completionLng,
+    this.completionAddress,
+    this.createdAt,
     this.formSchema,
     this.formResponse,
+    this.requiresReview = false,
+    this.allowSelfCompletion = true,
+    this.allowAttachments = false,
+    this.completionPercentage = 0,
   });
 
   final int id;
   final String title;
   final String status;
+  final String? taskCode;
   final String? description;
   final DateTime? dueDate;
+  /// Time-of-day deadline, serialized as "HH:mm[:ss]" by the backend.
+  final String? dueTime;
   final int? assignedToId;
   final String? assignedToName;
   final int? assignedById;
   final String? assignedByName;
+  final int? reviewerId;
+  final String? reviewerName;
+  final int? categoryId;
+  final String? categoryName;
   final String? priority;
   final DateTime? startDate;
+  final double? estimatedHours;
   final DateTime? completedAt;
+  final double? completionLat;
+  final double? completionLng;
+  final String? completionAddress;
+  final DateTime? createdAt;
+
   /// JSON string describing the form fields the assignee must fill.
   final String? formSchema;
+
   /// JSON string with the submitted values (null if not submitted yet).
   final String? formResponse;
 
-  // Back-compat aliases used by existing list UI.
-  String? get assignedBy => assignedByName;
-  String? get projectName => null;
+  final bool requiresReview;
+  final bool allowSelfCompletion;
+  final bool allowAttachments;
+  final int completionPercentage;
+
+  /// Terminal states — no further action is expected from the assignee.
+  bool get isClosed =>
+      status == TaskStatuses.done ||
+      status == TaskStatuses.cancelled ||
+      status == TaskStatuses.rejected;
+
+  bool get isDone => status == TaskStatuses.done;
+  bool get isInReview => status == TaskStatuses.inReview;
+
+  /// Whether the assignee can still move this task forward.
+  bool get isActionable =>
+      status == TaskStatuses.todo || status == TaskStatuses.inProgress;
 
   factory Task.fromJson(Map<String, dynamic> json) {
-    DateTime? parseDate(dynamic v) {
-      if (v is String && v.isNotEmpty) return DateTime.tryParse(v);
-      return null;
-    }
-
     return Task(
       id: (json['id'] as num).toInt(),
       title: json['title'] as String? ?? 'Untitled task',
       status: json['status'] as String? ?? 'UNKNOWN',
+      taskCode: json['taskCode'] as String?,
       description: json['description'] as String?,
-      dueDate: parseDate(json['dueDate']),
+      dueDate: _parseDate(json['dueDate']),
+      dueTime: json['dueTime'] as String?,
       assignedToId: (json['assignedToId'] as num?)?.toInt(),
       assignedToName: json['assignedToName'] as String?,
       assignedById: (json['assignedById'] as num?)?.toInt(),
       assignedByName: json['assignedByName'] as String?,
+      reviewerId: (json['reviewerEmployeeId'] as num?)?.toInt(),
+      reviewerName: json['reviewerName'] as String?,
+      categoryId: (json['categoryId'] as num?)?.toInt(),
+      categoryName: json['categoryName'] as String?,
       priority: json['priority'] as String?,
-      startDate: parseDate(json['startDate']),
-      completedAt: parseDate(json['completedAt']),
+      startDate: _parseDate(json['startDate']),
+      estimatedHours: _parseDouble(json['estimatedHours']),
+      completedAt: _parseDate(json['completedAt']),
+      completionLat: _parseDouble(json['completionLat']),
+      completionLng: _parseDouble(json['completionLng']),
+      completionAddress: json['completionAddress'] as String?,
+      createdAt: _parseDate(json['createdAt']),
       formSchema: json['formSchema'] as String?,
       formResponse: json['formResponse'] as String?,
+      requiresReview: json['requiresReview'] == true,
+      allowSelfCompletion: json['allowSelfCompletion'] != false,
+      allowAttachments: json['allowAttachments'] == true,
+      completionPercentage: (json['completionPercentage'] as num?)?.toInt() ?? 0,
     );
   }
+}
+
+/// A comment on the task's discussion thread (`GET/POST /api/tasks/{id}/comments`).
+class TaskComment {
+  TaskComment({
+    required this.id,
+    required this.commentText,
+    this.employeeId,
+    this.employeeName,
+    this.commentType,
+    this.createdAt,
+  });
+
+  final int id;
+  final String commentText;
+  final int? employeeId;
+  final String? employeeName;
+  final String? commentType;
+  final DateTime? createdAt;
+
+  factory TaskComment.fromJson(Map<String, dynamic> j) => TaskComment(
+        id: (j['id'] as num).toInt(),
+        commentText: j['commentText'] as String? ?? '',
+        employeeId: (j['employeeId'] as num?)?.toInt(),
+        employeeName: j['employeeName'] as String?,
+        commentType: j['commentType'] as String?,
+        createdAt: _parseDate(j['createdAt']),
+      );
+}
+
+/// One entry in a task's status/audit history (`GET /api/tasks/{id}/history`).
+class TaskHistoryEntry {
+  TaskHistoryEntry({
+    required this.id,
+    this.oldStatus,
+    this.newStatus,
+    this.changedByName,
+    this.changeReason,
+    this.changedField,
+    this.oldValue,
+    this.newValue,
+    this.createdAt,
+  });
+
+  final int id;
+  final String? oldStatus;
+  final String? newStatus;
+  final String? changedByName;
+  final String? changeReason;
+  final String? changedField;
+  final String? oldValue;
+  final String? newValue;
+  final DateTime? createdAt;
+
+  /// True for a status transition (vs a field edit).
+  bool get isStatusChange => (newStatus ?? '').isNotEmpty;
+
+  factory TaskHistoryEntry.fromJson(Map<String, dynamic> j) => TaskHistoryEntry(
+        id: (j['id'] as num).toInt(),
+        oldStatus: j['oldStatus'] as String?,
+        newStatus: j['newStatus'] as String?,
+        changedByName: j['changedByName'] as String?,
+        changeReason: j['changeReason'] as String?,
+        changedField: j['changedField'] as String?,
+        oldValue: j['oldValue'] as String?,
+        newValue: j['newValue'] as String?,
+        createdAt: _parseDate(j['createdAt']),
+      );
+}
+
+/// Logged-in employee's task summary (`GET /api/tasks/dashboard`).
+class TaskDashboard {
+  TaskDashboard({
+    required this.totalTasks,
+    required this.myPending,
+    required this.myInProgress,
+    required this.myInReview,
+    required this.myOverdue,
+    required this.myDoneThisMonth,
+    required this.pendingReview,
+    required this.createdByMe,
+    required this.urgentTasks,
+  });
+
+  final int totalTasks;
+  final int myPending;
+  final int myInProgress;
+  final int myInReview;
+  final int myOverdue;
+  final int myDoneThisMonth;
+  final int pendingReview;
+  final int createdByMe;
+  final int urgentTasks;
+
+  static int _i(dynamic v) => (v as num?)?.toInt() ?? 0;
+
+  factory TaskDashboard.fromJson(Map<String, dynamic> j) => TaskDashboard(
+        totalTasks: _i(j['totalTasks']),
+        myPending: _i(j['myPending']),
+        myInProgress: _i(j['myInProgress']),
+        myInReview: _i(j['myInReview']),
+        myOverdue: _i(j['myOverdue']),
+        myDoneThisMonth: _i(j['myDoneThisMonth']),
+        pendingReview: _i(j['pendingReview']),
+        createdByMe: _i(j['createdByMe']),
+        urgentTasks: _i(j['urgentTasks']),
+      );
 }
 
 // ---------------- Form schema (mirrors web FormBuilder JSON) ----------------

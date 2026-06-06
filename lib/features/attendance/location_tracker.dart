@@ -189,8 +189,8 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
 
     final now = DateTime.now();
     final interval = _currentInterval();
-    final dueByTime = _lastCaptureAt == null ||
-        now.difference(_lastCaptureAt!) >= interval;
+    final dueByTime =
+        _lastCaptureAt == null || now.difference(_lastCaptureAt!) >= interval;
 
     if (!distanceTriggered && !dueByTime) return;
 
@@ -257,15 +257,31 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
       state = state.copyWith(lastError: 'Location services are disabled.');
       return false;
     }
+
     var perm = await Geolocator.checkPermission();
     if (perm == LocationPermission.denied) {
       perm = await Geolocator.requestPermission();
     }
+
     if (perm == LocationPermission.deniedForever ||
         perm == LocationPermission.denied) {
       state = state.copyWith(lastError: 'Location permission denied.');
       return false;
     }
+
+    if (perm == LocationPermission.whileInUse) {
+      perm = await Geolocator.requestPermission();
+    }
+
+    if (perm != LocationPermission.always) {
+      state = state.copyWith(
+        lastError:
+            'Background tracking needs Location set to "Allow all the time".',
+      );
+      await Geolocator.openAppSettings();
+      return false;
+    }
+
     return true;
   }
 

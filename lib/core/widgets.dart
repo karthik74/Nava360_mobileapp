@@ -151,14 +151,22 @@ class AppSectionHeader extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.trailing,
+    this.onDark = false,
   });
 
   final String title;
   final String? subtitle;
   final Widget? trailing;
 
+  /// Use white/translucent-white text. Pass true when this header sits
+  /// directly on a dark gradient (Field-Ready treatment).
+  final bool onDark;
+
   @override
   Widget build(BuildContext context) {
+    final titleColor = onDark ? Colors.white : AppColors.ink;
+    final subtitleColor =
+        onDark ? Colors.white.withOpacity(0.78) : AppColors.muted;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -168,10 +176,10 @@ class AppSectionHeader extends StatelessWidget {
             children: [
               Text(
                 title,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
-                  color: AppColors.ink,
+                  color: titleColor,
                   letterSpacing: -0.1,
                 ),
               ),
@@ -179,9 +187,9 @@ class AppSectionHeader extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   subtitle!,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: AppColors.muted,
+                    color: subtitleColor,
                     fontWeight: FontWeight.w500,
                   ),
                 ),

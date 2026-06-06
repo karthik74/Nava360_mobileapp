@@ -427,6 +427,76 @@ class GlassBackdrop extends StatelessWidget {
   }
 }
 
+/// Bold cyan-teal-indigo gradient backdrop with a watermark logo and
+/// decorative glows. Mirrors the Welcome screen "Field-Ready" treatment;
+/// content screens (leaves, attendance) stack their UI on top of this.
+class FieldReadyBackdrop extends StatelessWidget {
+  const FieldReadyBackdrop({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topRight,
+              end: Alignment.bottomLeft,
+              colors: [
+                Color(0xFF06B6D4), // cyan-500
+                Color(0xFF0E7490), // cyan-800
+                Color(0xFF3730A3), // indigo-800
+              ],
+              stops: [0.0, 0.38, 1.0],
+            ),
+          ),
+        ),
+        Positioned(
+          top: -90,
+          right: -90,
+          child: _Blob(
+            size: 300,
+            color: const Color(0xFF14B8A6).withOpacity(0.55),
+          ),
+        ),
+        Positioned(
+          bottom: -60,
+          left: -80,
+          child: _Blob(
+            size: 260,
+            color: const Color(0xFF4F46E5).withOpacity(0.60),
+          ),
+        ),
+        Positioned(
+          top: 150,
+          right: -150,
+          child: IgnorePointer(
+            child: Opacity(
+              opacity: 0.10,
+              child: ColorFiltered(
+                colorFilter: const ColorFilter.mode(
+                  Colors.white,
+                  BlendMode.srcIn,
+                ),
+                child: Image.asset(
+                  'assets/logo-mark.png',
+                  width: 460,
+                  height: 460,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+          ),
+        ),
+        child,
+      ],
+    );
+  }
+}
+
 class _Blob extends StatelessWidget {
   const _Blob({required this.size, required this.color});
   final double size;

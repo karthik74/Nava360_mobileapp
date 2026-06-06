@@ -21,6 +21,30 @@ class AuthRepository {
     return user;
   }
 
+  Future<void> forgotPassword(String username) async {
+    await _api.post<void>(
+      '/api/auth/forgot-password',
+      body: {'username': username},
+      parse: (_) {},
+    );
+  }
+
+  Future<void> resetPassword({
+    required String username,
+    required String otp,
+    required String newPassword,
+  }) async {
+    await _api.post<void>(
+      '/api/auth/reset-password',
+      body: {
+        'username': username,
+        'otp': otp,
+        'newPassword': newPassword,
+      },
+      parse: (_) {},
+    );
+  }
+
   Future<void> logout() => SecureStorage.clear();
 
   /// Restore session from secure storage (called on app start).
