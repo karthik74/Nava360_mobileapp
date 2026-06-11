@@ -70,6 +70,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
+  /// Reads the FCM notification permission status. If Firebase isn't configured
+  /// (e.g. iOS without a GoogleService-Info.plist), accessing
+  /// `FirebaseMessaging.instance` throws `[core/no-app]` — in that case we don't
+  /// block sign-in and treat notifications as authorised.
+  Future<AuthorizationStatus> _readNotificationStatus() async {
+    try {
+      final s = await FirebaseMessaging.instance.getNotificationSettings();
+      return s.authorizationStatus;
+    } catch (_) {
+      return AuthorizationStatus.authorized;
+    }
+  }
+
   Future<void> _refreshRequiredPermissions() async {
     setState(() {
       _checkingPermissions = true;
@@ -79,13 +92,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       final locationServiceEnabled =
           await Geolocator.isLocationServiceEnabled();
       final locationPermission = await Geolocator.checkPermission();
-      final notificationSettings =
-          await FirebaseMessaging.instance.getNotificationSettings();
+      final notificationStatus = await _readNotificationStatus();
       if (!mounted) return;
       setState(() {
         _locationServiceEnabled = locationServiceEnabled;
         _locationPermission = locationPermission;
-        _notificationStatus = notificationSettings.authorizationStatus;
+        _notificationStatus = notificationStatus;
       });
     } catch (e) {
       if (mounted) setState(() => _permissionError = e.toString());
@@ -120,25 +132,32 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         locationPermission = await Geolocator.checkPermission();
       }
 
-      var notificationSettings =
-          await FirebaseMessaging.instance.getNotificationSettings();
-      if (notificationSettings.authorizationStatus ==
-          AuthorizationStatus.notDetermined) {
-        notificationSettings = await FirebaseMessaging.instance
-            .requestPermission(alert: true, badge: true, sound: true);
-      }
-      if (notificationSettings.authorizationStatus ==
-          AuthorizationStatus.denied) {
-        await Geolocator.openAppSettings();
-        notificationSettings =
+      // Notification permission. If Firebase isn't configured (e.g. iOS without
+      // a GoogleService-Info.plist) these calls throw `[core/no-app]`; in that
+      // case don't block sign-in — treat notifications as authorised.
+      AuthorizationStatus notifStatus;
+      try {
+        var settings =
             await FirebaseMessaging.instance.getNotificationSettings();
+        if (settings.authorizationStatus ==
+            AuthorizationStatus.notDetermined) {
+          settings = await FirebaseMessaging.instance
+              .requestPermission(alert: true, badge: true, sound: true);
+        }
+        if (settings.authorizationStatus == AuthorizationStatus.denied) {
+          await Geolocator.openAppSettings();
+          settings = await FirebaseMessaging.instance.getNotificationSettings();
+        }
+        notifStatus = settings.authorizationStatus;
+      } catch (_) {
+        notifStatus = AuthorizationStatus.authorized;
       }
 
       if (!mounted) return false;
       setState(() {
         _locationServiceEnabled = locationServiceEnabled;
         _locationPermission = locationPermission;
-        _notificationStatus = notificationSettings.authorizationStatus;
+        _notificationStatus = notifStatus;
       });
 
       if (!_permissionsReady) {
