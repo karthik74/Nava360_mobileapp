@@ -1,8 +1,21 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/env.dart';
+import '../../core/theme.dart';
+import '../files/file_repository.dart';
 import 'task_models.dart';
+
+/// Resolves a stored relative file url (`/api/files/{id}`) to an absolute URL.
+String absoluteFileUrl(String url) {
+  if (url.startsWith('http')) return url;
+  final base = Env.apiBaseUrl.replaceAll(RegExp(r'/+$'), '');
+  return '$base$url';
+}
 
 /// Renders a [FormSchema] into editable widgets.
 /// The caller owns `values` and gets a callback per change.
@@ -404,22 +417,321 @@ class _FieldInput extends StatelessWidget {
           ],
         );
 
-      case FieldType.file:
+      case FieldType.image:
+      case FieldType.webcam:
+        // Single image, camera-first.
+        return _FileField(
+          value: value,
+          multi: false,
+          imageOnly: true,
+          readOnly: readOnly,
+          onChanged: onChanged,
+        );
+
       case FieldType.multiimage:
-        // First-pass mobile: file/image upload is not yet wired up.
-        return Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.amber.withOpacity(0.10),
-            border: Border.all(color: Colors.amber.shade300),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            'File upload for "${field.label}" — use the web app for now.',
-            style: const TextStyle(fontSize: 12),
-          ),
+        return _FileField(
+          value: value,
+          multi: true,
+          imageOnly: true,
+          readOnly: readOnly,
+          onChanged: onChanged,
+        );
+
+      case FieldType.file:
+      case FieldType.video:
+      case FieldType.audio:
+        return _FileField(
+          value: value,
+          multi: false,
+          imageOnly: false,
+          readOnly: readOnly,
+          onChanged: onChanged,
         );
     }
+  }
+}
+
+// ─────────────────────────── File / photo upload ───────────────────────────
+
+/// Normalises a stored file value into a list of descriptor maps. Tolerates a
+/// bare url string, a single object, or a list of objects/strings.
+List<Map<String, dynamic>> _asFileList(dynamic value) {
+  Map<String, dynamic> one(dynamic e) {
+    if (e is Map) return Map<String, dynamic>.from(e);
+    return {'url': e.toString(), 'name': 'file'};
+  }
+
+  if (value == null) return [];
+  if (value is List) return value.map(one).toList();
+  return [one(value)];
+}
+
+class _FileField extends ConsumerStatefulWidget {
+  const _FileField({
+    required this.value,
+    required this.multi,
+    required this.readOnly,
+    required this.onChanged,
+    this.imageOnly = false,
+  });
+
+  final dynamic value;
+  final bool multi;
+  final bool readOnly;
+  final void Function(dynamic) onChanged;
+
+  /// When true the picker offers only camera + gallery (no document picker).
+  final bool imageOnly;
+
+  @override
+  ConsumerState<_FileField> createState() => _FileFieldState();
+}
+
+class _FileFieldState extends ConsumerState<_FileField> {
+  bool _busy = false;
+
+  List<Map<String, dynamic>> get _files => _asFileList(widget.value);
+
+  void _emit(List<Map<String, dynamic>> files) {
+    if (widget.multi) {
+      widget.onChanged(files.isEmpty ? null : files);
+    } else {
+      widget.onChanged(files.isEmpty ? null : files.first);
+    }
+  }
+
+  Future<void> _addFromCamera() async {
+    final picker = ImagePicker();
+    final shot = await picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 70,
+      maxWidth: 2000,
+    );
+    if (shot != null) await _uploadPaths([(shot.path, shot.name)]);
+  }
+
+  Future<void> _addFromGallery() async {
+    final picker = ImagePicker();
+    if (widget.multi) {
+      final shots = await picker.pickMultiImage(imageQuality: 70, maxWidth: 2000);
+      await _uploadPaths(shots.map((x) => (x.path, x.name)).toList());
+    } else {
+      final shot = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 70,
+        maxWidth: 2000,
+      );
+      if (shot != null) await _uploadPaths([(shot.path, shot.name)]);
+    }
+  }
+
+  Future<void> _addDocuments() async {
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: widget.multi,
+      withData: false,
+    );
+    if (result == null) return;
+    final paths = <(String, String)>[];
+    for (final f in result.files) {
+      if (f.path != null) paths.add((f.path!, f.name));
+    }
+    await _uploadPaths(paths);
+  }
+
+  Future<void> _uploadPaths(List<(String, String)> paths) async {
+    if (paths.isEmpty) return;
+    setState(() => _busy = true);
+    final repo = ref.read(fileRepositoryProvider);
+    final next = [..._files];
+    try {
+      for (final (path, name) in paths) {
+        final up = await repo.upload(path, filename: name);
+        if (widget.multi) {
+          next.add(up.toJson());
+        } else {
+          next
+            ..clear()
+            ..add(up.toJson());
+        }
+      }
+      _emit(next);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _remove(int index) {
+    final next = [..._files]..removeAt(index);
+    _emit(next);
+  }
+
+  Future<void> _showAddSheet() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Take a photo'),
+              onTap: () => Navigator.pop(ctx, 'camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text(widget.multi ? 'Choose photos' : 'Choose a photo'),
+              onTap: () => Navigator.pop(ctx, 'gallery'),
+            ),
+            if (!widget.imageOnly)
+              ListTile(
+                leading: const Icon(Icons.attach_file_rounded),
+                title: Text(widget.multi ? 'Attach files' : 'Attach a file'),
+                onTap: () => Navigator.pop(ctx, 'file'),
+              ),
+          ],
+        ),
+      ),
+    );
+    switch (action) {
+      case 'camera':
+        await _addFromCamera();
+        break;
+      case 'gallery':
+        await _addFromGallery();
+        break;
+      case 'file':
+        await _addDocuments();
+        break;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final files = _files;
+    final canAdd = !widget.readOnly && (widget.multi || files.isEmpty);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (files.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (var i = 0; i < files.length; i++)
+                _FilePreview(
+                  file: files[i],
+                  onRemove: widget.readOnly ? null : () => _remove(i),
+                ),
+            ],
+          ),
+        if (files.isNotEmpty) const SizedBox(height: 8),
+        if (canAdd)
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _showAddSheet,
+            icon: _busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.add_rounded, size: 18),
+            label: Text(_busy
+                ? 'Uploading…'
+                : (files.isEmpty ? 'Add attachment' : 'Add more')),
+          )
+        else if (files.isEmpty)
+          Text(
+            'No attachment.',
+            style: TextStyle(color: Theme.of(context).hintColor, fontSize: 12.5),
+          ),
+      ],
+    );
+  }
+}
+
+class _FilePreview extends StatelessWidget {
+  const _FilePreview({required this.file, this.onRemove});
+  final Map<String, dynamic> file;
+  final VoidCallback? onRemove;
+
+  bool get _isImage {
+    final ct = (file['contentType'] as String?) ?? '';
+    if (ct.startsWith('image/')) return true;
+    final name = (file['name'] as String?) ?? (file['url'] as String?) ?? '';
+    return RegExp(r'\.(png|jpe?g|gif|webp|heic)$', caseSensitive: false)
+        .hasMatch(name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = (file['url'] as String?) ?? '';
+    final name = (file['name'] as String?) ?? 'file';
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          width: 92,
+          height: 92,
+          decoration: BoxDecoration(
+            color: Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.grey.shade300),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: _isImage && url.isNotEmpty
+              ? Image.network(
+                  absoluteFileUrl(url),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      const Icon(Icons.broken_image_outlined, color: Colors.grey),
+                )
+              : Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.insert_drive_file_outlined,
+                          size: 26, color: AppColors.muted),
+                      const SizedBox(height: 4),
+                      Text(
+                        name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 9.5, color: AppColors.muted),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+        if (onRemove != null)
+          Positioned(
+            top: -6,
+            right: -6,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: AppColors.danger,
+                  shape: BoxShape.circle,
+                ),
+                padding: const EdgeInsets.all(2),
+                child: const Icon(Icons.close, size: 14, color: Colors.white),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 }
 

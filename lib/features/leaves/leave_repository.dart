@@ -34,6 +34,24 @@ class LeaveRepository {
     );
   }
 
+  /// Configured leave-type policies. Same source the web uses to build the
+  /// apply-leave type list (`GET /api/leave-types?activeOnly=`).
+  Future<List<LeaveTypePolicy>> listLeaveTypes({bool activeOnly = true}) {
+    return _api.get<List<LeaveTypePolicy>>(
+      '/api/leave-types',
+      query: {'activeOnly': activeOnly},
+      parse: (d) {
+        final list = d is List
+            ? d
+            : ((d as Map<String, dynamic>)['content'] as List<dynamic>? ??
+                const []);
+        return list
+            .map((e) => LeaveTypePolicy.fromJson(e as Map<String, dynamic>))
+            .toList();
+      },
+    );
+  }
+
   Future<EmployeeLeaveBalances> getBalance(int employeeId) {
     return _api.get<EmployeeLeaveBalances>(
       '/api/leaves/balance/$employeeId',

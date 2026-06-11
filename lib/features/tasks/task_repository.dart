@@ -2,10 +2,35 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
 import 'task_models.dart';
+import 'task_template_models.dart';
 
 class TaskRepository {
   TaskRepository(this._api);
   final ApiClient _api;
+
+  /// Active CUSTOMER task templates the field employee can perform.
+  Future<List<TaskTemplate>> customerTemplates({String query = ''}) {
+    return _api.get<List<TaskTemplate>>(
+      '/api/task-templates',
+      query: {
+        'activeOnly': true,
+        'taskType': 'CUSTOMER',
+        if (query.trim().isNotEmpty) 'q': query.trim(),
+        'size': 100,
+      },
+      parse: (d) {
+        final content = d is List
+            ? d
+            : ((d as Map<String, dynamic>)['content'] as List<dynamic>? ?? const []);
+        return content
+            .map((e) => TaskTemplate.fromJson(e as Map<String, dynamic>))
+            // Safety net: keep only CUSTOMER templates even if the backend
+            // hasn't been redeployed with the taskType query filter yet.
+            .where((t) => t.isCustomer)
+            .toList();
+      },
+    );
+  }
 
   Future<List<Task>> listForEmployee(int employeeId, {String? status}) {
     return _api.get<List<Task>>(

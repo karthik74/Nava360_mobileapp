@@ -234,7 +234,7 @@ class ProfileScreen extends ConsumerWidget {
                   const SizedBox(height: 24),
                   Center(
                     child: Text(
-                      'HRMS Mobile v1.0',
+                      'Nava360 Mobile v1.0',
                       style: TextStyle(
                         color: AppColors.muted.withOpacity(0.7),
                         fontSize: 12,

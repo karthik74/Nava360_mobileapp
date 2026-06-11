@@ -40,6 +40,34 @@ class LeaveRequest {
       );
 }
 
+/// A configured leave-type policy (mirrors the web `LeaveTypePolicy`).
+/// The apply-leave form builds its type list from these, like the web does.
+class LeaveTypePolicy {
+  final int? id;
+  final String code;
+  final String label;
+  final bool active;
+  final String allowedGender; // ANY | MALE | FEMALE
+
+  LeaveTypePolicy({
+    required this.code,
+    required this.label,
+    this.id,
+    this.active = true,
+    this.allowedGender = 'ANY',
+  });
+
+  factory LeaveTypePolicy.fromJson(Map<String, dynamic> j) => LeaveTypePolicy(
+        id: (j['id'] as num?)?.toInt(),
+        code: j['code'] as String,
+        label: (j['label'] as String?)?.trim().isNotEmpty == true
+            ? j['label'] as String
+            : j['code'] as String,
+        active: j['active'] != false,
+        allowedGender: (j['allowedGender'] as String?) ?? 'ANY',
+      );
+}
+
 class LeaveBalance {
   final String leaveTypeCode;
   final String leaveTypeLabel;

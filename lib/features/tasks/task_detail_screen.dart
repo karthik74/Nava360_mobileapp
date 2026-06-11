@@ -430,6 +430,12 @@ class _MetaGrid extends StatelessWidget {
         : DateFormat('EEE, d MMM y').format(task.dueDate!);
     final dueTime = formatDueTime(task.dueTime);
     final rows = <Widget>[
+      if (task.customerName != null && task.customerName!.isNotEmpty)
+        _InfoRow(
+          icon: Icons.badge_outlined,
+          label: 'Customer',
+          value: task.customerName!,
+        ),
       if (task.assignedByName != null)
         _InfoRow(
           icon: Icons.person_outline,

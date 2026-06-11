@@ -135,6 +135,15 @@ class ChatMessagesNotifier extends StateNotifier<AsyncValue<List<ChatMessage>>> 
     }
   }
 
+  /// Append a message we just sent so it shows immediately, without waiting for
+  /// the WebSocket echo or a refresh. Deduped by id, so a later echo is a no-op.
+  void addLocal(ChatMessage msg) {
+    state.whenData((list) {
+      if (list.any((m) => m.id == msg.id)) return;
+      state = AsyncValue.data([...list, msg]);
+    });
+  }
+
   /// Load earlier messages (cursor pagination).
   Future<void> loadMore() async {
     if (!_hasMore) return;

@@ -45,6 +45,72 @@ class AuthRepository {
     );
   }
 
+  // ── First-time login (account activation) ─────────────────────────────────
+
+  /// Step 1 — locate the account by employee code and send an OTP to the
+  /// registered mobile. Returns the masked mobile and any server message.
+  Future<({bool requiresOtp, String? maskedMobile, String? message})>
+      firstLoginStart(String employeeCode) {
+    return _api.post(
+      '/api/auth/first-login/start',
+      body: {'employeeCode': employeeCode},
+      parse: (d) {
+        final m = (d as Map<String, dynamic>?) ?? const {};
+        return (
+          requiresOtp: m['requiresOtp'] != false,
+          maskedMobile: m['maskedMobile'] as String?,
+          message: m['message'] as String?,
+        );
+      },
+    );
+  }
+
+  /// Step 1b — resend the OTP (server enforces cooldown / max-resend limits).
+  Future<void> firstLoginResendOtp(String employeeCode) {
+    return _api.post<void>(
+      '/api/auth/first-login/resend-otp',
+      body: {'employeeCode': employeeCode},
+      parse: (_) {},
+    );
+  }
+
+  /// Step 2 — verify the 6-digit OTP; returns a short-lived setup token.
+  Future<({String setupToken, int expiresInSeconds})> firstLoginVerifyOtp(
+    String employeeCode,
+    String otp,
+  ) {
+    return _api.post(
+      '/api/auth/first-login/verify-otp',
+      body: {'employeeCode': employeeCode, 'otp': otp},
+      parse: (d) {
+        final m = d as Map<String, dynamic>;
+        return (
+          setupToken: m['setupToken'] as String? ?? '',
+          expiresInSeconds: (m['expiresInSeconds'] as num?)?.toInt() ?? 0,
+        );
+      },
+    );
+  }
+
+  /// Step 3 — set the permanent password using the setup token.
+  Future<void> firstLoginSetPassword({
+    required String employeeCode,
+    required String setupToken,
+    required String newPassword,
+    required String confirmPassword,
+  }) {
+    return _api.post<void>(
+      '/api/auth/first-login/set-password',
+      body: {
+        'employeeCode': employeeCode,
+        'setupToken': setupToken,
+        'newPassword': newPassword,
+        'confirmPassword': confirmPassword,
+      },
+      parse: (_) {},
+    );
+  }
+
   Future<void> logout() => SecureStorage.clear();
 
   /// Restore session from secure storage (called on app start).

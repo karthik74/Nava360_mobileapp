@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -51,6 +54,28 @@ final _dashTeamLeavesProvider =
   return ref.watch(leaveRepositoryProvider).listForTeam();
 });
 
+/// Reverse-geocodes a check-in coordinate into a short, human place label
+/// (e.g. "Madhapur, Hyderabad"). Falls back to the raw coordinates when the
+/// device has no geocoder / is offline. Keyed by the coordinate so the lookup
+/// is cached per location.
+final _checkInPlaceProvider = FutureProvider.autoDispose
+    .family<String, ({double lat, double lng})>((ref, c) async {
+  String coords() =>
+      '${c.lat.toStringAsFixed(4)}, ${c.lng.toStringAsFixed(4)}';
+  try {
+    final marks = await placemarkFromCoordinates(c.lat, c.lng);
+    if (marks.isNotEmpty) {
+      final p = marks.first;
+      final parts = <String>[
+        for (final s in [p.subLocality, p.locality, p.administrativeArea])
+          if (s != null && s.trim().isNotEmpty) s.trim(),
+      ];
+      if (parts.isNotEmpty) return parts.take(2).join(', ');
+    }
+  } catch (_) {/* no geocoder / offline → fall back to coordinates */}
+  return coords();
+});
+
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
 
@@ -62,6 +87,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Timer? _clockTimer;
   DateTime _now = DateTime.now();
   bool _attendanceActionBusy = false;
+  bool _batteryPromptedThisSession = false;
 
   @override
   void initState() {
@@ -163,6 +189,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 longitude: position?.longitude,
               );
           _showSnack('Checked in successfully.');
+          // Ask to lift battery restrictions so background tracking stays reliable.
+          await _ensureBatteryUnrestricted();
         } catch (_) {
           await ref
               .read(locationTrackerProvider.notifier)
@@ -187,6 +215,44 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       );
     } catch (_) {
       return null;
+    }
+  }
+
+  /// On Android, asks the user to exclude the app from battery optimisation so
+  /// background location tracking keeps running with the screen off. Shown at most
+  /// once per session, and never once already granted.
+  Future<void> _ensureBatteryUnrestricted() async {
+    if (!Platform.isAndroid || _batteryPromptedThisSession) return;
+    try {
+      if (await Permission.ignoreBatteryOptimizations.isGranted) return;
+      _batteryPromptedThisSession = true;
+      if (!mounted) return;
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Keep tracking reliable'),
+          content: const Text(
+            'To record your location accurately while you are checked in — even with '
+            'the screen off — please allow this app to ignore battery optimisation. '
+            'Tap “Allow” on the next screen.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Not now'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      );
+      if (proceed == true) {
+        await Permission.ignoreBatteryOptimizations.request();
+      }
+    } catch (_) {
+      // Best-effort — never block check-in on this.
     }
   }
 
@@ -221,6 +287,22 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final hasCheckedIn = todayRec?.checkIn != null;
     final hasCheckedOut = todayRec?.checkOut != null;
     final timerText = _fmtTimer(_workDuration(todayRec));
+
+    // Actual punch-in location: reverse-geocode today's check-in coordinates
+    // (per employee), falling back to coordinates / a clear status string.
+    final checkInLat = todayRec?.checkInLatitude;
+    final checkInLng = todayRec?.checkInLongitude;
+    final String heroLocation;
+    if (hasCheckedIn && checkInLat != null && checkInLng != null) {
+      heroLocation = ref
+              .watch(_checkInPlaceProvider((lat: checkInLat, lng: checkInLng)))
+              .valueOrNull ??
+          '${checkInLat.toStringAsFixed(4)}, ${checkInLng.toStringAsFixed(4)}';
+    } else if (hasCheckedIn) {
+      heroLocation = 'Location not captured';
+    } else {
+      heroLocation = 'Not checked in';
+    }
     final attendanceActionTitle = _attendanceActionBusy
         ? 'Please wait...'
         : hasCheckedOut
@@ -297,6 +379,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             hasCheckedOut: hasCheckedOut,
             checkInTime: _fmtTime(todayRec?.checkIn),
             checkOutTime: _fmtTime(todayRec?.checkOut),
+            location: heroLocation,
+            busy: _attendanceActionBusy,
             onTap: () => _runAttendanceAction(
               hasCheckedIn: hasCheckedIn,
               hasCheckedOut: hasCheckedOut,

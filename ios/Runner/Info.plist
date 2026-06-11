@@ -37,6 +37,10 @@
 	<string>Nava360 uses your location in the background while you are checked in to record attendance tracking.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Nava360 uses your location while you are checked in to record attendance tracking.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Nava360 uses the camera so you can attach photos to a customer task.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Nava360 needs photo access so you can attach images to a customer task.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

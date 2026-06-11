@@ -104,7 +104,7 @@ class HomeShell extends ConsumerWidget {
     if (loc.startsWith('/leaves')) return 'Leaves';
     if (loc.startsWith('/tasks')) return 'Tasks';
     if (loc.startsWith('/team')) return 'Team';
-    return 'HRMS';
+    return 'Nava360';
   }
 
   @override
@@ -132,10 +132,10 @@ class HomeShell extends ConsumerWidget {
               sigmaY: GlassBlur.chrome,
             ),
             child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.62),
+              decoration: const BoxDecoration(
+                color: AppColors.surface,
                 border: Border(
-                  bottom: BorderSide(color: Colors.white.withOpacity(0.5)),
+                  bottom: BorderSide(color: AppColors.hairline),
                 ),
               ),
               child: SafeArea(
@@ -220,16 +220,16 @@ class HomeShell extends ConsumerWidget {
             sigmaY: GlassBlur.chrome,
           ),
           child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.62),
+            decoration: const BoxDecoration(
+              color: AppColors.surface,
               border: Border(
-                top: BorderSide(color: Colors.white.withOpacity(0.5)),
+                top: BorderSide(color: AppColors.hairline),
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Color(0x0D0F172A),
                   blurRadius: 12,
-                  offset: const Offset(0, -2),
+                  offset: Offset(0, -2),
                 ),
               ],
             ),
@@ -432,6 +432,13 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
         accent: AppColors.success,
         isPush: true,
       ),
+      const _NavItemData(
+        label: 'My Resignation',
+        icon: Icons.logout_rounded,
+        path: '/my-resignation',
+        accent: AppColors.danger,
+        isPush: true,
+      ),
     ];
 
     // Local fuzzy filter on label.
@@ -456,10 +463,10 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
             child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.42),
+              decoration: const BoxDecoration(
+                color: AppColors.surface,
                 border: Border(
-                  right: BorderSide(color: Colors.white.withOpacity(0.55)),
+                  right: BorderSide(color: AppColors.hairline),
                 ),
               ),
               child: Column(

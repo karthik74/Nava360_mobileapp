@@ -267,31 +267,22 @@ class AppIconButton extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          ClipRRect(
+          Material(
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(11),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: GlassBlur.chrome,
-                sigmaY: GlassBlur.chrome,
-              ),
-              child: Material(
-                color: Colors.white.withOpacity(0.55),
-                child: InkWell(
-                  onTap: onTap,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(11),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.55),
-                      ),
-                    ),
-                    alignment: Alignment.center,
-                    child: Icon(
-                      icon,
-                      size: 18,
-                      color: color ?? AppColors.inkSoft,
-                    ),
-                  ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onTap,
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(color: AppColors.hairline),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  icon,
+                  size: 18,
+                  color: color ?? AppColors.inkSoft,
                 ),
               ),
             ),
@@ -545,36 +536,21 @@ class _TappableGlass extends StatelessWidget {
         borderRadius: br,
         boxShadow: shadow ?? AppShadows.card,
       ),
-      child: ClipRRect(
+      child: Material(
+        color: AppColors.surface,
         borderRadius: br,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(
-            sigmaX: GlassBlur.card,
-            sigmaY: GlassBlur.card,
-          ),
-          child: Material(
-            color: Colors.white.withOpacity(0.45),
-            child: InkWell(
-              onTap: onTap,
-              splashColor: AppColors.primary.withOpacity(0.10),
-              highlightColor: AppColors.primary.withOpacity(0.05),
-              child: Container(
-                padding: padding,
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.glassBorder),
-                  borderRadius: br,
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Colors.white.withOpacity(0.35),
-                      Colors.white.withOpacity(0.05),
-                    ],
-                  ),
-                ),
-                child: child,
-              ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          splashColor: AppColors.primary.withOpacity(0.08),
+          highlightColor: AppColors.primary.withOpacity(0.04),
+          child: Container(
+            padding: padding,
+            decoration: BoxDecoration(
+              border: Border.all(color: AppColors.hairline),
+              borderRadius: br,
             ),
+            child: child,
           ),
         ),
       ),
@@ -596,7 +572,8 @@ class AttendanceHeroCard extends StatelessWidget {
     required this.checkInTime,
     required this.checkOutTime,
     required this.onTap,
-    this.location = 'Hyderabad HQ',
+    this.busy = false,
+    this.location = '—',
   });
 
   final String timerText;
@@ -605,6 +582,9 @@ class AttendanceHeroCard extends StatelessWidget {
   final String checkInTime;
   final String checkOutTime;
   final VoidCallback onTap;
+
+  /// While a check-in/out request is in flight — shows a spinner and blocks taps.
+  final bool busy;
   final String location;
 
   @override
@@ -623,11 +603,13 @@ class AttendanceHeroCard extends StatelessWidget {
     final caption = hasCheckedIn
         ? 'Worked today · checked in at $checkInTime'
         : 'Tap below to start your shift';
-    final ctaLabel = hasCheckedOut
-        ? 'Done for today'
-        : hasCheckedIn
-            ? 'Check out now'
-            : 'Check in now';
+    final ctaLabel = busy
+        ? 'Please wait…'
+        : hasCheckedOut
+            ? 'Done for today'
+            : hasCheckedIn
+                ? 'Check out now'
+                : 'Check in now';
 
     return Container(
       decoration: BoxDecoration(
@@ -734,12 +716,17 @@ class AttendanceHeroCard extends StatelessWidget {
                         color: Colors.white.withOpacity(0.85),
                       ),
                       const SizedBox(width: 4),
-                      Text(
-                        location,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.85),
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
+                      Flexible(
+                        child: Text(
+                          location,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.end,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.85),
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ],
@@ -784,7 +771,7 @@ class AttendanceHeroCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _HeroCta(label: ctaLabel, onTap: onTap),
+                  _HeroCta(label: ctaLabel, onTap: onTap, busy: busy),
                 ],
               ),
             ),
@@ -844,9 +831,10 @@ class _HeroMiniCard extends StatelessWidget {
 }
 
 class _HeroCta extends StatelessWidget {
-  const _HeroCta({required this.label, required this.onTap});
+  const _HeroCta({required this.label, required this.onTap, this.busy = false});
   final String label;
   final VoidCallback onTap;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -855,28 +843,41 @@ class _HeroCta extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppRadii.md),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(
-                Icons.fingerprint_rounded,
-                size: 18,
-                color: AppColors.primary,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: AppColors.primary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.1,
+        onTap: busy ? null : onTap,
+        child: Opacity(
+          opacity: busy ? 0.75 : 1,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (busy)
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation(AppColors.primary),
+                    ),
+                  )
+                else
+                  const Icon(
+                    Icons.fingerprint_rounded,
+                    size: 18,
+                    color: AppColors.primary,
+                  ),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: AppColors.primary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.1,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

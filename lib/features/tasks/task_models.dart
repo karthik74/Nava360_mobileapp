@@ -28,6 +28,9 @@ class Task {
     required this.title,
     required this.status,
     this.taskCode,
+    this.taskType,
+    this.customerId,
+    this.customerName,
     this.description,
     this.dueDate,
     this.dueTime,
@@ -59,7 +62,13 @@ class Task {
   final String title;
   final String status;
   final String? taskCode;
+  /// INTERNAL or CUSTOMER.
+  final String? taskType;
+  final int? customerId;
+  final String? customerName;
   final String? description;
+
+  bool get isCustomerTask => (taskType ?? '').toUpperCase() == 'CUSTOMER';
   final DateTime? dueDate;
   /// Time-of-day deadline, serialized as "HH:mm[:ss]" by the backend.
   final String? dueTime;
@@ -110,6 +119,9 @@ class Task {
       title: json['title'] as String? ?? 'Untitled task',
       status: json['status'] as String? ?? 'UNKNOWN',
       taskCode: json['taskCode'] as String?,
+      taskType: json['taskType'] as String?,
+      customerId: (json['customerId'] as num?)?.toInt(),
+      customerName: json['customerName'] as String?,
       description: json['description'] as String?,
       dueDate: _parseDate(json['dueDate']),
       dueTime: json['dueTime'] as String?,
@@ -251,12 +263,51 @@ class TaskDashboard {
 /// Supported field types. Unknown types fall back to plain text.
 enum FieldType {
   text, textarea, number, mobile, email, date, time, day,
-  daterange, select, radio, checkbox, file, multiimage;
+  daterange, select, radio, checkbox, file, multiimage,
+  // Media-capture types authored in the web form builder.
+  image, webcam, video, audio;
 
   static FieldType from(String s) {
     final v = s.trim().toLowerCase();
     for (final t in values) {
       if (t.name == v) return t;
+    }
+    // Aliases for media-capture fields built in the web form builder so they
+    // render an uploader (camera/gallery/file) instead of a text box.
+    switch (v) {
+      case 'photo':
+      case 'camera':
+      case 'imagecapture':
+      case 'image_capture':
+      case 'singleimage':
+      case 'single_image':
+        return FieldType.image;
+      case 'images':
+      case 'multi_image':
+      case 'multiimages':
+        return FieldType.multiimage;
+      case 'attachment':
+      case 'document':
+      case 'fileupload':
+      case 'file_upload':
+        return FieldType.file;
+    }
+    // Last resort: an unrecognised type whose key still indicates a media field
+    // (e.g. a suffixed/variant key) should render an uploader, not a text box.
+    if (v.contains('multiimage') || v.contains('multi_image')) {
+      return FieldType.multiimage;
+    }
+    if (v.contains('image') ||
+        v.contains('photo') ||
+        v.contains('camera') ||
+        v.contains('webcam') ||
+        v.contains('picture')) {
+      return FieldType.image;
+    }
+    if (v.contains('video')) return FieldType.video;
+    if (v.contains('audio') || v.contains('voice')) return FieldType.audio;
+    if (v.contains('file') || v.contains('attach') || v.contains('upload')) {
+      return FieldType.file;
     }
     return FieldType.text;
   }

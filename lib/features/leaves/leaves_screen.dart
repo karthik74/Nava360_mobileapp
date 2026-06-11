@@ -4,11 +4,63 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/api_client.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import 'leave_models.dart';
 import 'leave_repository.dart';
+
+/// Leave-type options for an employee, built the same way the web does:
+/// active policies only, filtered to the employee's gender. Types that need
+/// extra inputs the mobile form doesn't collect (restricted-holiday picker,
+/// comp-off worked date) are excluded.
+final _leaveTypeOptionsProvider = FutureProvider.autoDispose
+    .family<List<({String code, String label})>, int>((ref, employeeId) async {
+  final policies =
+      await ref.watch(leaveRepositoryProvider).listLeaveTypes(activeOnly: true);
+  String? gender;
+  try {
+    final emp = await ref.watch(apiClientProvider).get<Map<String, dynamic>>(
+          '/api/employees/$employeeId',
+          parse: (d) => d as Map<String, dynamic>,
+        );
+    gender = emp['gender'] as String?;
+  } catch (_) {/* gender unknown → show gender-neutral types only */}
+
+  const needsExtraInput = {'RESTRICTED_HOLIDAY', 'COMPENSATORY'};
+  return policies
+      .where((p) => p.active)
+      .where((p) =>
+          p.allowedGender == 'ANY' ||
+          (gender != null && p.allowedGender == gender))
+      .where((p) => !needsExtraInput.contains(p.code))
+      .map((p) => (code: p.code, label: p.label))
+      .toList();
+});
+
+IconData _leaveTypeIcon(String code) {
+  switch (code.toUpperCase()) {
+    case 'CASUAL':
+      return Icons.coffee_rounded;
+    case 'SICK':
+      return Icons.medical_services_rounded;
+    case 'EARNED':
+      return Icons.beach_access_rounded;
+    case 'MATERNITY':
+      return Icons.child_friendly_rounded;
+    case 'PATERNITY':
+      return Icons.family_restroom_rounded;
+    case 'UNPAID':
+      return Icons.savings_rounded;
+    case 'RESTRICTED_HOLIDAY':
+      return Icons.celebration_rounded;
+    case 'COMPENSATORY':
+      return Icons.sync_alt_rounded;
+    default:
+      return Icons.event_note_rounded;
+  }
+}
 
 final _myLeavesProvider = FutureProvider.autoDispose<List<LeaveRequest>>((ref) {
   final user = ref.watch(authUserProvider);
@@ -422,21 +474,12 @@ class _RequestSheet extends ConsumerStatefulWidget {
 }
 
 class _RequestSheetState extends ConsumerState<_RequestSheet> {
-  String _type = 'CASUAL';
+  String _type = '';
   DateTime _from = DateTime.now();
   DateTime _to = DateTime.now();
   final _reason = TextEditingController();
   bool _submitting = false;
   String? _err;
-
-  static const _types = [
-    ('CASUAL', Icons.coffee_rounded),
-    ('SICK', Icons.medical_services_rounded),
-    ('EARNED', Icons.beach_access_rounded),
-    ('MATERNITY', Icons.child_friendly_rounded),
-    ('PATERNITY', Icons.family_restroom_rounded),
-    ('UNPAID', Icons.savings_rounded),
-  ];
 
   Future<void> _pick({required bool isFrom}) async {
     final picked = await showDatePicker(
@@ -468,6 +511,10 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
   }
 
   Future<void> _submit() async {
+    if (_type.isEmpty) {
+      setState(() => _err = 'Please select a leave type.');
+      return;
+    }
     if (_reason.text.trim().isEmpty) {
       setState(() => _err = 'Please enter a reason.');
       return;
@@ -558,19 +605,49 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
             ),
           ),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final t in _types)
-                _TypeChip(
-                  label: t.$1,
-                  icon: t.$2,
-                  selected: _type == t.$1,
-                  onTap: () => setState(() => _type = t.$1),
+          ref.watch(_leaveTypeOptionsProvider(widget.employeeId)).when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 10),
+                  child: SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
                 ),
-            ],
-          ),
+                error: (e, _) => Text(
+                  'Could not load leave types: $e',
+                  style: const TextStyle(color: AppColors.danger, fontSize: 12),
+                ),
+                data: (opts) {
+                  if (opts.isEmpty) {
+                    return const Text(
+                      'No leave types are available for your account.',
+                      style: TextStyle(color: AppColors.muted, fontSize: 12.5),
+                    );
+                  }
+                  // Default to the first allowed type once options arrive.
+                  if (!opts.any((o) => o.code == _type)) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted && !opts.any((o) => o.code == _type)) {
+                        setState(() => _type = opts.first.code);
+                      }
+                    });
+                  }
+                  return Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final o in opts)
+                        _TypeChip(
+                          label: o.label,
+                          icon: _leaveTypeIcon(o.code),
+                          selected: _type == o.code,
+                          onTap: () => setState(() => _type = o.code),
+                        ),
+                    ],
+                  );
+                },
+              ),
           const SizedBox(height: 18),
           Row(
             children: [

@@ -31,7 +31,7 @@ class PushService {
 
   static const _androidChannel = AndroidNotificationChannel(
     'hrms_default_channel',
-    'HRMS notifications',
+    'Nava360 notifications',
     description: 'Tasks, leaves, attendance and announcements.',
     importance: Importance.high,
   );

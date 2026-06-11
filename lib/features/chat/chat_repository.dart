@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
@@ -121,6 +122,24 @@ class ChatRepository {
           'attachmentSizeBytes': attachmentSizeBytes,
       },
       parse: (d) => ChatMessage.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
+  /// Uploads a file to the shared file store and returns its details so it can be
+  /// attached to a chat message.
+  Future<({int fileId, String name, String? contentType, int? sizeBytes})>
+      uploadAttachment(String filePath, {String? filename}) async {
+    final name = filename ?? filePath.split(RegExp(r'[\\/]+')).last;
+    final form = FormData.fromMap({
+      'file': await MultipartFile.fromFile(filePath, filename: name),
+    });
+    final res = await _api.raw.post<Map<String, dynamic>>('/api/files', data: form);
+    final data = (res.data?['data'] as Map<String, dynamic>?) ?? const {};
+    return (
+      fileId: (data['id'] as num).toInt(),
+      name: (data['originalName'] as String?) ?? name,
+      contentType: data['contentType'] as String?,
+      sizeBytes: (data['sizeBytes'] as num?)?.toInt(),
     );
   }
 

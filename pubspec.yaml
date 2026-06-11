@@ -1,7 +1,7 @@
-name: hrms_mobile
-description: HRMS mobile app — employee self-service and manager approvals.
+name: nava360
+description: Nava360 mobile app — employee self-service and manager approvals.
 publish_to: "none"
-version: 0.1.0+1
+version: 0.1.1+1
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -30,11 +30,24 @@ dependencies:
   # Geolocation for punch in/out
   geolocator: ^12.0.0
 
+  # Battery-optimisation exemption prompt (reliable background tracking)
+  permission_handler: ^11.3.1
+
+  # Reverse-geocode check-in coordinates into a readable place name
+  geocoding: ^3.0.0
+
+  # Task form attachments — capture photos and pick documents
+  image_picker: ^1.1.2
+  file_picker: ^8.1.2
+
   # Formatting
   intl: ^0.19.0
 
   # URL Launcher
   url_launcher: ^6.3.0
+
+  # App version / build number for the backend update check
+  package_info_plus: ^8.0.2
 
   # Payslip PDF download: save to disk + open in the system viewer
   path_provider: ^2.1.4

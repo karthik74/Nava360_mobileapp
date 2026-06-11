@@ -3,29 +3,31 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/theme.dart';
+import 'features/app_version/app_version_gate.dart';
 import 'features/attendance/attendance_screen.dart';
 import 'features/attendance/location_lifecycle.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/welcome_seen_controller.dart';
+import 'features/auth/first_login_screen.dart';
 import 'features/auth/forgot_password_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/reset_password_screen.dart';
 import 'features/auth/welcome_screen.dart';
+import 'features/customers/customers_screen.dart';
 import 'features/home/dashboard_screen.dart';
 import 'features/home/home_shell.dart';
 import 'features/leaves/leaves_screen.dart';
 import 'features/notifications/notifications_screen.dart';
 import 'features/notifications/push_lifecycle.dart';
 import 'features/notifications/push_service.dart';
-import 'features/placeholders/coming_soon_screen.dart';
 import 'features/profile/profile_screen.dart';
-import 'features/tasks/tasks_screen.dart';
 import 'features/team/team_screen.dart';
 import 'features/chat/chat_list_screen.dart';
 import 'features/chat/chat_thread_by_id_screen.dart';
 import 'features/meetings/meetings_screen.dart';
 import 'features/trainings/trainings_screen.dart';
 import 'features/payslips/payslips_screen.dart';
+import 'features/resignation/resignation_screen.dart';
 
 final goRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -54,6 +56,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         '/login',
         '/forgot-password',
         '/reset-password',
+        '/first-login',
       };
 
       // Signed-out users.
@@ -78,6 +81,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           final flash = state.extra is String ? state.extra as String : null;
           return LoginScreen(flash: flash);
         },
+      ),
+      GoRoute(
+        path: '/first-login',
+        builder: (_, __) => const FirstLoginScreen(),
       ),
       GoRoute(
         path: '/forgot-password',
@@ -123,6 +130,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '/my-payslips',
         builder: (_, __) => const PayslipsScreen(),
       ),
+      GoRoute(
+        path: '/my-resignation',
+        builder: (_, __) => const ResignationScreen(),
+      ),
       ShellRoute(
         builder: (_, __, child) => HomeShell(child: child),
         routes: [
@@ -132,7 +143,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             builder: (_, __) => const AttendanceScreen(),
           ),
           GoRoute(path: '/leaves', builder: (_, __) => const LeavesScreen()),
-          GoRoute(path: '/tasks', builder: (_, __) => const TasksScreen()),
+          GoRoute(path: '/tasks', builder: (_, __) => const CustomerTasksHub()),
           GoRoute(path: '/team', builder: (_, __) => const TeamScreen()),
         ],
       ),
@@ -182,10 +193,14 @@ class HrmsApp extends ConsumerWidget {
     // Let push-notification taps deep-link into a chat thread.
     ref.read(pushServiceProvider).onOpenChat = (id) => router.push('/chats/$id');
     return MaterialApp.router(
-      title: 'HRMS',
+      title: 'Nava360',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       routerConfig: router,
+      // Gate the whole app behind the backend version check: a dismissible
+      // banner when an update is available, a blocking screen when it's forced.
+      builder: (context, child) =>
+          AppUpdateGate(child: child ?? const SizedBox.shrink()),
     );
   }
 }

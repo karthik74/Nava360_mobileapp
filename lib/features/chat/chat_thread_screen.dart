@@ -1,9 +1,12 @@
 import 'dart:ui';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/env.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -56,9 +59,14 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     setState(() => _sending = true);
     _msgCtrl.clear();
     try {
-      await ref
+      final sent = await ref
           .read(chatRepositoryProvider)
           .sendMessage(widget.conversation.id, content: text);
+      // Show it right away (deduped against any later WebSocket echo).
+      ref
+          .read(chatMessagesProvider(widget.conversation.id).notifier)
+          .addLocal(sent);
+      _scrollToBottom();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -67,6 +75,169 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
       }
     } finally {
       if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) {
+        // reverse: true → newest message sits at offset 0.
+        _scrollCtrl.animateTo(
+          0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  // ── Emoji picker ───────────────────────────────────────────────────────────
+
+  static const List<String> _emojis = [
+    '😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇','🙂','🙃','😉','😌','😍','🥰',
+    '😘','😗','😙','😚','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','😐','😑',
+    '😶','😏','😒','🙄','😬','😯','😴','😪','😫','🥱','😮','😲','😳','🥺','😢','😭',
+    '😤','😠','😡','🤬','😈','👿','💀','💩','🤡','👍','👎','👌','✌️','🤞','🙏','👏',
+    '🙌','💪','🔥','✨','🎉','❤️','🧡','💛','💚','💙','💜','🖤','💯','✅','❌','⭐',
+  ];
+
+  void _showEmojiPicker() {
+    FocusScope.of(context).unfocus();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 14, 12, 14),
+          child: GridView.count(
+            crossAxisCount: 8,
+            shrinkWrap: true,
+            children: _emojis
+                .map((e) => InkWell(
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _insertText(e);
+                      },
+                      child: Center(
+                        child: Text(e, style: const TextStyle(fontSize: 24)),
+                      ),
+                    ))
+                .toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _insertText(String text) {
+    final sel = _msgCtrl.selection;
+    final base = _msgCtrl.text;
+    if (sel.isValid && sel.start >= 0) {
+      final newText = base.replaceRange(sel.start, sel.end, text);
+      _msgCtrl.value = TextEditingValue(
+        text: newText,
+        selection: TextSelection.collapsed(offset: sel.start + text.length),
+      );
+    } else {
+      _msgCtrl.text = base + text;
+      _msgCtrl.selection =
+          TextSelection.collapsed(offset: _msgCtrl.text.length);
+    }
+  }
+
+  // ── Attachments ────────────────────────────────────────────────────────────
+
+  void _pickAttachment() {
+    FocusScope.of(context).unfocus();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            _SheetAction(
+              icon: Icons.photo_library_rounded,
+              label: 'Photo / Gallery',
+              color: AppColors.primary,
+              onTap: () { Navigator.pop(ctx); _pickImage(ImageSource.gallery); },
+            ),
+            _SheetAction(
+              icon: Icons.photo_camera_rounded,
+              label: 'Camera',
+              color: AppColors.primary,
+              onTap: () { Navigator.pop(ctx); _pickImage(ImageSource.camera); },
+            ),
+            _SheetAction(
+              icon: Icons.insert_drive_file_rounded,
+              label: 'Document',
+              color: AppColors.primary,
+              onTap: () { Navigator.pop(ctx); _pickDocument(); },
+            ),
+            const SizedBox(height: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final picked = await ImagePicker().pickImage(source: source, imageQuality: 80);
+      if (picked != null) await _sendAttachment(picked.path, picked.name);
+    } catch (e) {
+      _attachError(e);
+    }
+  }
+
+  Future<void> _pickDocument() async {
+    try {
+      final result = await FilePicker.platform.pickFiles();
+      final path = result?.files.single.path;
+      if (path != null) {
+        await _sendAttachment(path, result!.files.single.name);
+      }
+    } catch (e) {
+      _attachError(e);
+    }
+  }
+
+  Future<void> _sendAttachment(String path, String name) async {
+    if (_sending) return;
+    setState(() => _sending = true);
+    try {
+      final repo = ref.read(chatRepositoryProvider);
+      final up = await repo.uploadAttachment(path, filename: name);
+      final sent = await repo.sendMessage(
+        widget.conversation.id,
+        attachmentFileId: up.fileId,
+        attachmentName: up.name,
+        attachmentContentType: up.contentType,
+        attachmentSizeBytes: up.sizeBytes,
+      );
+      ref
+          .read(chatMessagesProvider(widget.conversation.id).notifier)
+          .addLocal(sent);
+      _scrollToBottom();
+    } catch (e) {
+      _attachError(e);
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  void _attachError(Object e) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Attachment failed: $e')),
+      );
     }
   }
 
@@ -374,6 +545,8 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                 controller: _msgCtrl,
                 sending: _sending,
                 onSend: _send,
+                onEmoji: _showEmojiPicker,
+                onAttach: _pickAttachment,
               ),
             ],
           ),
@@ -481,6 +654,104 @@ class _MessageBubble extends StatelessWidget {
   final bool showSender;
   final VoidCallback onLongPress;
 
+  /// Renders an inline image preview for image attachments, else a file chip.
+  Widget _attachment(BuildContext context) {
+    final url = _attachmentUrlOf(msg);
+    final isImage = msg.type == ChatMessageType.IMAGE ||
+        (msg.attachmentContentType?.startsWith('image/') ?? false);
+    if (isImage && url != null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: GestureDetector(
+          onTap: () => _openImage(context, url),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 240, maxHeight: 260),
+              child: Image.network(
+                url,
+                fit: BoxFit.cover,
+                loadingBuilder: (c, child, progress) => progress == null
+                    ? child
+                    : const SizedBox(
+                        height: 160,
+                        width: 200,
+                        child: Center(
+                          child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      ),
+                errorBuilder: (c, e, s) => _fileChip(),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return _fileChip();
+  }
+
+  Widget _fileChip() {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: (isMine ? Colors.black : const Color(0xFF008069)).withOpacity(0.06),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            msg.type == ChatMessageType.IMAGE
+                ? Icons.image_rounded
+                : Icons.attach_file_rounded,
+            size: 16,
+            color: const Color(0xFF54656F),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              msg.attachmentName!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF111B21),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openImage(BuildContext context, String url) {
+    Navigator.of(context).push(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: Text(msg.attachmentName ?? 'Image',
+              style: const TextStyle(fontSize: 15)),
+        ),
+        body: Center(
+          child: InteractiveViewer(
+            minScale: 0.5,
+            maxScale: 4,
+            child: Image.network(url, fit: BoxFit.contain),
+          ),
+        ),
+      ),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final deleted = msg.deletedForEveryone;
@@ -555,40 +826,7 @@ class _MessageBubble extends StatelessWidget {
                     )
                   else ...[
                     if (msg.attachmentName != null) ...[
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        margin: const EdgeInsets.only(bottom: 6),
-                        decoration: BoxDecoration(
-                          color: (isMine ? Colors.black : const Color(0xFF008069))
-                              .withOpacity(0.06),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              msg.type == ChatMessageType.IMAGE
-                                  ? Icons.image_rounded
-                                  : Icons.attach_file_rounded,
-                              size: 16,
-                              color: const Color(0xFF54656F),
-                            ),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Text(
-                                msg.attachmentName!,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF111B21),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      _attachment(context),
                     ],
                     if (msg.content != null && msg.content!.isNotEmpty)
                       Text(
@@ -693,6 +931,17 @@ class _SystemBubble extends StatelessWidget {
 // Date separator (WhatsApp rounded pill)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Absolute URL for a message attachment (the /api/files GET is public, so
+/// Image.network can load it directly, following the redirect to storage).
+String? _attachmentUrlOf(ChatMessage m) {
+  final path = m.attachmentUrl ??
+      (m.attachmentFileId != null ? '/api/files/${m.attachmentFileId}' : null);
+  if (path == null) return null;
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  final base = Env.apiBaseUrl.replaceAll(RegExp(r'/+$'), '');
+  return base + (path.startsWith('/') ? path : '/$path');
+}
+
 class _DateSeparator extends StatelessWidget {
   const _DateSeparator({required this.date});
   final DateTime date;
@@ -748,10 +997,14 @@ class _InputBar extends StatelessWidget {
     required this.controller,
     required this.sending,
     required this.onSend,
+    required this.onEmoji,
+    required this.onAttach,
   });
   final TextEditingController controller;
   final bool sending;
   final VoidCallback onSend;
+  final VoidCallback onEmoji;
+  final VoidCallback onAttach;
 
   @override
   Widget build(BuildContext context) {
@@ -788,7 +1041,7 @@ class _InputBar extends StatelessWidget {
                   IconButton(
                     icon: const Icon(Icons.sentiment_satisfied_alt_rounded,
                         color: Color(0xFF8696A0), size: 22),
-                    onPressed: () {},
+                    onPressed: onEmoji,
                   ),
                   Expanded(
                     child: Padding(
@@ -821,7 +1074,7 @@ class _InputBar extends StatelessWidget {
                   IconButton(
                     icon: const Icon(Icons.attach_file_rounded,
                         color: Color(0xFF8696A0), size: 22),
-                    onPressed: () {},
+                    onPressed: onAttach,
                   ),
                   const SizedBox(width: 4),
                 ],

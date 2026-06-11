@@ -86,6 +86,14 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
   static const int _flushAtCount = 5;
   static const int _flushIntervalSeconds = 120;
   static const Duration _tick = Duration(seconds: 30);
+  // How often the foreground timer fires a location-on/off heartbeat.
+  static const Duration _statusInterval = Duration(minutes: 3);
+  // Minimum gap between heartbeats (the location stream also triggers them, so they
+  // keep flowing in the background where Dart timers are paused).
+  static const Duration _statusMinGap = Duration(seconds: 90);
+  // OS location-update interval. Drives the stream on a timer (not just on movement)
+  // so heartbeats keep flowing in the background even when the device is stationary.
+  static const Duration _streamInterval = Duration(minutes: 2);
 
   // ---- Persistent key (so we can resume after a process restart) ----
   static const _kActiveEmployee = 'tracker.activeEmployeeId';
@@ -96,8 +104,11 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
   // ---- Runtime ----
   StreamSubscription<Position>? _streamSub;
   Timer? _ticker;
+  Timer? _statusTicker;
   Position? _lastPosition;
+  Position? _lastCapturedPosition;
   DateTime? _lastCaptureAt;
+  DateTime? _lastStatusSentAt;
   final List<LocationPing> _buffer = [];
   Future<void>? _flushInFlight;
 
@@ -114,6 +125,9 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
     _streamSub = Geolocator.getPositionStream(locationSettings: settings)
         .listen(_onPosition, onError: _onStreamError);
     _ticker = Timer.periodic(_tick, (_) => _maybeCapture());
+    // Foreground heartbeat. The location stream also fires heartbeats (see
+    // _onPosition) so they keep flowing while the app is backgrounded.
+    _statusTicker = Timer.periodic(_statusInterval, (_) => _maybeSendStatus(tracking: true));
 
     state = state.copyWith(
       active: true,
@@ -122,6 +136,8 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
       sentCount: 0,
       clearError: true,
     );
+    _lastStatusSentAt = DateTime.now();
+    unawaited(_sendStatus(tracking: true)); // report ON immediately
 
     // Try to capture an immediate baseline sample so the user sees activity right away.
     try {
@@ -139,10 +155,18 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
   Future<void> stop({bool flushBuffer = true}) async {
     await _streamSub?.cancel();
     _ticker?.cancel();
+    _statusTicker?.cancel();
     _streamSub = null;
     _ticker = null;
+    _statusTicker = null;
+
+    // Report that tracking has stopped (so HR sees "checked out", not a stale state).
+    await _sendStatus(tracking: false);
+
     _lastPosition = null;
+    _lastCapturedPosition = null;
     _lastCaptureAt = null;
+    _lastStatusSentAt = null;
 
     if (flushBuffer && _buffer.isNotEmpty && state.employeeId != null) {
       await _flush();
@@ -153,6 +177,26 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
     await _storage.delete(key: _kActiveEmployee);
 
     state = LocationTrackerState.idle;
+  }
+
+  /// Best-effort heartbeat reporting whether device location/GPS is on right now.
+  Future<void> _sendStatus({required bool tracking}) async {
+    if (state.employeeId == null) return;
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      final perm = await Geolocator.checkPermission();
+      final granted = perm == LocationPermission.always ||
+          perm == LocationPermission.whileInUse;
+      await _repo.sendStatus(
+        locationEnabled: enabled,
+        permissionGranted: granted,
+        tracking: tracking,
+        latitude: _lastPosition?.latitude,
+        longitude: _lastPosition?.longitude,
+      );
+    } catch (_) {
+      // Best-effort — ignore network / permission errors.
+    }
   }
 
   /// On app start: if a tracking session was persisted, reattach to it.
@@ -175,33 +219,53 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
 
   void _onPosition(Position p) {
     _lastPosition = p;
-    // The OS already filtered by distance, so a stream event is "interesting".
-    // Still honor the minimum cadence to avoid runaway sampling in noisy areas.
-    _maybeCapture(distanceTriggered: true);
+    // Stream now fires on a time interval (so it keeps flowing in the background
+    // even when stationary). Capture a route ping only when enough distance/time
+    // has elapsed; always send a location-ON heartbeat (throttled).
+    _maybeCapture();
+    _maybeSendStatus(tracking: true);
+  }
+
+  /// Sends a heartbeat at most once per [_statusMinGap].
+  void _maybeSendStatus({required bool tracking}) {
+    final now = DateTime.now();
+    if (_lastStatusSentAt != null &&
+        now.difference(_lastStatusSentAt!) < _statusMinGap) {
+      return;
+    }
+    _lastStatusSentAt = now;
+    unawaited(_sendStatus(tracking: tracking));
   }
 
   void _onStreamError(Object e) {
     state = state.copyWith(lastError: e.toString());
   }
 
-  void _maybeCapture({bool distanceTriggered = false}) {
+  void _maybeCapture() {
     if (!state.active || _lastPosition == null) return;
-
+    final p = _lastPosition!;
     final now = DateTime.now();
+
     final interval = _currentInterval();
     final dueByTime =
         _lastCaptureAt == null || now.difference(_lastCaptureAt!) >= interval;
+    final movedFar = _lastCapturedPosition == null ||
+        Geolocator.distanceBetween(
+              _lastCapturedPosition!.latitude,
+              _lastCapturedPosition!.longitude,
+              p.latitude,
+              p.longitude,
+            ) >=
+            _distanceFilterMeters;
 
-    if (!distanceTriggered && !dueByTime) return;
-
-    // Even on a distance event, if we just captured <30s ago, skip — that's noise.
-    if (distanceTriggered &&
-        _lastCaptureAt != null &&
+    if (!dueByTime && !movedFar) return;
+    // Avoid bursts — at most one ping per 30s.
+    if (_lastCaptureAt != null &&
         now.difference(_lastCaptureAt!) < const Duration(seconds: 30)) {
       return;
     }
 
-    _capture(_lastPosition!);
+    _capture(p);
     _maybeAutoFlush();
   }
 
@@ -215,6 +279,7 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
     );
     _buffer.add(ping);
     _lastCaptureAt = DateTime.now();
+    _lastCapturedPosition = p;
     state = state.copyWith(
       lastCapturedAt: _lastCaptureAt,
       bufferedCount: _buffer.length,
@@ -285,15 +350,19 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
     return true;
   }
 
-  /// Platform-specific stream settings. On Android we enable a foreground notification
-  /// so the OS keeps location updates flowing while the app isn't in front.
+  /// Platform-specific stream settings. We use a TIME interval (not a distance
+  /// filter) so the OS delivers updates on a schedule — keeping the foreground
+  /// service active and the on/off heartbeat flowing even when the device is
+  /// stationary in the background. Route pings are de-duplicated by distance in
+  /// [_maybeCapture], so a 0 distance filter doesn't flood the server.
   LocationSettings _platformSettings() {
     if (defaultTargetPlatform == TargetPlatform.android) {
       return AndroidSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: _distanceFilterMeters,
+        distanceFilter: 0,
+        intervalDuration: _streamInterval,
         foregroundNotificationConfig: const ForegroundNotificationConfig(
-          notificationTitle: 'HRMS attendance',
+          notificationTitle: 'Nava360 attendance',
           notificationText: 'Recording your location while you are checked in',
           enableWakeLock: true,
           notificationChannelName: 'Attendance tracking',
@@ -303,15 +372,18 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       return AppleSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: _distanceFilterMeters,
-        pauseLocationUpdatesAutomatically: true,
+        distanceFilter: 0,
+        // Keep updates flowing in the background (don't let iOS pause them) so the
+        // heartbeat continues. allowBackgroundLocationUpdates is required for this.
+        pauseLocationUpdatesAutomatically: false,
+        allowBackgroundLocationUpdates: true,
         showBackgroundLocationIndicator: false,
         activityType: ActivityType.other,
       );
     }
     return LocationSettings(
       accuracy: LocationAccuracy.high,
-      distanceFilter: _distanceFilterMeters,
+      distanceFilter: 0,
     );
   }
 
@@ -319,6 +391,7 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
   void dispose() {
     _streamSub?.cancel();
     _ticker?.cancel();
+    _statusTicker?.cancel();
     super.dispose();
   }
 }

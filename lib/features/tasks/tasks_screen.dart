@@ -59,7 +59,11 @@ extension on _TaskFilter {
 }
 
 class TasksScreen extends ConsumerStatefulWidget {
-  const TasksScreen({super.key});
+  const TasksScreen({super.key, this.header});
+
+  /// Optional widget rendered at the very top of the list (e.g. the
+  /// Customers ⇄ My tasks toggle when embedded in the customer-first hub).
+  final Widget? header;
 
   @override
   ConsumerState<TasksScreen> createState() => _TasksScreenState();
@@ -147,17 +151,11 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
             mq.padding.bottom + AppChrome.bottomNavHeight + 10,
           ),
           children: [
+            if (widget.header != null) widget.header!,
             const SizedBox(height: 12),
             const AppSectionHeader(
               title: 'My tasks',
               subtitle: 'Tasks assigned to your employee account',
-            ),
-            const SizedBox(height: 14),
-            _DashboardStrip(
-              async: dashboard,
-              onTapFilter: (filter) {
-                setState(() => _selectedFilter = filter);
-              },
             ),
             const SizedBox(height: 16),
             Wrap(
@@ -243,76 +241,6 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
   }
 }
 
-// ───────────────────────────── Dashboard strip ─────────────────────────────
-
-class _DashboardStrip extends StatelessWidget {
-  const _DashboardStrip({required this.async, required this.onTapFilter});
-
-  final AsyncValue<TaskDashboard> async;
-  final ValueChanged<_TaskFilter> onTapFilter;
-
-  @override
-  Widget build(BuildContext context) {
-    return async.when(
-      loading: () => const AppLoadingBlock(height: 96),
-      error: (_, __) => const SizedBox.shrink(),
-      data: (d) {
-        final items = <Widget>[
-          _MiniStat(
-            label: 'To do',
-            value: d.myPending,
-            icon: Icons.radio_button_unchecked_rounded,
-            color: AppColors.info,
-            onTap: () => onTapFilter(_TaskFilter.toDo),
-          ),
-          _MiniStat(
-            label: 'In progress',
-            value: d.myInProgress,
-            icon: Icons.timelapse_rounded,
-            color: AppColors.warning,
-            onTap: () => onTapFilter(_TaskFilter.inProgress),
-          ),
-          _MiniStat(
-            label: 'In review',
-            value: d.myInReview,
-            icon: Icons.rate_review_outlined,
-            color: AppColors.accent,
-            onTap: () => onTapFilter(_TaskFilter.inReview),
-          ),
-          _MiniStat(
-            label: 'Overdue',
-            value: d.myOverdue,
-            icon: Icons.error_outline_rounded,
-            color: AppColors.danger,
-          ),
-          _MiniStat(
-            label: 'Urgent',
-            value: d.urgentTasks,
-            icon: Icons.priority_high_rounded,
-            color: AppColors.pink,
-          ),
-          _MiniStat(
-            label: 'Done (mo)',
-            value: d.myDoneThisMonth,
-            icon: Icons.check_circle_outline_rounded,
-            color: AppColors.success,
-            onTap: () => onTapFilter(_TaskFilter.done),
-          ),
-        ];
-        return SizedBox(
-          height: 86,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            itemCount: items.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 10),
-            itemBuilder: (_, i) => items[i],
-          ),
-        );
-      },
-    );
-  }
-}
 
 class _MiniStat extends StatelessWidget {
   const _MiniStat({

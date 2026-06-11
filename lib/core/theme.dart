@@ -1,110 +1,106 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Centralised design tokens for the HRMS app — glass morphism revision.
+/// Centralised design tokens — Light Modern Enterprise SaaS theme:
+/// white cards on a soft light-gray canvas, a deep-blue primary, slate
+/// typography, soft gray borders and minimal shadows. Token names are kept
+/// stable so every screen reskins without code changes.
 class AppColors {
   AppColors._();
 
-  // Brand
-  static const primary = Color(0xFF4F46E5);
-  static const primaryDark = Color(0xFF3730A3);
-  static const accent = Color(0xFF06B6D4);
-  static const pink = Color(0xFFEC4899);
+  // Brand — deep blue
+  static const primary = Color(0xFF1D4ED8); // blue-700
+  static const primaryDark = Color(0xFF1E40AF); // blue-800 (hover/darker)
+  static const accent = Color(0xFF0EA5E9); // sky-500 (secondary, used sparingly)
+  static const pink = Color(0xFF7C3AED); // violet-600 (kept token name)
 
-  // Page chrome (still used in a few "neutral" surfaces inside glass cards).
-  static const bg = Color(0xFFEEF1F8);
-  static const surface = Colors.white;
-  static const surfaceAlt = Color(0xFFF4F6FB);
+  // Page chrome
+  static const bg = Color(0xFFF1F5F9); // slate-100 — soft light gray canvas
+  static const surface = Colors.white; // cards / sheets
+  static const surfaceAlt = Color(0xFFF8FAFC); // slate-50 — subtle fills
 
   // Type
-  static const ink = Color(0xFF0F172A);
-  static const inkSoft = Color(0xFF334155);
-  static const muted = Color(0xFF64748B);
-  static const hairline = Color(0x33FFFFFF); // glass hairline (white 20%)
+  static const ink = Color(0xFF0F172A); // slate-900
+  static const inkSoft = Color(0xFF334155); // slate-700
+  static const muted = Color(0xFF64748B); // slate-500
+  static const hairline = Color(0xFFE2E8F0); // slate-200 — soft border/divider
 
-  // Status
-  static const success = Color(0xFF10B981);
-  static const warning = Color(0xFFF59E0B);
-  static const danger = Color(0xFFEF4444);
-  static const info = Color(0xFF3B82F6);
+  // Status (slightly deeper for crisp contrast on white)
+  static const success = Color(0xFF16A34A); // green-600
+  static const warning = Color(0xFFD97706); // amber-600
+  static const danger = Color(0xFFDC2626); // red-600
+  static const info = Color(0xFF2563EB); // blue-600
 
-  // ── Glass tokens ─────────────────────────────────────────────
-  // White-tinted frosted surfaces (used by GlassCard).
-  static final glassFill = Colors.white.withOpacity(0.45);
-  static final glassFillStrong = Colors.white.withOpacity(0.62);
-  static final glassFillSubtle = Colors.white.withOpacity(0.28);
-  static final glassBorder = Colors.white.withOpacity(0.55);
-  static final glassBorderSubtle = Colors.white.withOpacity(0.32);
+  // ── Surface tokens (kept names; now flat surfaces, not frosted glass) ──
+  static const glassFill = Colors.white;
+  static const glassFillStrong = Colors.white;
+  static const glassFillSubtle = Color(0xFFF8FAFC);
+  static const glassBorder = Color(0xFFE2E8F0);
+  static const glassBorderSubtle = Color(0xFFEEF2F7);
 
-  // Mesh-background palette (the canvas behind the glass).
-  static const meshA = Color(0xFF6366F1); // indigo
-  static const meshB = Color(0xFF06B6D4); // cyan
-  static const meshC = Color(0xFFEC4899); // hot pink
-  static const meshD = Color(0xFF8B5CF6); // violet
-  static const meshBase = Color(0xFFEEF1F8);
+  // Decorative palette — only used by FieldReadyBackdrop / success art now.
+  static const meshA = Color(0xFF6366F1);
+  static const meshB = Color(0xFF06B6D4);
+  static const meshC = Color(0xFFEC4899);
+  static const meshD = Color(0xFF8B5CF6);
+  static const meshBase = Color(0xFFF1F5F9);
 
-  // Gradients (kept names for backwards compatibility).
+  // Subtle deep-blue brand gradient — hero card, avatars (kept names).
   static const heroGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF4F46E5), Color(0xFF06B6D4)],
+    colors: [Color(0xFF1E40AF), Color(0xFF2563EB)],
   );
 
   static const successGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFF10B981), Color(0xFF34D399)],
+    colors: [Color(0xFF16A34A), Color(0xFF22C55E)],
   );
 
   static const warningGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFFF59E0B), Color(0xFFFBBF24)],
+    colors: [Color(0xFFD97706), Color(0xFFF59E0B)],
   );
 
   static const dangerGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [Color(0xFFEF4444), Color(0xFFF87171)],
+    colors: [Color(0xFFDC2626), Color(0xFFEF4444)],
   );
 }
 
 class AppShadows {
   AppShadows._();
 
+  // Minimal, soft enterprise shadows.
   static const card = [
     BoxShadow(
-      color: Color(0x0F101828),
-      blurRadius: 18,
-      offset: Offset(0, 8),
-    ),
-    BoxShadow(
-      color: Color(0x06101828),
-      blurRadius: 4,
-      offset: Offset(0, 1),
+      color: Color(0x0D0F172A),
+      blurRadius: 10,
+      offset: Offset(0, 2),
     ),
   ];
 
   static const soft = [
     BoxShadow(
-      color: Color(0x0C101828),
-      blurRadius: 12,
-      offset: Offset(0, 4),
+      color: Color(0x080F172A),
+      blurRadius: 8,
+      offset: Offset(0, 1),
     ),
   ];
 
   static const lifted = [
     BoxShadow(
-      color: Color(0x266366F1),
-      blurRadius: 26,
-      offset: Offset(0, 12),
+      color: Color(0x1A1D4ED8),
+      blurRadius: 20,
+      offset: Offset(0, 10),
     ),
     BoxShadow(
-      color: Color(0x0F101828),
-      blurRadius: 6,
-      offset: Offset(0, 2),
+      color: Color(0x0D0F172A),
+      blurRadius: 4,
+      offset: Offset(0, 1),
     ),
   ];
 }
@@ -118,11 +114,13 @@ class AppRadii {
   static const pill = 999.0;
 }
 
+/// Kept for API compatibility. The enterprise theme is flat (no frosted blur),
+/// so these are 0 — any remaining `BackdropFilter` that reads them is a no-op.
 class GlassBlur {
   GlassBlur._();
-  static const card = 14.0;
-  static const overlay = 20.0;
-  static const chrome = 18.0;
+  static const card = 0.0;
+  static const overlay = 0.0;
+  static const chrome = 0.0;
 }
 
 /// Visible heights of the persistent chrome (excluding system insets).
@@ -205,12 +203,12 @@ ThemeData buildAppTheme() {
       ),
     ),
     chipTheme: ChipThemeData(
-      backgroundColor: Colors.white.withOpacity(0.55),
+      backgroundColor: AppColors.surfaceAlt,
       selectedColor: AppColors.primary,
       secondarySelectedColor: AppColors.primary,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadii.pill),
-        side: BorderSide(color: Colors.white.withOpacity(0.55)),
+        side: const BorderSide(color: AppColors.hairline),
       ),
       labelStyle: const TextStyle(
         color: AppColors.inkSoft,
@@ -220,7 +218,7 @@ ThemeData buildAppTheme() {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
     ),
     cardTheme: CardThemeData(
-      color: Colors.white.withOpacity(0.55),
+      color: AppColors.surface,
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
@@ -229,18 +227,18 @@ ThemeData buildAppTheme() {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: Colors.white.withOpacity(0.55),
+      fillColor: AppColors.surface,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       hintStyle: const TextStyle(color: AppColors.muted, fontSize: 13),
       labelStyle: const TextStyle(color: AppColors.inkSoft, fontSize: 13),
       prefixIconColor: AppColors.muted,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadii.md),
-        borderSide: BorderSide(color: Colors.white.withOpacity(0.55)),
+        borderSide: const BorderSide(color: AppColors.hairline),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadii.md),
-        borderSide: BorderSide(color: Colors.white.withOpacity(0.55)),
+        borderSide: const BorderSide(color: AppColors.hairline),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadii.md),
@@ -273,7 +271,7 @@ ThemeData buildAppTheme() {
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.ink,
-        side: BorderSide(color: Colors.white.withOpacity(0.55)),
+        side: const BorderSide(color: AppColors.hairline),
         padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 16),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.md),
@@ -320,7 +318,7 @@ ThemeData buildAppTheme() {
       ),
     ),
     dialogTheme: DialogThemeData(
-      backgroundColor: Colors.white.withOpacity(0.92),
+      backgroundColor: AppColors.surface,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadii.lg),
@@ -330,8 +328,8 @@ ThemeData buildAppTheme() {
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
     ),
-    dividerTheme: DividerThemeData(
-      color: Colors.white.withOpacity(0.45),
+    dividerTheme: const DividerThemeData(
+      color: AppColors.hairline,
       space: 1,
       thickness: 1,
     ),
@@ -355,75 +353,9 @@ class GlassBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final i = intensity.clamp(0.0, 1.4);
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFFEDF1FB), Color(0xFFF4ECFB), Color(0xFFE8F4FB)],
-            ),
-          ),
-        ),
-        // Indigo blob — top left
-        Positioned(
-          top: -120,
-          left: -100,
-          child: _Blob(
-            size: 360,
-            color: AppColors.meshA.withOpacity(0.32 * i),
-          ),
-        ),
-        // Cyan blob — top right
-        Positioned(
-          top: -80,
-          right: -130,
-          child: _Blob(
-            size: 320,
-            color: AppColors.meshB.withOpacity(0.28 * i),
-          ),
-        ),
-        // Pink blob — bottom centre
-        Positioned(
-          bottom: -160,
-          left: -40,
-          child: _Blob(
-            size: 380,
-            color: AppColors.meshC.withOpacity(0.26 * i),
-          ),
-        ),
-        // Violet blob — middle right
-        Positioned(
-          bottom: 60,
-          right: -120,
-          child: _Blob(
-            size: 280,
-            color: AppColors.meshD.withOpacity(0.24 * i),
-          ),
-        ),
-        // Soft white veil to keep text readable.
-        Positioned.fill(
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.white.withOpacity(0.30),
-                  Colors.white.withOpacity(0.12),
-                  Colors.white.withOpacity(0.25),
-                ],
-                stops: const [0, 0.5, 1],
-              ),
-            ),
-          ),
-        ),
-        child,
-      ],
-    );
+    // Enterprise theme: a clean, flat soft-gray canvas behind the cards.
+    // (`intensity` kept for API compatibility; no longer used.)
+    return Container(color: AppColors.bg, child: child);
   }
 }
 
@@ -553,55 +485,24 @@ class GlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isOpaque = gradient != null || (color != null && color!.alpha > 240);
     final borderRadius = BorderRadius.circular(radius);
-    final effectiveBorder = border ??
-        Border.all(color: AppColors.glassBorder, width: 1);
+    final hasGradient = gradient != null;
 
-    // Opaque path — preserves prior behaviour for gradient hero cards etc.
-    if (isOpaque) {
-      return Container(
-        padding: padding,
-        decoration: BoxDecoration(
-          color: gradient == null ? color : null,
-          gradient: gradient,
-          borderRadius: borderRadius,
-          boxShadow: shadow ?? AppShadows.card,
-          border: border,
-        ),
-        child: child,
-      );
-    }
-
-    // True frosted-glass path.
-    return DecoratedBox(
+    // Flat enterprise card: solid white surface, soft gray border, minimal
+    // shadow. Gradient cards (hero) paint their gradient with no border so the
+    // brand colour reads cleanly.
+    return Container(
+      padding: padding,
       decoration: BoxDecoration(
+        color: hasGradient ? null : (color ?? AppColors.surface),
+        gradient: gradient,
         borderRadius: borderRadius,
         boxShadow: shadow ?? AppShadows.card,
+        border: hasGradient
+            ? null
+            : (border ?? Border.all(color: AppColors.hairline, width: 1)),
       ),
-      child: ClipRRect(
-        borderRadius: borderRadius,
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-          child: Container(
-            padding: padding,
-            decoration: BoxDecoration(
-              color: color ?? AppColors.glassFill,
-              borderRadius: borderRadius,
-              border: effectiveBorder,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Colors.white.withOpacity(0.35),
-                  Colors.white.withOpacity(0.05),
-                ],
-              ),
-            ),
-            child: child,
-          ),
-        ),
-      ),
+      child: child,
     );
   }
 }
@@ -628,27 +529,22 @@ class GlassChrome extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final clip = radius ?? BorderRadius.zero;
-    return ClipRRect(
-      borderRadius: clip,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.55),
-            borderRadius: clip,
-            border: Border(
-              top: borderTop
-                  ? BorderSide(color: Colors.white.withOpacity(0.55))
-                  : BorderSide.none,
-              bottom: borderBottom
-                  ? BorderSide(color: Colors.white.withOpacity(0.55))
-                  : BorderSide.none,
-            ),
-          ),
-          child: child,
+    // Flat solid chrome bar (app bar / bottom nav background).
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: clip,
+        border: Border(
+          top: borderTop
+              ? const BorderSide(color: AppColors.hairline)
+              : BorderSide.none,
+          bottom: borderBottom
+              ? const BorderSide(color: AppColors.hairline)
+              : BorderSide.none,
         ),
       ),
+      child: child,
     );
   }
 }

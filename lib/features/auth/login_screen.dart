@@ -367,6 +367,39 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ? null
                                   : _submit,
                             ),
+                            const SizedBox(height: 16),
+                            Center(
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(6),
+                                onTap: !formEnabled
+                                    ? null
+                                    : () => context.push('/first-login'),
+                                child: const Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 4,
+                                  ),
+                                  child: Text.rich(
+                                    TextSpan(
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AppColors.muted,
+                                      ),
+                                      children: [
+                                        TextSpan(text: 'First time signing in? '),
+                                        TextSpan(
+                                          text: 'Activate account',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            color: AppColors.primary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -379,7 +412,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   padding: const EdgeInsets.only(bottom: 12, top: 4),
                   child: Center(
                     child: Text(
-                      'Secured by HRMS · v1.0',
+                      'Secured by Nava360 · v1.0',
                       style: TextStyle(
                         color: AppColors.muted.withOpacity(0.85),
                         fontSize: 12,

@@ -15,6 +15,28 @@ class LocationRepository {
       parse: (d) => (d as num).toInt(),
     );
   }
+
+  /// Heartbeat telling the server whether this device's location/GPS is on.
+  /// Sent even when GPS is off, so HR can see "location turned off".
+  Future<void> sendStatus({
+    required bool locationEnabled,
+    required bool permissionGranted,
+    required bool tracking,
+    double? latitude,
+    double? longitude,
+  }) {
+    return _api.post<void>(
+      '/api/attendance/locations/status',
+      body: {
+        'locationEnabled': locationEnabled,
+        'permissionGranted': permissionGranted,
+        'tracking': tracking,
+        if (latitude != null) 'latitude': latitude,
+        if (longitude != null) 'longitude': longitude,
+      },
+      parse: (_) {},
+    );
+  }
 }
 
 final locationRepositoryProvider = Provider<LocationRepository>(

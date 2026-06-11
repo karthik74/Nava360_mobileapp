@@ -7,7 +7,7 @@ import '../../core/theme.dart';
 import 'auth_repository.dart';
 import 'login_screen.dart';
 
-/// Step 2 of password reset: enter the 4-digit OTP and a new password.
+/// Step 2 of password reset: enter the 6-digit OTP and a new password.
 class ResetPasswordScreen extends ConsumerStatefulWidget {
   const ResetPasswordScreen({super.key, this.username});
 
@@ -36,8 +36,8 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   }
 
   Future<void> _submit() async {
-    if (_otp.length < 4) {
-      setState(() => _error = 'Enter the 4-digit code sent to your mobile.');
+    if (_otp.length < 6) {
+      setState(() => _error = 'Enter the 6-digit code sent to your mobile.');
       return;
     }
     if (_p1.text.length < 6) {
@@ -88,7 +88,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
         TextSpan(
           children: [
             const TextSpan(
-              text: 'We sent a 4-digit code to the mobile number '
+              text: 'We sent a 6-digit code to the mobile number '
                   'registered with ',
             ),
             TextSpan(
@@ -110,7 +110,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
           const AuthFieldLabel('Verification code'),
           const SizedBox(height: 8),
           _OtpBoxes(
-            length: 4,
+            length: 6,
             onChanged: (v) => setState(() => _otp = v),
           ),
           const SizedBox(height: 8),
@@ -202,7 +202,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// 4-digit OTP input — auto-advances on type, backspaces to previous.
+// 6-digit OTP input — auto-advances on type, backspaces to previous.
 // ──────────────────────────────────────────────────────────────────────
 
 class _OtpBoxes extends StatefulWidget {
