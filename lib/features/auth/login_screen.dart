@@ -1,10 +1,12 @@
 import 'dart:ui';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/theme.dart';
 import 'auth_controller.dart';
@@ -33,6 +35,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _locationServiceEnabled = false;
   LocationPermission _locationPermission = LocationPermission.denied;
   AuthorizationStatus _notificationStatus = AuthorizationStatus.notDetermined;
+  PermissionStatus _smsStatus = PermissionStatus.denied;
+
+  // SMS reading is Android-only (iOS forbids it). On other platforms we never
+  // block sign-in on SMS.
+  bool get _smsSupported =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   bool get _locationReady =>
       _locationServiceEnabled &&
@@ -42,7 +50,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _notificationStatus == AuthorizationStatus.authorized ||
       _notificationStatus == AuthorizationStatus.provisional;
 
-  bool get _permissionsReady => _locationReady && _notificationsReady;
+  bool get _smsReady => !_smsSupported || _smsStatus.isGranted;
+
+  bool get _permissionsReady =>
+      _locationReady && _notificationsReady && _smsReady;
 
   @override
   void initState() {
@@ -93,11 +104,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           await Geolocator.isLocationServiceEnabled();
       final locationPermission = await Geolocator.checkPermission();
       final notificationStatus = await _readNotificationStatus();
+      final smsStatus =
+          _smsSupported ? await Permission.sms.status : PermissionStatus.granted;
       if (!mounted) return;
       setState(() {
         _locationServiceEnabled = locationServiceEnabled;
         _locationPermission = locationPermission;
         _notificationStatus = notificationStatus;
+        _smsStatus = smsStatus;
       });
     } catch (e) {
       if (mounted) setState(() => _permissionError = e.toString());
@@ -153,17 +167,35 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         notifStatus = AuthorizationStatus.authorized;
       }
 
+      // SMS read permission (Android only). On other platforms treat as granted
+      // so it never blocks sign-in.
+      PermissionStatus smsStatus;
+      if (_smsSupported) {
+        smsStatus = await Permission.sms.status;
+        if (!smsStatus.isGranted && !smsStatus.isPermanentlyDenied) {
+          smsStatus = await Permission.sms.request();
+        }
+        if (smsStatus.isPermanentlyDenied) {
+          await openAppSettings();
+          smsStatus = await Permission.sms.status;
+        }
+      } else {
+        smsStatus = PermissionStatus.granted;
+      }
+
       if (!mounted) return false;
       setState(() {
         _locationServiceEnabled = locationServiceEnabled;
         _locationPermission = locationPermission;
         _notificationStatus = notifStatus;
+        _smsStatus = smsStatus;
       });
 
       if (!_permissionsReady) {
         setState(() {
-          _permissionError =
-              'Allow location all the time and notifications to continue.';
+          _permissionError = _smsSupported
+              ? 'Allow location all the time, notifications, and SMS access to continue.'
+              : 'Allow location all the time and notifications to continue.';
         });
         return false;
       }
@@ -301,6 +333,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 locationServiceEnabled: _locationServiceEnabled,
                                 locationPermission: _locationPermission,
                                 notificationStatus: _notificationStatus,
+                                smsStatus: _smsStatus,
+                                smsSupported: _smsSupported,
                                 error: _permissionError,
                                 onGrant: _ensureRequiredPermissions,
                                 onRefresh: _refreshRequiredPermissions,
@@ -898,6 +932,8 @@ class _RequiredPermissionsPanel extends StatelessWidget {
     required this.locationServiceEnabled,
     required this.locationPermission,
     required this.notificationStatus,
+    required this.smsStatus,
+    required this.smsSupported,
     required this.error,
     required this.onGrant,
     required this.onRefresh,
@@ -908,6 +944,8 @@ class _RequiredPermissionsPanel extends StatelessWidget {
   final bool locationServiceEnabled;
   final LocationPermission locationPermission;
   final AuthorizationStatus notificationStatus;
+  final PermissionStatus smsStatus;
+  final bool smsSupported;
   final String? error;
   final Future<bool> Function() onGrant;
   final Future<void> Function() onRefresh;
@@ -968,6 +1006,14 @@ class _RequiredPermissionsPanel extends StatelessWidget {
             label: 'Notifications',
             detail: _notificationLabel(notificationStatus),
           ),
+          if (smsSupported) ...[
+            const SizedBox(height: 7),
+            _PermissionStatusRow(
+              granted: smsStatus.isGranted,
+              label: 'SMS access',
+              detail: _smsLabel(smsStatus),
+            ),
+          ],
           if (error != null) ...[
             const SizedBox(height: 10),
             Text(
@@ -1036,6 +1082,13 @@ class _RequiredPermissionsPanel extends StatelessWidget {
       case AuthorizationStatus.notDetermined:
         return 'Not granted';
     }
+  }
+
+  String _smsLabel(PermissionStatus status) {
+    if (status.isGranted) return 'Allowed';
+    if (status.isPermanentlyDenied) return 'Denied in settings';
+    if (status.isRestricted) return 'Restricted';
+    return 'Not granted';
   }
 }
 

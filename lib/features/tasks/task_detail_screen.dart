@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
+import '../auth/auth_controller.dart';
 import 'form_renderer.dart';
 import 'task_done_screen.dart';
 import 'task_models.dart';
@@ -46,6 +47,14 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
     if (_hydrated) return;
     _values = parseFormValues(task.formResponse);
     _hydrated = true;
+  }
+
+  /// A self-task is one the employee raised for themselves: they are both the
+  /// assignee and the assigner, so they must also fill the assigner-owned
+  /// (`assigned: true`) form fields.
+  bool _isSelfTask(Task task) {
+    final me = ref.read(authUserProvider)?.employeeId;
+    return me != null && task.assignedToId == me && task.assignedById == me;
   }
 
   /// One-shot GPS fix for geo-tagging a completion. Returns null if location is
@@ -101,7 +110,8 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
   Future<void> _complete(Task task) async {
     final schema = FormSchema.parse(task.formSchema);
     if (schema != null) {
-      final errors = validateForm(schema, _values);
+      final errors =
+          validateForm(schema, _values, includeAssigned: _isSelfTask(task));
       setState(() {
         _errors = errors;
         _topError = errors.isEmpty ? null : 'Please fix the highlighted fields.';
@@ -238,6 +248,7 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
                   values: _values,
                   readOnly: readOnly,
                   errors: _errors,
+                  ownerFillsAssigned: _isSelfTask(task),
                   onChanged: (name, v) {
                     setState(() {
                       if (v == null) {

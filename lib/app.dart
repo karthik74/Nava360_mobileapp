@@ -13,6 +13,8 @@ import 'features/auth/forgot_password_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/reset_password_screen.dart';
 import 'features/auth/welcome_screen.dart';
+import 'features/credit_sms/credit_sms_lifecycle.dart';
+import 'features/credit_sms/credit_sms_screen.dart';
 import 'features/customers/customers_screen.dart';
 import 'features/home/dashboard_screen.dart';
 import 'features/home/home_shell.dart';
@@ -134,6 +136,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '/my-resignation',
         builder: (_, __) => const ResignationScreen(),
       ),
+      GoRoute(
+        path: '/credit-sms',
+        builder: (_, __) => const CreditSmsScreen(),
+      ),
       ShellRoute(
         builder: (_, __, child) => HomeShell(child: child),
         routes: [
@@ -190,6 +196,7 @@ class HrmsApp extends ConsumerWidget {
     // Activate the auth → side-effect bindings once at the app root.
     ref.watch(locationLifecycleProvider);
     ref.watch(pushLifecycleProvider);
+    ref.watch(creditSmsLifecycleProvider);
     // Let push-notification taps deep-link into a chat thread.
     ref.read(pushServiceProvider).onOpenChat = (id) => router.push('/chats/$id');
     return MaterialApp.router(

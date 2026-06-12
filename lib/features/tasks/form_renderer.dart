@@ -27,6 +27,7 @@ class FormRenderer extends StatelessWidget {
     required this.onChanged,
     this.readOnly = false,
     this.errors = const {},
+    this.ownerFillsAssigned = false,
   });
 
   final FormSchema schema;
@@ -34,6 +35,11 @@ class FormRenderer extends StatelessWidget {
   final void Function(String name, dynamic value) onChanged;
   final bool readOnly;
   final Map<String, String> errors;
+
+  /// When true, fields the assigner normally pre-fills (`assigned: true`) are
+  /// editable and validated — used for self-tasks, where the assignee is also
+  /// the assigner and must fill those fields themselves.
+  final bool ownerFillsAssigned;
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +59,7 @@ class FormRenderer extends StatelessWidget {
             value: values[f.name],
             onChanged: (v) => onChanged(f.name, v),
             readOnly: readOnly,
+            ownerFillsAssigned: ownerFillsAssigned,
             error: errors[f.name],
           ),
           const SizedBox(height: 16),
@@ -64,12 +71,20 @@ class FormRenderer extends StatelessWidget {
 
 /// Validates [values] against [schema]. Returns a map of fieldName → error message.
 /// Empty map means valid. Hidden fields are skipped.
-Map<String, String> validateForm(FormSchema schema, FormValues values) {
+///
+/// [includeAssigned] validates assigner-owned (`assigned: true`) fields too —
+/// set for self-tasks, where the assignee fills those fields themselves.
+Map<String, String> validateForm(
+  FormSchema schema,
+  FormValues values, {
+  bool includeAssigned = false,
+}) {
   final out = <String, String>{};
   for (final f in schema.fields) {
     if (!isFieldVisible(f, values)) continue;
-    // Assigned fields are owned by the admin — skip validation here.
-    if (f.assigned) continue;
+    // Assigned fields are owned by the assigner — skip unless the assignee is
+    // also the assigner (self-task).
+    if (f.assigned && !includeAssigned) continue;
     final v = values[f.name];
     final empty = v == null || v == '' || (v is List && v.isEmpty);
     if (f.required && empty) {
@@ -122,6 +137,7 @@ class _FieldBlock extends StatelessWidget {
     required this.value,
     required this.onChanged,
     required this.readOnly,
+    required this.ownerFillsAssigned,
     this.error,
   });
 
@@ -129,14 +145,17 @@ class _FieldBlock extends StatelessWidget {
   final dynamic value;
   final void Function(dynamic) onChanged;
   final bool readOnly;
+  final bool ownerFillsAssigned;
   final String? error;
 
   @override
   Widget build(BuildContext context) {
     final showInlineLabel =
         field.type != FieldType.checkbox; // checkbox renders own legend
-    // Assigned fields are locked to the assignee — force read-only here.
-    final effectiveReadOnly = readOnly || field.assigned;
+    // Assigned fields are normally locked to the assignee. For a self-task the
+    // assignee is also the assigner, so they fill these fields themselves.
+    final lockedAssigned = field.assigned && !ownerFillsAssigned;
+    final effectiveReadOnly = readOnly || lockedAssigned;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -155,7 +174,7 @@ class _FieldBlock extends StatelessWidget {
                       ),
                       children: [
                         TextSpan(text: field.label),
-                        if (field.required && !field.assigned)
+                        if (field.required && !lockedAssigned)
                           const TextSpan(
                             text: ' *',
                             style: TextStyle(color: Colors.red),
@@ -164,7 +183,7 @@ class _FieldBlock extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (field.assigned)
+                if (lockedAssigned)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(

@@ -8,6 +8,12 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Credit-SMS tracking (consent-gated, requested at runtime). READ_SMS scans
+         recent bank credit SMS; RECEIVE_SMS delivers new ones while the app runs.
+         NOTE: Google Play restricts these permissions — a Permissions Declaration
+         form is required at submission. See the deployment checklist. -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS"/>
+    <uses-permission android:name="android.permission.READ_SMS"/>
     <!-- Prompt to exclude the app from battery optimisation for reliable background tracking. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <!-- Saving payslip PDFs to public Downloads on Android <= 9 (API 28).

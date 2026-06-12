@@ -32,6 +32,59 @@ class TaskRepository {
     );
   }
 
+  /// Active INTERNAL task templates the employee can raise for themselves
+  /// (the "create my own task" flow on the My Tasks screen).
+  Future<List<TaskTemplate>> individualTemplates({String query = ''}) {
+    return _api.get<List<TaskTemplate>>(
+      '/api/task-templates',
+      query: {
+        'activeOnly': true,
+        'taskType': 'INTERNAL',
+        if (query.trim().isNotEmpty) 'q': query.trim(),
+        'size': 100,
+      },
+      parse: (d) {
+        final content = d is List
+            ? d
+            : ((d as Map<String, dynamic>)['content'] as List<dynamic>? ?? const []);
+        return content
+            .map((e) => TaskTemplate.fromJson(e as Map<String, dynamic>))
+            // Safety net: keep only INTERNAL templates even if the backend
+            // hasn't been redeployed with the taskType query filter yet.
+            .where((t) => !t.isCustomer)
+            .toList();
+      },
+    );
+  }
+
+  /// Raise an INTERNAL task for the calling employee from a template. The
+  /// backend sets both the assignee and assigner to the current employee, so
+  /// the task lands in their own "My Tasks" list (in TODO). Returns the created
+  /// task, which the caller then performs via the task detail screen.
+  Future<Task> createSelfTask({
+    required int templateId,
+    String? title,
+    String? description,
+    String? priority,
+    String? startDate, // ISO yyyy-MM-dd
+    String? dueDate, // ISO yyyy-MM-dd
+    String? dueTime, // HH:mm
+  }) {
+    return _api.post<Task>(
+      '/api/tasks/self-tasks',
+      body: {
+        'templateId': templateId,
+        if (title != null && title.isNotEmpty) 'title': title,
+        if (description != null && description.isNotEmpty) 'description': description,
+        if (priority != null && priority.isNotEmpty) 'priority': priority,
+        if (startDate != null && startDate.isNotEmpty) 'startDate': startDate,
+        if (dueDate != null && dueDate.isNotEmpty) 'dueDate': dueDate,
+        if (dueTime != null && dueTime.isNotEmpty) 'dueTime': dueTime,
+      },
+      parse: (d) => Task.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
   Future<List<Task>> listForEmployee(int employeeId, {String? status}) {
     return _api.get<List<Task>>(
       '/api/tasks/employee/$employeeId',

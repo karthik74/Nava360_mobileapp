@@ -72,12 +72,6 @@ class HomeShell extends ConsumerWidget {
       path: '/home',
     ),
     _Tab(
-      label: 'Leaves',
-      icon: Icons.event_available_outlined,
-      selectedIcon: Icons.event_available_rounded,
-      path: '/leaves',
-    ),
-    _Tab(
       label: 'Tasks',
       icon: Icons.task_alt_outlined,
       selectedIcon: Icons.task_alt_rounded,
@@ -112,7 +106,7 @@ class HomeShell extends ConsumerWidget {
     final loc = GoRouterState.of(context).matchedLocation;
     final user = ref.watch(authUserProvider);
     final isManager = user?.hasRole(const {'ADMIN', 'HR'}) ?? false;
-    final visibleTabs = isManager ? _bottomTabs : _bottomTabs.take(3).toList();
+    final visibleTabs = isManager ? _bottomTabs : _bottomTabs.take(2).toList();
     final index = _indexFromLocation(loc, visibleTabs);
 
     return Scaffold(

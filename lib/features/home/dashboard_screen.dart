@@ -303,13 +303,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     } else {
       heroLocation = 'Not checked in';
     }
-    final attendanceActionTitle = _attendanceActionBusy
-        ? 'Please wait...'
-        : hasCheckedOut
-            ? 'Done for today'
-            : hasCheckedIn
-                ? 'Check out now'
-                : 'Check in now';
 
     int pendingLeaves = 0;
     List<LeaveRequest> leavesList = const [];
@@ -327,11 +320,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       inProgressTasks = list.where((t) => t.status == 'IN_PROGRESS').length;
     });
 
-    int pendingApprovals = 0;
     List<LeaveRequest> teamLeavesList = const [];
     teamLeaves.whenData((list) {
       teamLeavesList = list;
-      pendingApprovals = list.where((l) => l.status == 'PENDING').length;
     });
 
     final isManager = user?.hasRole(const {'ADMIN', 'HR'}) ?? false;
@@ -436,57 +427,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 22),
-
-          // Quick actions
-          const AppSectionHeader(
-            title: 'Quick actions',
-            subtitle: 'Get things done in a tap',
-          ),
-          const SizedBox(height: 8),
-          QuickActionRow(
-            icon: Icons.fingerprint_rounded,
-            title: attendanceActionTitle,
-            description: hasCheckedOut
-                ? 'Shift completed for today'
-                : hasCheckedIn
-                    ? 'Clock out and end your shift'
-                    : 'Start your shift and background location tracking',
-            color: AppColors.primary,
-            onTap: () => _runAttendanceAction(
-              hasCheckedIn: hasCheckedIn,
-              hasCheckedOut: hasCheckedOut,
-            ),
-          ),
-          const SizedBox(height: 8),
-          QuickActionRow(
-            icon: Icons.event_available_rounded,
-            title: 'Apply for leave',
-            description: 'Submit a new leave request',
-            color: AppColors.success,
-            onTap: () => context.go('/leaves'),
-          ),
-          const SizedBox(height: 8),
-          QuickActionRow(
-            icon: Icons.task_alt_rounded,
-            title: 'View tasks',
-            description: activeTasks > 0
-                ? '$activeTasks active · tap to review'
-                : 'See what\'s on your plate',
-            color: AppColors.accent,
-            onTap: () => context.go('/tasks'),
-          ),
-          if (isManager && pendingApprovals > 0) ...[
-            const SizedBox(height: 10),
-            QuickActionRow(
-              icon: Icons.groups_2_rounded,
-              title: 'Review $pendingApprovals team request'
-                  '${pendingApprovals == 1 ? '' : 's'}',
-              description: 'Approve or decline pending leaves',
-              color: AppColors.pink,
-              onTap: () => context.go('/team'),
-            ),
-          ],
           const SizedBox(height: 22),
 
           // Today

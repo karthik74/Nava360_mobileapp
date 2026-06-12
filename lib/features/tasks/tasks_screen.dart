@@ -9,6 +9,7 @@ import 'task_detail_screen.dart';
 import 'task_models.dart';
 import 'task_repository.dart';
 import 'task_status_ui.dart';
+import 'task_template_models.dart';
 
 final _myTasksProvider =
     FutureProvider.autoDispose.family<List<Task>, String?>((ref, status) {
@@ -17,6 +18,12 @@ final _myTasksProvider =
   return ref
       .watch(taskRepositoryProvider)
       .listForEmployee(user!.employeeId!, status: status);
+});
+
+/// Active INTERNAL templates an employee can raise a self-task from.
+final _individualTemplatesProvider =
+    FutureProvider.autoDispose<List<TaskTemplate>>((ref) {
+  return ref.watch(taskRepositoryProvider).individualTemplates();
 });
 
 final _taskDashboardProvider =
@@ -73,6 +80,42 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
   _TaskFilter _selectedFilter = _TaskFilter.all;
   DateTime? _fromDate;
   DateTime? _toDate;
+  bool _creating = false;
+
+  /// Self-task creation: pick an INTERNAL template, raise the task assigned to
+  /// the current employee, then open it to fill and submit.
+  Future<void> _createSelfTask() async {
+    final template = await showModalBottomSheet<TaskTemplate>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (_) => const _TaskTemplatePickerSheet(),
+    );
+    if (template == null || !mounted) return;
+
+    setState(() => _creating = true);
+    try {
+      final task = await ref
+          .read(taskRepositoryProvider)
+          .createSelfTask(templateId: template.id);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => TaskDetailScreen(taskId: task.id)),
+      );
+      _refresh();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not create task: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _creating = false);
+    }
+  }
 
   /// Apply the optional date-range filter to a fetched list (client-side).
   /// Matches against `dueDate` — falls back to `startDate` if no due date.
@@ -132,10 +175,50 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
   Widget build(BuildContext context) {
     final tasks = ref.watch(_myTasksProvider(_selectedFilter.queryValue));
     final dashboard = ref.watch(_taskDashboardProvider);
+    final user = ref.watch(authUserProvider);
 
     final mq = MediaQuery.of(context);
     return Scaffold(
       backgroundColor: Colors.transparent,
+      // Only employees can raise a task for themselves. Lift the button above
+      // the app's custom bottom navigation bar so it never overlaps it.
+      floatingActionButton: user?.employeeId == null
+          ? null
+          : Padding(
+              padding: EdgeInsets.only(
+                bottom: mq.padding.bottom + AppChrome.bottomNavHeight,
+              ),
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: AppColors.heroGradient,
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
+                  boxShadow: AppShadows.lifted,
+                ),
+                child: FloatingActionButton.extended(
+                  heroTag: 'new_self_task_fab',
+                  onPressed: _creating ? null : _createSelfTask,
+                  backgroundColor: Colors.transparent,
+                  elevation: 0,
+                  icon: _creating
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation(Colors.white),
+                          ),
+                        )
+                      : const Icon(Icons.add_task_rounded, color: Colors.white),
+                  label: Text(
+                    _creating ? 'Creating…' : 'New task',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ),
       body: RefreshIndicator(
         color: AppColors.primary,
         backgroundColor: Colors.white.withOpacity(0.85),
@@ -699,6 +782,180 @@ class _DatePill extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────── Self-task template picker ─────────────────────
+
+/// Bottom sheet listing active INTERNAL templates the employee can raise a
+/// self-task from. Returns the chosen [TaskTemplate] via `Navigator.pop`.
+class _TaskTemplatePickerSheet extends ConsumerWidget {
+  const _TaskTemplatePickerSheet();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(_individualTemplatesProvider);
+    final mq = MediaQuery.of(context);
+    return Padding(
+      padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: mq.size.height * 0.7),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.muted.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 14, 20, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Create a task',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.ink,
+                  ),
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Pick a template to raise a task for yourself.',
+                  style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+                ),
+              ),
+            ),
+            Flexible(
+              child: async.when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.all(28),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (e, _) => Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text('Could not load templates: $e',
+                      style: const TextStyle(color: AppColors.danger)),
+                ),
+                data: (templates) {
+                  if (templates.isEmpty) {
+                    return const Padding(
+                      padding: EdgeInsets.all(28),
+                      child: Text(
+                        'No task templates are available. Ask your admin to publish one.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.muted),
+                      ),
+                    );
+                  }
+                  return ListView.separated(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+                    itemCount: templates.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, i) {
+                      final t = templates[i];
+                      return _TaskTemplateTile(
+                        template: t,
+                        onTap: () => Navigator.pop(context, t),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TaskTemplateTile extends StatelessWidget {
+  const _TaskTemplateTile({required this.template, required this.onTap});
+  final TaskTemplate template;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = template;
+    Color accent = AppColors.primary;
+    final hex = t.color;
+    if (hex != null && hex.isNotEmpty) {
+      final parsed = int.tryParse(hex.replaceFirst('#', ''), radix: 16);
+      if (parsed != null) {
+        accent = Color(parsed | 0xFF000000);
+      }
+    }
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          border: Border.all(color: AppColors.muted.withOpacity(0.18)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: accent.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: accent.withOpacity(0.22)),
+              ),
+              child: Icon(Icons.assignment_outlined, size: 19, color: accent),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    t.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                  if (t.description != null && t.description!.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      t.description!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.muted,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded,
+                size: 18, color: AppColors.muted),
+          ],
+        ),
       ),
     );
   }
