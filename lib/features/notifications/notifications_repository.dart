@@ -35,6 +35,24 @@ class NotificationsRepository {
       debugPrint('Device-token registration error: $e');
     }
   }
+
+  /// Removes this device's FCM token from the backend so it stops receiving
+  /// pushes. Called when the user disables notifications (and on logout).
+  Future<void> unregisterDeviceToken(String token) async {
+    try {
+      await _api.raw.delete<dynamic>(
+        '/api/notifications/device-tokens',
+        queryParameters: {'token': token},
+      );
+    } on DioException catch (e) {
+      debugPrint(
+        'Device-token unregister failed: '
+        '${e.response?.statusCode} ${e.message}',
+      );
+    } catch (e) {
+      debugPrint('Device-token unregister error: $e');
+    }
+  }
 }
 
 final notificationsRepositoryProvider = Provider<NotificationsRepository>(

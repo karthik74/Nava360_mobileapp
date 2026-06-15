@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme.dart';
 import 'auth_repository.dart';
 import 'login_screen.dart';
+import 'sms_otp.dart';
 
 /// First-time login / account activation:
 /// 1. Enter Employee Code → OTP sent to the registered mobile.
@@ -39,6 +40,10 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
   bool _o1 = true;
   bool _o2 = true;
 
+  // OTP SMS auto-read (SMS User Consent API — no READ_SMS permission).
+  final _smsOtp = SmsOtpListener();
+  final _otpKey = GlobalKey<_OtpInputState>();
+
   // Resend cooldown.
   Timer? _timer;
   int _cooldown = 0;
@@ -46,10 +51,25 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _smsOtp.cancel();
     _code.dispose();
     _p1.dispose();
     _p2.dispose();
     super.dispose();
+  }
+
+  /// Begin listening for the incoming OTP so it auto-fills the boxes.
+  void _listenForOtp() {
+    _smsOtp.start(
+      digits: 6,
+      onCode: (code) {
+        if (!mounted) return;
+        _otpKey.currentState?.setCode(code);
+        setState(() => _otp = code);
+        // Auto-verify once the code is complete.
+        if (code.length >= 6 && !_loading) _verifyOtp();
+      },
+    );
   }
 
   void _startCooldown([int seconds = 30]) {
@@ -69,6 +89,7 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
         context.go('/login');
         break;
       case _Step.otp:
+        _smsOtp.cancel();
         setState(() {
           _step = _Step.code;
           _error = null;
@@ -104,6 +125,7 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
         _step = _Step.otp;
       });
       _startCooldown();
+      _listenForOtp();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -121,6 +143,7 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
           .firstLoginResendOtp(_code.text.trim());
       if (!mounted) return;
       _startCooldown();
+      _listenForOtp();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('OTP resent.')),
       );
@@ -145,6 +168,7 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
           .read(authRepositoryProvider)
           .firstLoginVerifyOtp(_code.text.trim(), _otp);
       if (!mounted) return;
+      _smsOtp.cancel();
       setState(() {
         _loading = false;
         _setupToken = res.setupToken;
@@ -276,6 +300,7 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
           const AuthFieldLabel('Verification code'),
           const SizedBox(height: 8),
           _OtpInput(
+            key: _otpKey,
             length: 6,
             onChanged: (v) => setState(() => _otp = v),
           ),
@@ -397,7 +422,7 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
 // ──────────────────────────────────────────────────────────────────────
 
 class _OtpInput extends StatefulWidget {
-  const _OtpInput({required this.length, required this.onChanged});
+  const _OtpInput({super.key, required this.length, required this.onChanged});
   final int length;
   final ValueChanged<String> onChanged;
 
@@ -420,6 +445,16 @@ class _OtpInputState extends State<_OtpInput> {
       n.dispose();
     }
     super.dispose();
+  }
+
+  /// Fill the boxes from an auto-read OTP code.
+  void setCode(String code) {
+    for (var i = 0; i < _controllers.length; i++) {
+      _controllers[i].text = i < code.length ? code[i] : '';
+    }
+    final last = code.length.clamp(1, widget.length) - 1;
+    _nodes[last].requestFocus();
+    _emit();
   }
 
   void _emit() => widget.onChanged(_controllers.map((c) => c.text).join());

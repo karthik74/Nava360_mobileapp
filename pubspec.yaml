@@ -1,7 +1,7 @@
 name: nava360
 description: Nava360 mobile app — employee self-service and manager approvals.
 publish_to: "none"
-version: 0.1.2+2
+version: 0.1.5+5
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -30,10 +30,9 @@ dependencies:
   # Geolocation for punch in/out
   geolocator: ^12.0.0
 
-  # Credit-SMS tracking: read bank credit SMS (Android only) + hash for de-dupe.
-  # `another_telephony` is the maintained fork of the abandoned `telephony`.
-  another_telephony: ^0.4.1
-  crypto: ^3.0.3
+  # OTP auto-read via Google's SMS User Consent / Retriever APIs. No READ_SMS
+  # permission, so it's allowed by Play Protect (used on the OTP screens).
+  smart_auth: ^2.0.0
 
   # Battery-optimisation exemption prompt (reliable background tracking)
   permission_handler: ^11.3.1

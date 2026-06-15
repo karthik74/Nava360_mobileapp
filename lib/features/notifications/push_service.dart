@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/secure_storage.dart';
 import 'notifications_repository.dart';
 
 /// Background handler — must be a top-level / static function so Firebase can
@@ -151,6 +152,35 @@ class PushService {
     }
   }
 
+  /// Enables or disables push notifications for this device.
+  ///
+  /// Disabling unregisters the device's FCM token with the backend (so the
+  /// server stops pushing) and tears down the listeners. Enabling re-registers
+  /// the token and re-attaches listeners. The persisted preference itself is
+  /// owned by [NotificationsEnabledController]; this only applies the effect.
+  Future<void> setEnabled(bool enabled) async {
+    if (enabled) {
+      if (_started) {
+        await _registerCurrentToken();
+      } else {
+        await start();
+      }
+      return;
+    }
+    // Disabling: best-effort unregister of the current token, then stop.
+    try {
+      if (_firebaseReady) {
+        final token = await FirebaseMessaging.instance.getToken();
+        if (token != null && token.isNotEmpty) {
+          await _repo.unregisterDeviceToken(token);
+        }
+      }
+    } catch (e) {
+      debugPrint('Disable notifications: unregister failed: $e');
+    }
+    await stop();
+  }
+
   /// Stops listeners. Call on logout.
   Future<void> stop() async {
     await _foregroundSub?.cancel();
@@ -203,6 +233,12 @@ class PushService {
   }
 
   Future<void> _register(String token) async {
+    // Respect the user's notifications preference — never register the token
+    // (e.g. on a token refresh) while notifications are disabled.
+    if (!await SecureStorage.readNotificationsEnabled()) {
+      debugPrint('Notifications disabled — skipping token registration');
+      return;
+    }
     final platform = Platform.isIOS ? 'IOS' : 'ANDROID';
     debugPrint('Registering FCM token ($platform): ${_redact(token)}');
     await _repo.registerDeviceToken(token: token, platform: platform);
@@ -255,4 +291,29 @@ class PushService {
 
 final pushServiceProvider = Provider<PushService>(
   (ref) => PushService(repo: ref.watch(notificationsRepositoryProvider)),
+);
+
+/// Holds the "push notifications enabled" preference (default on) and applies
+/// changes to the [PushService]. Backed by [SecureStorage] so it persists.
+class NotificationsEnabledController extends StateNotifier<bool> {
+  NotificationsEnabledController(this._push) : super(true) {
+    _load();
+  }
+
+  final PushService _push;
+
+  Future<void> _load() async {
+    state = await SecureStorage.readNotificationsEnabled();
+  }
+
+  Future<void> setEnabled(bool enabled) async {
+    state = enabled;
+    await SecureStorage.writeNotificationsEnabled(enabled);
+    await _push.setEnabled(enabled);
+  }
+}
+
+final notificationsEnabledProvider =
+    StateNotifierProvider<NotificationsEnabledController, bool>(
+  (ref) => NotificationsEnabledController(ref.watch(pushServiceProvider)),
 );

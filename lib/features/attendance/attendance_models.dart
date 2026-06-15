@@ -1,3 +1,23 @@
+/// A configured non-working-day rule (e.g. every Sunday, 2nd Saturday).
+/// Mirrors the backend `NonWorkingDay`.
+class NonWorkingRule {
+  final String dayOfWeek; // MONDAY..SUNDAY
+  final String week; // ALL | FIRST | SECOND | THIRD | FOURTH | FIFTH | LAST
+  final bool active;
+
+  NonWorkingRule({
+    required this.dayOfWeek,
+    required this.week,
+    required this.active,
+  });
+
+  factory NonWorkingRule.fromJson(Map<String, dynamic> j) => NonWorkingRule(
+        dayOfWeek: (j['dayOfWeek'] as String?) ?? '',
+        week: (j['week'] as String?) ?? 'ALL',
+        active: j['active'] != false,
+      );
+}
+
 class AttendanceRecord {
   final int id;
   final int employeeId;

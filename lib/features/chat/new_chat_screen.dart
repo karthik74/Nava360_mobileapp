@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/env.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'chat_controller.dart';
@@ -259,7 +260,12 @@ class _ContactTile extends StatelessWidget {
           leading: Stack(
             clipBehavior: Clip.none,
             children: [
-              UserAvatar(name: contact.name, size: 40, radius: 20),
+              UserAvatar(
+                name: contact.name,
+                size: 40,
+                radius: 20,
+                imageUrl: Env.fileUrl(contact.avatarUrl),
+              ),
               if (contact.online)
                 Positioned(
                   bottom: 0,

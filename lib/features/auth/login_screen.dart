@@ -1,12 +1,10 @@
 import 'dart:ui';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/theme.dart';
 import 'auth_controller.dart';
@@ -32,15 +30,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   bool _checkingPermissions = true;
   bool _requestingPermissions = false;
   String? _permissionError;
+  bool _consentAccepted = false;
   bool _locationServiceEnabled = false;
   LocationPermission _locationPermission = LocationPermission.denied;
   AuthorizationStatus _notificationStatus = AuthorizationStatus.notDetermined;
-  PermissionStatus _smsStatus = PermissionStatus.denied;
-
-  // SMS reading is Android-only (iOS forbids it). On other platforms we never
-  // block sign-in on SMS.
-  bool get _smsSupported =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   bool get _locationReady =>
       _locationServiceEnabled &&
@@ -50,10 +43,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _notificationStatus == AuthorizationStatus.authorized ||
       _notificationStatus == AuthorizationStatus.provisional;
 
-  bool get _smsReady => !_smsSupported || _smsStatus.isGranted;
+  /// Required permissions for sign-in (SMS is optional, so it's excluded here).
+  bool get _permissionsReady => _locationReady && _notificationsReady;
 
-  bool get _permissionsReady =>
-      _locationReady && _notificationsReady && _smsReady;
+  /// Required permissions granted AND the user has ticked the consent box.
+  /// Sign-in is only enabled in this state.
+  bool get _readyToSignIn => _permissionsReady && _consentAccepted;
 
   @override
   void initState() {
@@ -104,14 +99,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           await Geolocator.isLocationServiceEnabled();
       final locationPermission = await Geolocator.checkPermission();
       final notificationStatus = await _readNotificationStatus();
-      final smsStatus =
-          _smsSupported ? await Permission.sms.status : PermissionStatus.granted;
       if (!mounted) return;
       setState(() {
         _locationServiceEnabled = locationServiceEnabled;
         _locationPermission = locationPermission;
         _notificationStatus = notificationStatus;
-        _smsStatus = smsStatus;
       });
     } catch (e) {
       if (mounted) setState(() => _permissionError = e.toString());
@@ -122,6 +114,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<bool> _ensureRequiredPermissions() async {
     if (_requestingPermissions) return false;
+    // Affirmative consent must come BEFORE we request any OS permission
+    // (Google Play prominent-disclosure requirement).
+    if (!_consentAccepted) {
+      setState(() => _permissionError =
+          'Please tick the consent box to grant the permissions below.');
+      return false;
+    }
     setState(() {
       _requestingPermissions = true;
       _permissionError = null;
@@ -167,35 +166,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         notifStatus = AuthorizationStatus.authorized;
       }
 
-      // SMS read permission (Android only). On other platforms treat as granted
-      // so it never blocks sign-in.
-      PermissionStatus smsStatus;
-      if (_smsSupported) {
-        smsStatus = await Permission.sms.status;
-        if (!smsStatus.isGranted && !smsStatus.isPermanentlyDenied) {
-          smsStatus = await Permission.sms.request();
-        }
-        if (smsStatus.isPermanentlyDenied) {
-          await openAppSettings();
-          smsStatus = await Permission.sms.status;
-        }
-      } else {
-        smsStatus = PermissionStatus.granted;
-      }
-
       if (!mounted) return false;
       setState(() {
         _locationServiceEnabled = locationServiceEnabled;
         _locationPermission = locationPermission;
         _notificationStatus = notifStatus;
-        _smsStatus = smsStatus;
       });
 
+      // Only the REQUIRED permissions (location + notifications) gate sign-in.
       if (!_permissionsReady) {
         setState(() {
-          _permissionError = _smsSupported
-              ? 'Allow location all the time, notifications, and SMS access to continue.'
-              : 'Allow location all the time and notifications to continue.';
+          _permissionError =
+              'Allow location all the time and notifications to continue.';
         });
         return false;
       }
@@ -222,7 +204,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final state = ref.watch(authControllerProvider);
     final loading = state.isLoading;
     final error = state.hasError ? state.error.toString() : null;
-    final formEnabled = !loading && _permissionsReady;
+    // Fields/navigation are usable any time (so users can fill the form while
+    // reviewing the consent below); only the Sign-in CTA waits on consent +
+    // permissions via [_readyToSignIn].
+    final formEnabled = !loading;
     final mq = MediaQuery.of(context);
     final size = mq.size;
 
@@ -324,23 +309,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               _FlashSuccess(message: widget.flash!),
                               const SizedBox(height: 16),
                             ],
-                            if (!_permissionsReady ||
-                                _checkingPermissions ||
-                                _permissionError != null) ...[
-                              _RequiredPermissionsPanel(
-                                checking: _checkingPermissions,
-                                requesting: _requestingPermissions,
-                                locationServiceEnabled: _locationServiceEnabled,
-                                locationPermission: _locationPermission,
-                                notificationStatus: _notificationStatus,
-                                smsStatus: _smsStatus,
-                                smsSupported: _smsSupported,
-                                error: _permissionError,
-                                onGrant: _ensureRequiredPermissions,
-                                onRefresh: _refreshRequiredPermissions,
-                              ),
-                              const SizedBox(height: 16),
-                            ],
                             const _FieldLabel('Username'),
                             const SizedBox(height: 8),
                             _AuthTextField(
@@ -411,12 +379,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               const SizedBox(height: 16),
                               _FlashError(message: error),
                             ],
-                            SizedBox(height: error != null ? 16 : 14),
+                            const SizedBox(height: 16),
+                            // Consent + full permission disclosure, directly
+                            // above the Sign-in button. Sign-in stays disabled
+                            // until the box is ticked and access is granted.
+                            _ConsentPanel(
+                              checking: _checkingPermissions,
+                              requesting: _requestingPermissions,
+                              locationServiceEnabled: _locationServiceEnabled,
+                              locationPermission: _locationPermission,
+                              notificationStatus: _notificationStatus,
+                              accepted: _consentAccepted,
+                              error: _permissionError,
+                              onAcceptedChanged: (v) =>
+                                  setState(() => _consentAccepted = v),
+                              onGrant: _ensureRequiredPermissions,
+                              onRefresh: _refreshRequiredPermissions,
+                            ),
+                            const SizedBox(height: 14),
                             _GradientAuthButton(
                               label: 'Sign in',
                               loading: loading,
                               done: _justSignedIn,
-                              onPressed: !formEnabled || _justSignedIn
+                              onPressed: (!_readyToSignIn || loading || _justSignedIn)
                                   ? null
                                   : _submit,
                             ),
@@ -925,16 +910,20 @@ class _FlashError extends StatelessWidget {
   }
 }
 
-class _RequiredPermissionsPanel extends StatelessWidget {
-  const _RequiredPermissionsPanel({
+/// Consent + full permission disclosure shown directly above the Sign-in
+/// button. Lists every permission the app uses and why, lets the user grant
+/// them, and carries the affirmative consent checkbox. This is the prominent
+/// disclosure Google Play expects before accessing notifications/location.
+class _ConsentPanel extends StatelessWidget {
+  const _ConsentPanel({
     required this.checking,
     required this.requesting,
     required this.locationServiceEnabled,
     required this.locationPermission,
     required this.notificationStatus,
-    required this.smsStatus,
-    required this.smsSupported,
+    required this.accepted,
     required this.error,
+    required this.onAcceptedChanged,
     required this.onGrant,
     required this.onRefresh,
   });
@@ -944,15 +933,21 @@ class _RequiredPermissionsPanel extends StatelessWidget {
   final bool locationServiceEnabled;
   final LocationPermission locationPermission;
   final AuthorizationStatus notificationStatus;
-  final PermissionStatus smsStatus;
-  final bool smsSupported;
+  final bool accepted;
   final String? error;
+  final ValueChanged<bool> onAcceptedChanged;
   final Future<bool> Function() onGrant;
   final Future<void> Function() onRefresh;
 
   bool get _notificationReady =>
       notificationStatus == AuthorizationStatus.authorized ||
       notificationStatus == AuthorizationStatus.provisional;
+
+  // The required permissions gate the Grant/Refresh buttons.
+  bool get _requiredGranted =>
+      locationServiceEnabled &&
+      locationPermission == LocationPermission.always &&
+      _notificationReady;
 
   @override
   Widget build(BuildContext context) {
@@ -969,7 +964,7 @@ class _RequiredPermissionsPanel extends StatelessWidget {
           Row(
             children: [
               const Icon(
-                Icons.verified_user_outlined,
+                Icons.privacy_tip_outlined,
                 color: AppColors.primary,
                 size: 18,
               ),
@@ -977,8 +972,8 @@ class _RequiredPermissionsPanel extends StatelessWidget {
               Expanded(
                 child: Text(
                   checking
-                      ? 'Checking required permissions...'
-                      : 'Required permissions',
+                      ? 'Checking permissions…'
+                      : 'Permissions & data consent',
                   style: const TextStyle(
                     color: AppColors.ink,
                     fontSize: 13,
@@ -988,32 +983,33 @@ class _RequiredPermissionsPanel extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          _PermissionStatusRow(
-            granted: locationServiceEnabled,
-            label: 'Location services',
-            detail: locationServiceEnabled ? 'Enabled' : 'Turn on GPS',
+          const SizedBox(height: 6),
+          const Text(
+            'Nava360 needs the access below to work. Your data is used only for '
+            'the purposes described, and you can revoke it any time in Settings.',
+            style: TextStyle(
+              color: AppColors.inkSoft,
+              fontSize: 11.5,
+              height: 1.35,
+              fontWeight: FontWeight.w500,
+            ),
           ),
-          const SizedBox(height: 7),
-          _PermissionStatusRow(
-            granted: locationPermission == LocationPermission.always,
-            label: 'Background location',
+          const SizedBox(height: 12),
+          _ConsentPermissionRow(
+            granted: locationServiceEnabled &&
+                locationPermission == LocationPermission.always,
+            label: 'Location (all the time)',
+            purpose:
+                'Records your attendance check-in/out, including in the background.',
             detail: _locationLabel(locationPermission),
           ),
-          const SizedBox(height: 7),
-          _PermissionStatusRow(
+          const SizedBox(height: 10),
+          _ConsentPermissionRow(
             granted: _notificationReady,
             label: 'Notifications',
+            purpose: 'Approvals, reminders and important alerts.',
             detail: _notificationLabel(notificationStatus),
           ),
-          if (smsSupported) ...[
-            const SizedBox(height: 7),
-            _PermissionStatusRow(
-              granted: smsStatus.isGranted,
-              label: 'SMS access',
-              detail: _smsLabel(smsStatus),
-            ),
-          ],
           if (error != null) ...[
             const SizedBox(height: 10),
             Text(
@@ -1026,29 +1022,69 @@ class _RequiredPermissionsPanel extends StatelessWidget {
               ),
             ),
           ],
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _PermissionButton(
-                  label: requesting ? 'Opening settings...' : 'Grant access',
-                  icon: Icons.lock_open_rounded,
-                  primary: true,
-                  enabled: !checking && !requesting,
-                  onTap: onGrant,
+          if (!_requiredGranted) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _PermissionButton(
+                    label: requesting ? 'Opening settings…' : 'Grant access',
+                    icon: Icons.lock_open_rounded,
+                    primary: true,
+                    enabled: !checking && !requesting,
+                    onTap: onGrant,
+                  ),
                 ),
+                const SizedBox(width: 8),
+                _PermissionButton(
+                  label: 'Refresh',
+                  icon: Icons.refresh_rounded,
+                  enabled: !checking && !requesting,
+                  onTap: () async {
+                    await onRefresh();
+                    return true;
+                  },
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 6),
+          // Affirmative consent checkbox — required to enable Sign in.
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => onAcceptedChanged(!accepted),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: Checkbox(
+                      value: accepted,
+                      onChanged: (v) => onAcceptedChanged(v ?? false),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                      activeColor: AppColors.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'I have read and agree to the permissions and data use '
+                      'described above.',
+                      style: TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              _PermissionButton(
-                label: 'Refresh',
-                icon: Icons.refresh_rounded,
-                enabled: !checking && !requesting,
-                onTap: () async {
-                  await onRefresh();
-                  return true;
-                },
-              ),
-            ],
+            ),
           ),
         ],
       ),
@@ -1083,59 +1119,76 @@ class _RequiredPermissionsPanel extends StatelessWidget {
         return 'Not granted';
     }
   }
-
-  String _smsLabel(PermissionStatus status) {
-    if (status.isGranted) return 'Allowed';
-    if (status.isPermanentlyDenied) return 'Denied in settings';
-    if (status.isRestricted) return 'Restricted';
-    return 'Not granted';
-  }
 }
 
-class _PermissionStatusRow extends StatelessWidget {
-  const _PermissionStatusRow({
+/// One permission row inside [_ConsentPanel]: status icon + label + a plain
+/// explanation of why the app needs it + the current grant status.
+class _ConsentPermissionRow extends StatelessWidget {
+  const _ConsentPermissionRow({
     required this.granted,
     required this.label,
+    required this.purpose,
     required this.detail,
   });
 
   final bool granted;
   final String label;
+  final String purpose;
   final String detail;
 
   @override
   Widget build(BuildContext context) {
     final color = granted ? AppColors.success : AppColors.warning;
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(
-          granted ? Icons.check_circle_rounded : Icons.info_outline_rounded,
-          color: color,
-          size: 17,
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(
-              color: AppColors.ink,
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-            ),
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(
+            granted ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+            color: color,
+            size: 17,
           ),
         ),
         const SizedBox(width: 8),
-        Flexible(
-          child: Text(
-            detail,
-            textAlign: TextAlign.right,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: color,
-              fontSize: 11.5,
-              fontWeight: FontWeight.w700,
-            ),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: const TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    detail,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Text(
+                purpose,
+                style: const TextStyle(
+                  color: AppColors.inkSoft,
+                  fontSize: 11,
+                  height: 1.3,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
         ),
       ],

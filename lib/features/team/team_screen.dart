@@ -6,6 +6,8 @@ import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import '../leaves/leave_models.dart';
 import '../leaves/leave_repository.dart';
+import 'team_models.dart';
+import 'team_repository.dart';
 
 final _teamLeavesProvider =
     FutureProvider.autoDispose<List<LeaveRequest>>((ref) {
@@ -20,21 +22,260 @@ class TeamScreen extends ConsumerStatefulWidget {
 }
 
 class _TeamScreenState extends ConsumerState<TeamScreen> {
-  String _filter = 'ALL'; // ALL, PENDING, APPROVED, REJECTED
+  int _tab = 0; // 0 = Members, 1 = Leaves, 2 = Attendance
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    return Column(
+      children: [
+        SizedBox(height: mq.padding.top + 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _SegmentBar(
+            value: _tab,
+            labels: const ['Members', 'Leaves', 'Attendance'],
+            onChanged: (v) => setState(() => _tab = v),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Expanded(
+          child: IndexedStack(
+            index: _tab,
+            children: const [
+              _MembersView(),
+              _LeavesView(),
+              _AttendanceView(),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Segmented control
+// ─────────────────────────────────────────────────────────────────────
+
+class _SegmentBar extends StatelessWidget {
+  const _SegmentBar({
+    required this.value,
+    required this.labels,
+    required this.onChanged,
+  });
+  final int value;
+  final List<String> labels;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < labels.length; i++)
+            Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+                onTap: () => onChanged(i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: value == i ? AppColors.primary : Colors.transparent,
+                    borderRadius: BorderRadius.circular(AppRadii.pill),
+                  ),
+                  child: Text(
+                    labels[i],
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: value == i ? Colors.white : AppColors.inkSoft,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Members tab
+// ─────────────────────────────────────────────────────────────────────
+
+class _MembersView extends ConsumerWidget {
+  const _MembersView();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(teamMembersProvider);
+    final mq = MediaQuery.of(context);
+    final pad = EdgeInsets.fromLTRB(
+      16,
+      4,
+      16,
+      mq.padding.bottom + AppChrome.bottomNavHeight + 16,
+    );
+    return RefreshIndicator(
+      color: AppColors.primary,
+      onRefresh: () async => ref.invalidate(teamMembersProvider),
+      child: async.when(
+        loading: () => const _CenterLoader(),
+        error: (e, _) => _ErrorList(
+          message: e.toString(),
+          padding: pad,
+          onRetry: () => ref.invalidate(teamMembersProvider),
+        ),
+        data: (members) {
+          if (members.isEmpty) {
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: pad,
+              children: const [
+                SizedBox(height: 40),
+                AppEmptyState(
+                  icon: Icons.groups_2_rounded,
+                  message: 'No team members report to you yet.',
+                ),
+              ],
+            );
+          }
+          return ListView.separated(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: pad,
+            itemCount: members.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 10),
+            itemBuilder: (_, i) => _MemberCard(m: members[i]),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _MemberCard extends StatelessWidget {
+  const _MemberCard({required this.m});
+  final TeamMember m;
+
+  @override
+  Widget build(BuildContext context) {
+    final meta = <String>[
+      if (m.designation != null && m.designation!.isNotEmpty) m.designation!,
+      if (m.department != null && m.department!.isNotEmpty) m.department!,
+    ].join(' · ');
+    return GlassCard(
+      padding: const EdgeInsets.all(12),
+      shadow: AppShadows.soft,
+      child: Row(
+        children: [
+          UserAvatar(name: m.name, size: 42, radius: 12),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  m.name,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.ink,
+                  ),
+                ),
+                if (meta.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    meta,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.muted,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+                if (m.branchLabel != null && m.branchLabel!.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      const Icon(Icons.location_on_outlined,
+                          size: 12, color: AppColors.muted),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          m.branchLabel!,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.inkSoft,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (m.employeeCode != null && m.employeeCode!.isNotEmpty)
+            StatusPill(label: m.employeeCode!, color: AppColors.primary),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Leaves tab (approve / reject)
+// ─────────────────────────────────────────────────────────────────────
+
+class _LeavesView extends ConsumerStatefulWidget {
+  const _LeavesView();
+
+  @override
+  ConsumerState<_LeavesView> createState() => _LeavesViewState();
+}
+
+class _LeavesViewState extends ConsumerState<_LeavesView> {
+  String _filter = 'ALL';
 
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authUserProvider);
     final canReview = user?.hasRole(const {'ADMIN', 'HR'}) ?? false;
     final leaves = ref.watch(_teamLeavesProvider);
-
     final mq = MediaQuery.of(context);
+    final pad = EdgeInsets.fromLTRB(
+      16,
+      4,
+      16,
+      mq.padding.bottom + AppChrome.bottomNavHeight + 16,
+    );
+
     return RefreshIndicator(
       color: AppColors.primary,
-      backgroundColor: Colors.white.withOpacity(0.85),
       onRefresh: () async => ref.invalidate(_teamLeavesProvider),
       child: leaves.when(
-        data: (rows) {
+        loading: () => const _CenterLoader(),
+        error: (e, _) => _ErrorList(
+          message: e.toString(),
+          padding: pad,
+          onRetry: () => ref.invalidate(_teamLeavesProvider),
+        ),
+        data: (allRows) {
+          // Cancelled leaves are not relevant to a reviewer — hide them.
+          final rows =
+              allRows.where((r) => r.status != 'CANCELLED').toList();
           final pending = rows.where((r) => r.status == 'PENDING').length;
           final approved = rows.where((r) => r.status == 'APPROVED').length;
           final rejected = rows.where((r) => r.status == 'REJECTED').length;
@@ -43,15 +284,8 @@ class _TeamScreenState extends ConsumerState<TeamScreen> {
               : rows.where((r) => r.status == _filter).toList();
 
           return ListView(
-            physics: const BouncingScrollPhysics(
-              parent: AlwaysScrollableScrollPhysics(),
-            ),
-            padding: EdgeInsets.fromLTRB(
-              16,
-              mq.padding.top + AppChrome.appBarHeight + 12,
-              16,
-              mq.padding.bottom + AppChrome.bottomNavHeight + 16,
-            ),
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: pad,
             children: [
               _TeamSummary(
                 total: rows.length,
@@ -59,7 +293,7 @@ class _TeamScreenState extends ConsumerState<TeamScreen> {
                 approved: approved,
                 rejected: rejected,
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               _FilterBar(
                 value: _filter,
                 onChanged: (v) => setState(() => _filter = v),
@@ -70,50 +304,369 @@ class _TeamScreenState extends ConsumerState<TeamScreen> {
                   'REJECTED': rejected,
                 },
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
               if (filtered.isEmpty)
                 const AppEmptyState(
-                  icon: Icons.groups_2_rounded,
+                  icon: Icons.event_available_rounded,
                   message: 'Nothing here right now.',
                 )
               else
-                Column(
-                  children: [
-                    for (final r in filtered)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _TeamLeaveCard(
-                          r: r,
-                          canReview: canReview && r.status == 'PENDING',
-                          reviewerEmployeeId: user?.employeeId,
-                          onReviewed: () => ref.invalidate(_teamLeavesProvider),
-                        ),
-                      ),
-                  ],
-                ),
+                for (final r in filtered)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _TeamLeaveCard(
+                      r: r,
+                      canReview: canReview && r.status == 'PENDING',
+                      reviewerEmployeeId: user?.employeeId,
+                      onReviewed: () => ref.invalidate(_teamLeavesProvider),
+                    ),
+                  ),
             ],
           );
         },
-        loading: () => const Center(
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Attendance tab (regularization approve / reject)
+// ─────────────────────────────────────────────────────────────────────
+
+class _AttendanceView extends ConsumerStatefulWidget {
+  const _AttendanceView();
+
+  @override
+  ConsumerState<_AttendanceView> createState() => _AttendanceViewState();
+}
+
+class _AttendanceViewState extends ConsumerState<_AttendanceView> {
+  String _filter = 'ALL';
+
+  @override
+  Widget build(BuildContext context) {
+    final user = ref.watch(authUserProvider);
+    final async = ref.watch(teamRegularizationsProvider);
+    final mq = MediaQuery.of(context);
+    final pad = EdgeInsets.fromLTRB(
+      16,
+      4,
+      16,
+      mq.padding.bottom + AppChrome.bottomNavHeight + 16,
+    );
+
+    return RefreshIndicator(
+      color: AppColors.primary,
+      onRefresh: () async => ref.invalidate(teamRegularizationsProvider),
+      child: async.when(
+        loading: () => const _CenterLoader(),
+        error: (e, _) => _ErrorList(
+          message: e.toString(),
+          padding: pad,
+          onRetry: () => ref.invalidate(teamRegularizationsProvider),
+        ),
+        data: (rows) {
+          final pending = rows.where((r) => r.status == 'PENDING').length;
+          final approved = rows.where((r) => r.status == 'APPROVED').length;
+          final rejected = rows.where((r) => r.status == 'REJECTED').length;
+          final filtered = _filter == 'ALL'
+              ? rows
+              : rows.where((r) => r.status == _filter).toList();
+          // Pending first within the current filter.
+          final sorted = [
+            ...filtered.where((r) => r.isPending),
+            ...filtered.where((r) => !r.isPending),
+          ];
+
+          return ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: pad,
+            children: [
+              _TeamSummary(
+                total: rows.length,
+                pending: pending,
+                approved: approved,
+                rejected: rejected,
+              ),
+              const SizedBox(height: 16),
+              _FilterBar(
+                value: _filter,
+                onChanged: (v) => setState(() => _filter = v),
+                counts: {
+                  'ALL': rows.length,
+                  'PENDING': pending,
+                  'APPROVED': approved,
+                  'REJECTED': rejected,
+                },
+              ),
+              const SizedBox(height: 14),
+              if (sorted.isEmpty)
+                const AppEmptyState(
+                  icon: Icons.fact_check_outlined,
+                  message: 'Nothing here right now.',
+                )
+              else
+                for (final r in sorted)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _RegularizationCard(
+                      r: r,
+                      reviewerEmployeeId: user?.employeeId,
+                      onReviewed: () =>
+                          ref.invalidate(teamRegularizationsProvider),
+                    ),
+                  ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _RegularizationCard extends ConsumerStatefulWidget {
+  const _RegularizationCard({
+    required this.r,
+    required this.reviewerEmployeeId,
+    required this.onReviewed,
+  });
+  final RegularizationRequest r;
+  final int? reviewerEmployeeId;
+  final VoidCallback onReviewed;
+
+  @override
+  ConsumerState<_RegularizationCard> createState() =>
+      _RegularizationCardState();
+}
+
+class _RegularizationCardState extends ConsumerState<_RegularizationCard> {
+  bool _busy = false;
+
+  Future<void> _review(String status) async {
+    final comment = await _promptComment(status);
+    if (comment == null) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(teamRepositoryProvider).reviewRegularization(
+            widget.r.id,
+            status: status,
+            reviewerEmployeeId: widget.reviewerEmployeeId,
+            comment: comment.isEmpty ? null : comment,
+          );
+      widget.onReviewed();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<String?> _promptComment(String status) {
+    final c = TextEditingController();
+    final isApprove = status == 'APPROVED';
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isApprove ? 'Approve regularization' : 'Reject regularization'),
+        content: TextField(
+          controller: c,
+          maxLines: 2,
+          decoration: const InputDecoration(hintText: 'Add a comment (optional)'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: isApprove ? AppColors.success : AppColors.danger,
+            ),
+            onPressed: () => Navigator.pop(ctx, c.text),
+            child: Text(isApprove ? 'Approve' : 'Reject'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.r;
+    final tone = r.statusTone;
+    return GlassCard(
+      padding: const EdgeInsets.all(14),
+      shadow: AppShadows.soft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              UserAvatar(name: r.employeeName ?? '?', size: 36, radius: 11),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      r.employeeName ?? 'Employee',
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      [
+                        if (r.date != null) r.date!,
+                        if (r.requestedStatus != null) r.requestedStatus!,
+                      ].join(' · '),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              StatusPill(label: tone.label, color: tone.color),
+            ],
+          ),
+          if (r.timeSummary.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                border: Border.all(color: AppColors.hairline),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.schedule_rounded,
+                      size: 13, color: AppColors.primary),
+                  const SizedBox(width: 6),
+                  Text(
+                    r.timeSummary,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (r.reason != null && r.reason!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.format_quote_rounded,
+                    size: 13, color: AppColors.muted),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    r.reason!,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.inkSoft,
+                      fontStyle: FontStyle.italic,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (r.isPending) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _ActionButton(
+                    icon: Icons.check_rounded,
+                    label: 'Approve',
+                    color: AppColors.success,
+                    onTap: _busy ? null : () => _review('APPROVED'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _ActionButton(
+                    icon: Icons.close_rounded,
+                    label: 'Reject',
+                    color: AppColors.danger,
+                    outlined: true,
+                    onTap: _busy ? null : () => _review('REJECTED'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Shared small widgets
+// ─────────────────────────────────────────────────────────────────────
+
+class _CenterLoader extends StatelessWidget {
+  const _CenterLoader();
+  @override
+  Widget build(BuildContext context) {
+    // Wrapped so RefreshIndicator's pull-to-refresh still works while loading.
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: const [
+        SizedBox(height: 140),
+        Center(
           child: SizedBox(
             width: 28,
             height: 28,
             child: CircularProgressIndicator(strokeWidth: 2.5),
           ),
         ),
-        error: (e, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              e.toString(),
-              style: const TextStyle(color: AppColors.danger),
-            ),
-          ),
-        ),
-      ),
+      ],
     );
   }
 }
+
+class _ErrorList extends StatelessWidget {
+  const _ErrorList({
+    required this.message,
+    required this.padding,
+    required this.onRetry,
+  });
+  final String message;
+  final EdgeInsets padding;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: padding,
+      children: [
+        const SizedBox(height: 8),
+        AppErrorPanel(message: message, onRetry: onRetry),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Leaves summary + filter + card (unchanged behaviour)
+// ─────────────────────────────────────────────────────────────────────
 
 class _TeamSummary extends StatelessWidget {
   const _TeamSummary({
@@ -141,114 +694,63 @@ class _TeamSummary extends StatelessWidget {
           ),
         ],
       ),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topRight,
-                  end: Alignment.bottomLeft,
-                  colors: [
-                    Colors.white.withOpacity(0.14),
-                    Colors.transparent,
-                    Colors.black.withOpacity(0.05),
-                  ],
-                  stops: const [0, 0.56, 1],
-                ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$total request${total == 1 ? '' : 's'}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
               ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(height: 2),
+            Text(
+              pending > 0
+                  ? '$pending pending your review'
+                  : 'All caught up — nice work',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.85),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
               children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 9, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.18),
-                        borderRadius: BorderRadius.circular(AppRadii.pill),
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.25),
-                        ),
-                      ),
-                      child: const Text(
-                        'TEAM',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  '$total request${total == 1 ? '' : 's'}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
+                Expanded(
+                  child: _MiniStat(
+                    label: 'Pending',
+                    value: pending,
+                    color: const Color(0xFFFBBF24),
                   ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  pending > 0
-                      ? '$pending pending your review'
-                      : 'All caught up — nice work',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.85),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
+                Container(
+                    width: 1, height: 28, color: Colors.white.withOpacity(0.18)),
+                Expanded(
+                  child: _MiniStat(
+                    label: 'Approved',
+                    value: approved,
+                    color: const Color(0xFF34D399),
                   ),
                 ),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _MiniStat(
-                        label: 'Pending',
-                        value: pending,
-                        color: const Color(0xFFFBBF24),
-                      ),
-                    ),
-                    Container(
-                      width: 1,
-                      height: 28,
-                      color: Colors.white.withOpacity(0.18),
-                    ),
-                    Expanded(
-                      child: _MiniStat(
-                        label: 'Approved',
-                        value: approved,
-                        color: const Color(0xFF34D399),
-                      ),
-                    ),
-                    Container(
-                      width: 1,
-                      height: 28,
-                      color: Colors.white.withOpacity(0.18),
-                    ),
-                    Expanded(
-                      child: _MiniStat(
-                        label: 'Rejected',
-                        value: rejected,
-                        color: const Color(0xFFF87171),
-                      ),
-                    ),
-                  ],
+                Container(
+                    width: 1, height: 28, color: Colors.white.withOpacity(0.18)),
+                Expanded(
+                  child: _MiniStat(
+                    label: 'Rejected',
+                    value: rejected,
+                    color: const Color(0xFFF87171),
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -362,10 +864,10 @@ class _FilterChip extends StatelessWidget {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: selected ? AppColors.ink : Colors.white.withOpacity(0.55),
+          color: selected ? AppColors.ink : AppColors.surfaceAlt,
           borderRadius: BorderRadius.circular(AppRadii.pill),
           border: Border.all(
-            color: selected ? AppColors.ink : Colors.white.withOpacity(0.55),
+            color: selected ? AppColors.ink : AppColors.hairline,
           ),
         ),
         child: Row(
@@ -385,7 +887,7 @@ class _FilterChip extends StatelessWidget {
               decoration: BoxDecoration(
                 color: selected
                     ? Colors.white.withOpacity(0.18)
-                    : Colors.white.withOpacity(0.7),
+                    : AppColors.surface,
                 borderRadius: BorderRadius.circular(AppRadii.pill),
               ),
               child: Text(
@@ -452,36 +954,7 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
     return showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-        ),
-        title: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: (isApprove ? AppColors.success : AppColors.danger)
-                    .withOpacity(0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                isApprove ? Icons.check_circle_rounded : Icons.cancel_rounded,
-                size: 18,
-                color: isApprove ? AppColors.success : AppColors.danger,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              isApprove ? 'Approve request' : 'Reject request',
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
+        title: Text(isApprove ? 'Approve request' : 'Reject request'),
         content: TextField(
           controller: c,
           decoration: const InputDecoration(
@@ -506,31 +979,10 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
     );
   }
 
-  String _initials(String? name) {
-    if (name == null || name.trim().isEmpty) return '?';
-    final parts = name.trim().split(RegExp(r'\s+'));
-    final letters = parts.take(2).map((p) => p[0].toUpperCase()).join();
-    return letters;
-  }
-
-  Color _avatarColor(String? name) {
-    final hash = (name ?? '?').hashCode.abs();
-    const colors = [
-      Color(0xFF6366F1),
-      Color(0xFF8B5CF6),
-      Color(0xFFEC4899),
-      Color(0xFF10B981),
-      Color(0xFF3B82F6),
-      Color(0xFFF59E0B),
-    ];
-    return colors[hash % colors.length];
-  }
-
   @override
   Widget build(BuildContext context) {
     final r = widget.r;
     final tone = StatusTone.forLeave(r.status);
-    final avatarColor = _avatarColor(r.employeeName);
 
     return GlassCard(
       padding: const EdgeInsets.all(14),
@@ -540,30 +992,7 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
         children: [
           Row(
             children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      avatarColor,
-                      avatarColor.withOpacity(0.7),
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  _initials(r.employeeName),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
+              UserAvatar(name: r.employeeName ?? '?', size: 36, radius: 11),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -596,9 +1025,9 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.45),
+              color: AppColors.surfaceAlt,
               borderRadius: BorderRadius.circular(AppRadii.md),
-              border: Border.all(color: Colors.white.withOpacity(0.55)),
+              border: Border.all(color: AppColors.hairline),
             ),
             child: Row(
               children: [
@@ -704,15 +1133,6 @@ class _ActionButton extends StatelessWidget {
                 ? Border.all(color: color.withOpacity(0.5), width: 1.3)
                 : null,
             borderRadius: BorderRadius.circular(AppRadii.md),
-            boxShadow: outlined || disabled
-                ? null
-                : [
-                    BoxShadow(
-                      color: color.withOpacity(0.28),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,

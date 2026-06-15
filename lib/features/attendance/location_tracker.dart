@@ -63,11 +63,12 @@ class LocationTrackerState {
 /// Captures GPS samples on an adaptive schedule while the employee is "punched in"
 /// and posts them to the server in batches.
 ///
-/// Cadence:
+/// Cadence (tuned for an accurate travel path while limiting battery use):
 ///   - Default                  → 5 minutes
-///   - Moving fast (>3 m/s)     → 2 minutes
+///   - Moving fast (>3 m/s)     → 1 minute
 ///   - Stopped (<0.5 m/s)       → 30 minutes
-///   - Distance-triggered       → 200 m (Geolocator stream filter)
+///   - Distance-triggered       → 75 m moved
+///   - Hard cap                 → at most one ping per 15 s
 ///
 /// The tracker self-flushes when its buffer reaches [_flushAtCount] or
 /// [_flushIntervalSeconds] have passed since the last successful upload.
@@ -78,14 +79,16 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
 
   // ---- Tunables ----
   static const Duration _intervalDefault = Duration(minutes: 5);
-  static const Duration _intervalMoving = Duration(minutes: 2);
+  static const Duration _intervalMoving = Duration(minutes: 1);
   static const Duration _intervalStopped = Duration(minutes: 30);
   static const double _movingThresholdMps = 3.0;
   static const double _stoppedThresholdMps = 0.5;
-  static const int _distanceFilterMeters = 200;
+  static const int _distanceFilterMeters = 75;
   static const int _flushAtCount = 5;
   static const int _flushIntervalSeconds = 120;
-  static const Duration _tick = Duration(seconds: 30);
+  static const Duration _tick = Duration(seconds: 15);
+  /// Minimum gap between two captured route pings (burst guard).
+  static const Duration _minCaptureGap = Duration(seconds: 15);
   // How often the foreground timer fires a location-on/off heartbeat.
   static const Duration _statusInterval = Duration(minutes: 3);
   // Minimum gap between heartbeats (the location stream also triggers them, so they
@@ -93,7 +96,7 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
   static const Duration _statusMinGap = Duration(seconds: 90);
   // OS location-update interval. Drives the stream on a timer (not just on movement)
   // so heartbeats keep flowing in the background even when the device is stationary.
-  static const Duration _streamInterval = Duration(minutes: 2);
+  static const Duration _streamInterval = Duration(minutes: 1);
 
   // ---- Persistent key (so we can resume after a process restart) ----
   static const _kActiveEmployee = 'tracker.activeEmployeeId';
@@ -259,9 +262,9 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
             _distanceFilterMeters;
 
     if (!dueByTime && !movedFar) return;
-    // Avoid bursts — at most one ping per 30s.
+    // Avoid bursts — at most one ping per _minCaptureGap.
     if (_lastCaptureAt != null &&
-        now.difference(_lastCaptureAt!) < const Duration(seconds: 30)) {
+        now.difference(_lastCaptureAt!) < _minCaptureGap) {
       return;
     }
 

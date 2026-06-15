@@ -2,19 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'core/api_client.dart';
 import 'core/theme.dart';
 import 'features/app_version/app_version_gate.dart';
 import 'features/attendance/attendance_screen.dart';
 import 'features/attendance/location_lifecycle.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/welcome_seen_controller.dart';
+import 'features/auth/change_password_screen.dart';
 import 'features/auth/first_login_screen.dart';
 import 'features/auth/forgot_password_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/reset_password_screen.dart';
 import 'features/auth/welcome_screen.dart';
-import 'features/credit_sms/credit_sms_lifecycle.dart';
-import 'features/credit_sms/credit_sms_screen.dart';
+import 'features/interviews/interviews_screen.dart';
+import 'features/requisitions/create_requisition_screen.dart';
+import 'features/requisitions/requisitions_screen.dart';
+import 'features/support/help_support_screen.dart';
 import 'features/customers/customers_screen.dart';
 import 'features/home/dashboard_screen.dart';
 import 'features/home/home_shell.dart';
@@ -107,6 +111,26 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const ProfileScreen(),
       ),
       GoRoute(
+        path: '/change-password',
+        builder: (_, __) => const ChangePasswordScreen(),
+      ),
+      GoRoute(
+        path: '/help-support',
+        builder: (_, __) => const HelpSupportScreen(),
+      ),
+      GoRoute(
+        path: '/interviews',
+        builder: (_, __) => const InterviewsScreen(),
+      ),
+      GoRoute(
+        path: '/requisitions',
+        builder: (_, __) => const RequisitionsScreen(),
+      ),
+      GoRoute(
+        path: '/requisitions/new',
+        builder: (_, __) => const CreateRequisitionScreen(),
+      ),
+      GoRoute(
         path: '/notifications',
         builder: (_, __) => const NotificationsScreen(),
       ),
@@ -135,10 +159,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/my-resignation',
         builder: (_, __) => const ResignationScreen(),
-      ),
-      GoRoute(
-        path: '/credit-sms',
-        builder: (_, __) => const CreditSmsScreen(),
       ),
       ShellRoute(
         builder: (_, __, child) => HomeShell(child: child),
@@ -196,7 +216,13 @@ class HrmsApp extends ConsumerWidget {
     // Activate the auth → side-effect bindings once at the app root.
     ref.watch(locationLifecycleProvider);
     ref.watch(pushLifecycleProvider);
-    ref.watch(creditSmsLifecycleProvider);
+    // On any 401, clear credentials and bounce to /login. Set once (??=) so
+    // rebuilds don't re-wire it. Read the notifier lazily inside the callback so
+    // we always hit the live controller.
+    final api = ref.read(apiClientProvider);
+    api.onUnauthorized ??= () {
+      ref.read(authControllerProvider.notifier).sessionExpired();
+    };
     // Let push-notification taps deep-link into a chat thread.
     ref.read(pushServiceProvider).onOpenChat = (id) => router.push('/chats/$id');
     return MaterialApp.router(

@@ -55,6 +55,9 @@ class ApiClient {
         handler.next(options);
       },
       onError: (e, handler) {
+        if (e.response?.statusCode == 401) {
+          onUnauthorized?.call();
+        }
         handler.next(e);
       },
     ));
@@ -76,6 +79,13 @@ class ApiClient {
   late final Dio _dio;
 
   Dio get raw => _dio;
+
+  /// Invoked whenever an authenticated request comes back 401. Wired at the app
+  /// root to clear stored credentials and bounce the user to the login screen.
+  /// This is how a device that was signed out remotely (because the same user
+  /// logged in elsewhere, displacing this session) cleanly recovers instead of
+  /// looping on 401s.
+  void Function()? onUnauthorized;
 
   Future<T> get<T>(
     String path, {

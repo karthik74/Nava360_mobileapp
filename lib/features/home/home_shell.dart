@@ -37,8 +37,12 @@ final _drawerActiveTasksProvider = FutureProvider.autoDispose<int>((ref) async {
       .length;
 });
 
+/// Employee profile cache. NOT autoDispose — fetched once per session and
+/// reused, so opening the drawer (or other consumers) doesn't re-hit
+/// /api/employees/{id} every time. Invalidate it after a profile edit
+/// (e.g. photo upload) to refresh.
 final employeeProfileProvider =
-    FutureProvider.autoDispose.family<Map<String, dynamic>?, int>((ref, employeeId) async {
+    FutureProvider.family<Map<String, dynamic>?, int>((ref, employeeId) async {
   final api = ref.watch(apiClientProvider);
   try {
     return await api.get<Map<String, dynamic>>(
@@ -207,7 +211,9 @@ class HomeShell extends ConsumerWidget {
           ),
         ),
       ),
-      bottomNavigationBar: ClipRect(
+      // Hidden on the attendance screen so it never overlaps the day-action
+      // sheets' submit buttons.
+      bottomNavigationBar: loc.startsWith('/attendance') ? null : ClipRect(
         child: BackdropFilter(
           filter: ImageFilter.blur(
             sigmaX: GlassBlur.chrome,
@@ -297,7 +303,6 @@ class _HamburgerButton extends StatelessWidget {
 //   • Search field  (filters nav items locally)
 //   • Nav           (Overview / Workspace sections with badges)
 //   • + New leave   (dashed-bordered action)
-//   • Footer nav    (Settings, Help)
 //   • User card     (avatar + status dot + email + sign-out)
 // ─────────────────────────────────────────────────────────────────────
 
@@ -405,6 +410,24 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
           accent: AppColors.pink,
           badge: pendingApprovals > 0 ? pendingApprovals : null,
         ),
+      // Recruitment — shown per the user's permissions (INTERVIEW_VIEW /
+      // REQUISITION_CREATE). HR, DHR, RHR, RM and Admin get these.
+      if (user?.hasPermission('INTERVIEW_VIEW') ?? false)
+        const _NavItemData(
+          label: 'My Interviews',
+          icon: Icons.event_note_rounded,
+          path: '/interviews',
+          accent: AppColors.primary,
+          isPush: true,
+        ),
+      if (user?.hasPermission('REQUISITION_CREATE') ?? false)
+        const _NavItemData(
+          label: 'Job Requisitions',
+          icon: Icons.work_outline_rounded,
+          path: '/requisitions',
+          accent: AppColors.pink,
+          isPush: true,
+        ),
       const _NavItemData(
         label: 'My Meetings',
         icon: Icons.event_rounded,
@@ -509,30 +532,6 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
                       ],
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
-                    child: Container(
-                      height: 1,
-                      color: Colors.white.withOpacity(0.55),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Column(
-                      children: [
-                        _DrawerFooterLink(
-                          icon: Icons.settings_outlined,
-                          label: 'Settings',
-                          onTap: () => Navigator.pop(context),
-                        ),
-                        _DrawerFooterLink(
-                          icon: Icons.help_outline_rounded,
-                          label: 'Help & support',
-                          onTap: () => Navigator.pop(context),
-                        ),
-                      ],
-                    ),
-                  ),
                   const SizedBox(height: 10),
                   Padding(
                     padding: EdgeInsets.fromLTRB(
@@ -546,8 +545,15 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
                       email: user?.email ?? '',
                       role: user?.role ?? 'EMPLOYEE',
                       onSignOut: () {
+                        // Capture the notifier BEFORE popping the drawer — once
+                        // the drawer is popped this State (and its `ref`) is
+                        // disposed, so reading `ref` later would throw. The
+                        // notifier itself lives in the ProviderContainer and is
+                        // safe to use afterwards.
+                        final auth =
+                            ref.read(authControllerProvider.notifier);
                         Navigator.pop(context);
-                        _showLogoutDialog(context, ref);
+                        _showLogoutDialog(context, auth);
                       },
                     ),
                   ),
@@ -560,7 +566,7 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
     );
   }
 
-  void _showLogoutDialog(BuildContext context, WidgetRef ref) {
+  void _showLogoutDialog(BuildContext context, AuthController auth) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -585,7 +591,7 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
             style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             onPressed: () {
               Navigator.pop(ctx);
-              ref.read(authControllerProvider.notifier).logout();
+              auth.logout();
             },
             child: const Text('Sign out'),
           ),
@@ -623,10 +629,8 @@ class _DrawerBrandRow extends ConsumerWidget {
         ? rawCode
         : _formatEmployeeCode(user?.employeeId);
         
-    final rawName = profile != null
-        ? '${profile['firstName'] ?? ''} ${profile['lastName'] ?? ''}'.trim()
-        : (user?.username ?? 'User');
-    final name = rawName.isNotEmpty ? rawName : (user?.username ?? 'User');
+    // Name comes from the cached login user — shown instantly, no API wait.
+    final name = user?.displayName ?? 'User';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
@@ -1026,51 +1030,6 @@ class _DrawerBadge extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────
 // Footer link (small, muted)
 // ─────────────────────────────────────────────────────────────────────
-
-class _DrawerFooterLink extends StatelessWidget {
-  const _DrawerFooterLink({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(AppRadii.md),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        onTap: onTap,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 40),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                Icon(icon, size: 16, color: AppColors.muted),
-                const SizedBox(width: 12),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.inkSoft,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────
 // User card at the bottom (avatar + status dot + name/email + sign-out)

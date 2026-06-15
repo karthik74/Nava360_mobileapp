@@ -7,7 +7,18 @@ class Env {
   /// `http://localhost:8080`; a physical device needs your LAN IP.
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-   // defaultValue: 'https://hrms.navachetanalivelihoods.com/',
-    defaultValue: 'http://192.168.0.94:8443/',
+    defaultValue: 'https://hrms.navachetanalivelihoods.com/',
+    //defaultValue: 'http://192.168.0.94:8443/',
   );
+
+  /// Builds an absolute URL for a backend file path (e.g. "/api/files/12").
+  /// Returns null for empty input; passes absolute URLs through unchanged.
+  static String? fileUrl(String? path) {
+    if (path == null || path.trim().isEmpty) return null;
+    if (path.startsWith('http://') || path.startsWith('https://')) return path;
+    final base =
+        apiBaseUrl.endsWith('/') ? apiBaseUrl.substring(0, apiBaseUrl.length - 1) : apiBaseUrl;
+    return base + (path.startsWith('/') ? path : '/$path');
+  }
+  
 }

@@ -32,6 +32,16 @@ class AuthController extends StateNotifier<AsyncValue<AuthUser?>> {
     await _repo.logout();
     state = const AsyncValue.data(null);
   }
+
+  /// Called when the backend rejects our token (HTTP 401) — typically because
+  /// this session was displaced by a login on another device. Clears the stored
+  /// credentials and flips to signed-out so the router redirects to /login.
+  Future<void> sessionExpired() async {
+    // Already signed out — nothing to do (avoids redundant redirects/loops).
+    if (state.asData?.value == null) return;
+    await _repo.logout();
+    state = const AsyncValue.data(null);
+  }
 }
 
 final authControllerProvider =

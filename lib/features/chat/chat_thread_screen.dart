@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:file_picker/file_picker.dart';
@@ -28,10 +29,17 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   final _scrollCtrl = ScrollController();
   bool _sending = false;
 
+  /// The message currently being replied to (null = not replying).
+  ChatMessage? _replyingTo;
+
+  /// The current "@..." token being typed (without the @); null = not tagging.
+  String? _mentionQuery;
+
   @override
   void initState() {
     super.initState();
     _scrollCtrl.addListener(_onScroll);
+    _msgCtrl.addListener(_onTextChanged);
   }
 
   @override
@@ -56,12 +64,17 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   Future<void> _send() async {
     final text = _msgCtrl.text.trim();
     if (text.isEmpty || _sending) return;
-    setState(() => _sending = true);
+    final replyId = _replyingTo?.id;
+    setState(() {
+      _sending = true;
+      _replyingTo = null;
+    });
     _msgCtrl.clear();
     try {
       final sent = await ref
           .read(chatRepositoryProvider)
-          .sendMessage(widget.conversation.id, content: text);
+          .sendMessage(widget.conversation.id,
+              content: text, replyToMessageId: replyId);
       // Show it right away (deduped against any later WebSocket echo).
       ref
           .read(chatMessagesProvider(widget.conversation.id).notifier)
@@ -89,6 +102,62 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
         );
       }
     });
+  }
+
+  // ── @mention tagging ─────────────────────────────────────────────────────────
+
+  static final _mentionRegExp = RegExp(r'(^|\s)@([^\s@]*)$');
+
+  /// Recomputes the active @token (the word being typed before the caret).
+  void _onTextChanged() {
+    final sel = _msgCtrl.selection;
+    final text = _msgCtrl.text;
+    String? query;
+    if (sel.isValid && sel.start == sel.end && sel.start >= 0 && sel.start <= text.length) {
+      final upToCaret = text.substring(0, sel.start);
+      final m = _mentionRegExp.firstMatch(upToCaret);
+      if (m != null) query = m.group(2);
+    }
+    if (query != _mentionQuery) {
+      setState(() => _mentionQuery = query);
+    }
+  }
+
+  /// Conversation members matching the current @token (self excluded).
+  List<ChatContact> _mentionMatches() {
+    if (_mentionQuery == null) return const [];
+    final myId = ref.read(authUserProvider)?.employeeId;
+    final q = _mentionQuery!.toLowerCase();
+    return widget.conversation.members
+        .where((c) => c.employeeId != myId)
+        .where((c) => q.isEmpty || c.name.toLowerCase().contains(q))
+        .take(20)
+        .toList();
+  }
+
+  /// Replaces the active @token with "@<name> " and dismisses the picker.
+  void _applyMention(ChatContact c) {
+    final text = _msgCtrl.text;
+    final caret = _msgCtrl.selection.start;
+    if (caret < 0) {
+      setState(() => _mentionQuery = null);
+      return;
+    }
+    final upToCaret = text.substring(0, caret);
+    final m = _mentionRegExp.firstMatch(upToCaret);
+    if (m == null) {
+      setState(() => _mentionQuery = null);
+      return;
+    }
+    // Start index of the '@' (skip the leading whitespace group, if any).
+    final atIndex = m.start + (m.group(1)?.length ?? 0);
+    final insert = '@${c.name} ';
+    final newText = text.replaceRange(atIndex, caret, insert);
+    _msgCtrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: atIndex + insert.length),
+    );
+    setState(() => _mentionQuery = null);
   }
 
   // ── Emoji picker ───────────────────────────────────────────────────────────
@@ -191,7 +260,9 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   Future<void> _pickImage(ImageSource source) async {
     try {
       final picked = await ImagePicker().pickImage(source: source, imageQuality: 80);
-      if (picked != null) await _sendAttachment(picked.path, picked.name);
+      if (picked != null) {
+        await _promptCaptionAndSend(picked.path, picked.name, isImage: true);
+      }
     } catch (e) {
       _attachError(e);
     }
@@ -202,21 +273,44 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
       final result = await FilePicker.platform.pickFiles();
       final path = result?.files.single.path;
       if (path != null) {
-        await _sendAttachment(path, result!.files.single.name);
+        await _promptCaptionAndSend(path, result!.files.single.name,
+            isImage: false);
       }
     } catch (e) {
       _attachError(e);
     }
   }
 
-  Future<void> _sendAttachment(String path, String name) async {
+  /// Shows a preview with an optional caption, then sends. Returns early if the
+  /// user backs out (caption screen popped with null).
+  Future<void> _promptCaptionAndSend(String path, String name,
+      {required bool isImage}) async {
+    if (!mounted) return;
+    final caption = await Navigator.of(context).push<String?>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _AttachmentCaptionScreen(
+          filePath: path,
+          fileName: name,
+          isImage: isImage,
+        ),
+      ),
+    );
+    if (caption == null) return; // cancelled
+    await _sendAttachment(path, name, caption: caption);
+  }
+
+  Future<void> _sendAttachment(String path, String name,
+      {String? caption}) async {
     if (_sending) return;
     setState(() => _sending = true);
     try {
       final repo = ref.read(chatRepositoryProvider);
       final up = await repo.uploadAttachment(path, filename: name);
+      final text = caption?.trim();
       final sent = await repo.sendMessage(
         widget.conversation.id,
+        content: (text != null && text.isNotEmpty) ? text : null,
         attachmentFileId: up.fileId,
         attachmentName: up.name,
         attachmentContentType: up.contentType,
@@ -267,6 +361,16 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                 ),
               ),
               const SizedBox(height: 18),
+              if (!msg.deletedForEveryone)
+                _SheetAction(
+                  icon: Icons.reply_rounded,
+                  label: 'Reply',
+                  color: AppColors.primary,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() => _replyingTo = msg);
+                  },
+                ),
               _SheetAction(
                 icon: Icons.delete_outline_rounded,
                 label: 'Delete for me',
@@ -317,6 +421,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     final user = ref.watch(authUserProvider);
     final myEmpId = user?.employeeId;
     final mq = MediaQuery.of(context);
+    final mentionMatches = _mentionMatches();
 
     return Scaffold(
       backgroundColor: const Color(0xFFE5DDD5),
@@ -540,6 +645,18 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                   ),
                 ),
               ),
+              // ── @mention suggestions (shown above the input while tagging) ─
+              if (mentionMatches.isNotEmpty)
+                _MentionSuggestions(
+                  matches: mentionMatches,
+                  onSelect: _applyMention,
+                ),
+              // ── Reply preview (shown above the input while replying) ──────
+              if (_replyingTo != null)
+                _ReplyComposerBar(
+                  message: _replyingTo!,
+                  onCancel: () => setState(() => _replyingTo = null),
+                ),
               // ── Input bar styled like WhatsApp ────────────────────────────
               _InputBar(
                 controller: _msgCtrl,
@@ -547,6 +664,7 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                 onSend: _send,
                 onEmoji: _showEmojiPicker,
                 onAttach: _pickAttachment,
+                onMention: () => _insertText('@'),
               ),
             ],
           ),
@@ -825,6 +943,8 @@ class _MessageBubble extends StatelessWidget {
                       ],
                     )
                   else ...[
+                    if (msg.replyToId != null)
+                      _QuotedReply(msg: msg, isMine: isMine),
                     if (msg.attachmentName != null) ...[
                       _attachment(context),
                     ],
@@ -999,12 +1119,14 @@ class _InputBar extends StatelessWidget {
     required this.onSend,
     required this.onEmoji,
     required this.onAttach,
+    required this.onMention,
   });
   final TextEditingController controller;
   final bool sending;
   final VoidCallback onSend;
   final VoidCallback onEmoji;
   final VoidCallback onAttach;
+  final VoidCallback onMention;
 
   @override
   Widget build(BuildContext context) {
@@ -1072,6 +1194,12 @@ class _InputBar extends StatelessWidget {
                     ),
                   ),
                   IconButton(
+                    icon: const Icon(Icons.alternate_email_rounded,
+                        color: Color(0xFF8696A0), size: 21),
+                    tooltip: 'Mention someone',
+                    onPressed: onMention,
+                  ),
+                  IconButton(
                     icon: const Icon(Icons.attach_file_rounded,
                         color: Color(0xFF8696A0), size: 22),
                     onPressed: onAttach,
@@ -1120,6 +1248,369 @@ class _InputBar extends StatelessWidget {
                 ),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Quoted reply (inside a message bubble)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _QuotedReply extends StatelessWidget {
+  const _QuotedReply({required this.msg, required this.isMine});
+  final ChatMessage msg;
+  final bool isMine;
+
+  @override
+  Widget build(BuildContext context) {
+    final deleted = msg.replyToDeleted;
+    final preview =
+        deleted ? 'This message was deleted' : (msg.replyToPreview ?? '');
+    return Container(
+      margin: const EdgeInsets.only(bottom: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFF008069).withOpacity(0.07),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: IntrinsicHeight(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(width: 3.5, color: const Color(0xFF008069)),
+            Flexible(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 5, 10, 5),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      msg.replyToSenderName ?? 'Reply',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF008069),
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      preview,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontStyle:
+                            deleted ? FontStyle.italic : FontStyle.normal,
+                        color: const Color(0xFF54656F),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// @mention suggestions (member picker above the composer)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _MentionSuggestions extends StatelessWidget {
+  const _MentionSuggestions({required this.matches, required this.onSelect});
+  final List<ChatContact> matches;
+  final ValueChanged<ChatContact> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+      constraints: const BoxConstraints(maxHeight: 220),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: const [
+          BoxShadow(color: Color(0x18000000), blurRadius: 8, offset: Offset(0, 2)),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: ListView.separated(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        itemCount: matches.length,
+        separatorBuilder: (_, __) =>
+            const Divider(height: 1, indent: 60, endIndent: 12),
+        itemBuilder: (_, i) {
+          final c = matches[i];
+          final hasDesignation =
+              c.designation != null && c.designation!.isNotEmpty;
+          return ListTile(
+            dense: true,
+            leading: UserAvatar(
+              name: c.name,
+              size: 36,
+              radius: 18,
+              imageUrl: Env.fileUrl(c.avatarUrl),
+            ),
+            title: Text(
+              c.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF111B21),
+              ),
+            ),
+            subtitle: hasDesignation
+                ? Text(
+                    c.designation!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 11.5, color: Color(0xFF667781)),
+                  )
+                : null,
+            onTap: () => onSelect(c),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reply preview bar above the composer
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ReplyComposerBar extends StatelessWidget {
+  const _ReplyComposerBar({required this.message, required this.onCancel});
+  final ChatMessage message;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+          boxShadow: [
+            BoxShadow(
+              color: Color(0x10000000),
+              blurRadius: 2,
+              offset: Offset(0, -1),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(width: 4, color: const Color(0xFF008069)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Replying to ${message.senderName}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF008069),
+                        ),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        message.previewText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF54656F),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded,
+                    size: 20, color: Color(0xFF8696A0)),
+                onPressed: onCancel,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Attachment preview + caption (before sending)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _AttachmentCaptionScreen extends StatefulWidget {
+  const _AttachmentCaptionScreen({
+    required this.filePath,
+    required this.fileName,
+    required this.isImage,
+  });
+  final String filePath;
+  final String fileName;
+  final bool isImage;
+
+  @override
+  State<_AttachmentCaptionScreen> createState() =>
+      _AttachmentCaptionScreenState();
+}
+
+class _AttachmentCaptionScreenState extends State<_AttachmentCaptionScreen> {
+  final _caption = TextEditingController();
+
+  @override
+  void dispose() {
+    _caption.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    return Scaffold(
+      backgroundColor: const Color(0xFF111B21),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF111B21),
+        foregroundColor: Colors.white,
+        title: Text(
+          widget.fileName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 15),
+        ),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: Center(
+              child: widget.isImage
+                  ? InteractiveViewer(
+                      minScale: 0.5,
+                      maxScale: 4,
+                      child: Image.file(File(widget.filePath),
+                          fit: BoxFit.contain),
+                    )
+                  : _FilePreviewCard(fileName: widget.fileName),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(8, 6, 8, mq.padding.bottom + 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: Container(
+                    constraints: const BoxConstraints(maxHeight: 140),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
+                      child: TextField(
+                        controller: _caption,
+                        maxLines: null,
+                        autofocus: false,
+                        textCapitalization: TextCapitalization.sentences,
+                        cursorColor: const Color(0xFF008069),
+                        style: const TextStyle(
+                            fontSize: 14.5, color: Color(0xFF111B21)),
+                        decoration: const InputDecoration(
+                          isCollapsed: true,
+                          contentPadding: EdgeInsets.symmetric(vertical: 8),
+                          border: InputBorder.none,
+                          hintText: 'Add a caption…',
+                          hintStyle: TextStyle(
+                              color: Color(0xFF8696A0), fontSize: 14.5),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF00A884),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(24),
+                      onTap: () => Navigator.pop(context, _caption.text),
+                      child: const Icon(Icons.send_rounded,
+                          color: Colors.white, size: 20),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilePreviewCard extends StatelessWidget {
+  const _FilePreviewCard({required this.fileName});
+  final String fileName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.all(28),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.15)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.insert_drive_file_rounded,
+              size: 64, color: Colors.white70),
+          const SizedBox(height: 14),
+          Text(
+            fileName,
+            maxLines: 2,
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
           ),
         ],
       ),

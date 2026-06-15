@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme.dart';
 import 'auth_repository.dart';
 import 'login_screen.dart';
+import 'sms_otp.dart';
 
 /// Step 2 of password reset: enter the 6-digit OTP and a new password.
 class ResetPasswordScreen extends ConsumerStatefulWidget {
@@ -28,8 +29,28 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
   bool _done = false;
   String? _error;
 
+  // OTP SMS auto-read (SMS User Consent API — no READ_SMS permission).
+  final _smsOtp = SmsOtpListener();
+  final _otpKey = GlobalKey<_OtpBoxesState>();
+
+  @override
+  void initState() {
+    super.initState();
+    // The OTP was sent on the previous (forgot-password) screen, so it should
+    // arrive shortly after this screen opens — start listening now.
+    _smsOtp.start(
+      digits: 6,
+      onCode: (code) {
+        if (!mounted) return;
+        _otpKey.currentState?.setCode(code);
+        setState(() => _otp = code);
+      },
+    );
+  }
+
   @override
   void dispose() {
+    _smsOtp.cancel();
     _p1.dispose();
     _p2.dispose();
     super.dispose();
@@ -110,6 +131,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
           const AuthFieldLabel('Verification code'),
           const SizedBox(height: 8),
           _OtpBoxes(
+            key: _otpKey,
             length: 6,
             onChanged: (v) => setState(() => _otp = v),
           ),
@@ -206,7 +228,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
 // ──────────────────────────────────────────────────────────────────────
 
 class _OtpBoxes extends StatefulWidget {
-  const _OtpBoxes({required this.length, required this.onChanged});
+  const _OtpBoxes({super.key, required this.length, required this.onChanged});
   final int length;
   final ValueChanged<String> onChanged;
 
@@ -229,6 +251,16 @@ class _OtpBoxesState extends State<_OtpBoxes> {
       n.dispose();
     }
     super.dispose();
+  }
+
+  /// Fill the boxes from an auto-read OTP code.
+  void setCode(String code) {
+    for (var i = 0; i < _controllers.length; i++) {
+      _controllers[i].text = i < code.length ? code[i] : '';
+    }
+    final last = code.length.clamp(1, widget.length) - 1;
+    _nodes[last].requestFocus();
+    _emit();
   }
 
   void _emit() {

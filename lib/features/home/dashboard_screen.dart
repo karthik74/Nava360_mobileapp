@@ -338,6 +338,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       tasks: tasksList,
       leaves: leavesList,
       todayStr: today,
+      checkInLocation: heroLocation,
     );
 
     final activeTasks = pendingTasks + inProgressTasks;
@@ -476,6 +477,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     required List<Task> tasks,
     required List<LeaveRequest> leaves,
     required String todayStr,
+    required String checkInLocation,
   }) {
     final items = <TodayScheduleItem>[];
     final timeFmt = DateFormat('HH:mm');
@@ -494,7 +496,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       items.add(TodayScheduleItem(
         time: timeFmt.format(inTime),
         title: 'Checked in',
-        meta: 'Hyderabad HQ',
+        meta: checkInLocation.isNotEmpty ? checkInLocation : 'Location not captured',
         tone: AppColors.success,
         onTap: () => context.go('/attendance'),
       ));

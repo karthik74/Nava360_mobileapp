@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/env.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'chat_controller.dart';
@@ -301,6 +302,7 @@ class _ConversationTile extends StatelessWidget {
                 name: conversation.title,
                 isGroup: conversation.isGroup,
                 online: conversation.isDirect && conversation.otherOnline,
+                imageUrl: Env.fileUrl(conversation.otherAvatarUrl),
               ),
               const SizedBox(width: 12),
               // Title + preview
@@ -400,11 +402,13 @@ class _ChatAvatar extends StatelessWidget {
     this.isGroup = false,
     this.online = false,
     this.size = 44,
+    this.imageUrl,
   });
   final String name;
   final bool isGroup;
   final bool online;
   final double size;
+  final String? imageUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -415,6 +419,7 @@ class _ChatAvatar extends StatelessWidget {
           name: name,
           size: size,
           radius: isGroup ? 14 : 22,
+          imageUrl: isGroup ? null : imageUrl,
         ),
         if (online)
           Positioned(

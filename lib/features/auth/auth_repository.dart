@@ -21,6 +21,21 @@ class AuthRepository {
     return user;
   }
 
+  /// Changes the signed-in user's password after verifying the current one.
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    await _api.post<void>(
+      '/api/users/me/change-password',
+      body: {
+        'currentPassword': currentPassword,
+        'newPassword': newPassword,
+      },
+      parse: (_) {},
+    );
+  }
+
   Future<void> forgotPassword(String username) async {
     await _api.post<void>(
       '/api/auth/forgot-password',

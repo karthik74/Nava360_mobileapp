@@ -3,10 +3,15 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
+import '../auth/auth_models.dart';
+import '../home/home_shell.dart' show employeeProfileProvider;
+import '../notifications/push_service.dart';
+import 'profile_repository.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -54,36 +59,7 @@ class ProfileScreen extends ConsumerWidget {
                   Center(
                     child: Column(
                       children: [
-                        Container(
-                          width: 76,
-                          height: 76,
-                          decoration: BoxDecoration(
-                            gradient: AppColors.heroGradient,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppColors.primary.withOpacity(0.32),
-                                blurRadius: 18,
-                                offset: const Offset(0, 8),
-                              ),
-                            ],
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.55),
-                              width: 1.5,
-                            ),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            user.username.isNotEmpty
-                                ? user.username[0].toUpperCase()
-                                : '?',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 30,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
+                        _ProfileAvatar(user: user),
                         const SizedBox(height: 12),
                         Text(
                           user.username,
@@ -150,22 +126,31 @@ class ProfileScreen extends ConsumerWidget {
                   // Settings
                   const AppSectionHeader(title: 'Settings'),
                   const SizedBox(height: 8),
+                  _SettingSwitchTile(
+                    icon: Icons.notifications_active_outlined,
+                    label: 'Push notifications',
+                    value: ref.watch(notificationsEnabledProvider),
+                    onChanged: (v) => ref
+                        .read(notificationsEnabledProvider.notifier)
+                        .setEnabled(v),
+                  ),
+                  const SizedBox(height: 8),
                   _SettingTile(
                     icon: Icons.notifications_outlined,
-                    label: 'Notifications',
+                    label: 'Notification history',
                     onTap: () => context.push('/notifications'),
                   ),
                   const SizedBox(height: 8),
                   _SettingTile(
-                    icon: Icons.security_outlined,
-                    label: 'Privacy & security',
-                    onTap: () {},
+                    icon: Icons.lock_outline_rounded,
+                    label: 'Change password',
+                    onTap: () => context.push('/change-password'),
                   ),
                   const SizedBox(height: 8),
                   _SettingTile(
                     icon: Icons.help_outline_rounded,
                     label: 'Help & support',
-                    onTap: () {},
+                    onTap: () => context.push('/help-support'),
                   ),
                   const SizedBox(height: 22),
 
@@ -348,6 +333,254 @@ class _InfoCard extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileAvatar extends ConsumerStatefulWidget {
+  const _ProfileAvatar({required this.user});
+  final AuthUser user;
+
+  @override
+  ConsumerState<_ProfileAvatar> createState() => _ProfileAvatarState();
+}
+
+class _ProfileAvatarState extends ConsumerState<_ProfileAvatar> {
+  bool _busy = false;
+
+  String get _initial =>
+      widget.user.username.isNotEmpty ? widget.user.username[0].toUpperCase() : '?';
+
+  Future<void> _pickAndUpload(ImageSource source) async {
+    final empId = widget.user.employeeId;
+    if (empId == null) return;
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: 1024,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+      setState(() => _busy = true);
+      await ref
+          .read(profileRepositoryProvider)
+          .uploadPhoto(picked.path, filename: picked.name);
+      ref.invalidate(employeeProfileProvider(empId));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(content: Text('Profile photo updated.')),
+          );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text('Upload failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _showPicker() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.hairline,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined,
+                  color: AppColors.primary),
+              title: const Text('Take photo'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickAndUpload(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined,
+                  color: AppColors.primary),
+              title: const Text('Choose from gallery'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickAndUpload(ImageSource.gallery);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final empId = widget.user.employeeId;
+    final profile = empId == null
+        ? null
+        : ref.watch(employeeProfileProvider(empId)).valueOrNull;
+    final imageUrl = absoluteFileUrl(profile?['profileImageUrl'] as String?);
+
+    return SizedBox(
+      width: 84,
+      height: 84,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            width: 76,
+            height: 76,
+            decoration: BoxDecoration(
+              gradient: imageUrl == null ? AppColors.heroGradient : null,
+              color: imageUrl == null ? null : AppColors.surfaceAlt,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withOpacity(0.32),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+              border: Border.all(
+                color: Colors.white.withOpacity(0.55),
+                width: 1.5,
+              ),
+              image: imageUrl == null
+                  ? null
+                  : DecorationImage(
+                      image: NetworkImage(imageUrl),
+                      fit: BoxFit.cover,
+                    ),
+            ),
+            alignment: Alignment.center,
+            child: imageUrl == null
+                ? Text(
+                    _initial,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 30,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  )
+                : null,
+          ),
+          if (_busy)
+            Positioned(
+              width: 76,
+              height: 76,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.35),
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.4,
+                    valueColor: AlwaysStoppedAnimation(Colors.white),
+                  ),
+                ),
+              ),
+            ),
+          if (empId != null)
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: GestureDetector(
+                onTap: _busy ? null : _showPicker,
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primary.withOpacity(0.4),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(Icons.camera_alt_rounded,
+                      color: Colors.white, size: 15),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingSwitchTile extends StatelessWidget {
+  const _SettingSwitchTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassCard(
+      padding: const EdgeInsets.fromLTRB(12, 4, 8, 4),
+      shadow: AppShadows.soft,
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.55),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.white.withOpacity(0.6)),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, color: AppColors.inkSoft, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink,
+              ),
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: AppColors.primary,
           ),
         ],
       ),

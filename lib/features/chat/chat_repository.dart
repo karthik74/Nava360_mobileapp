@@ -109,6 +109,7 @@ class ChatRepository {
     String? attachmentName,
     String? attachmentContentType,
     int? attachmentSizeBytes,
+    int? replyToMessageId,
   }) {
     return _api.post<ChatMessage>(
       '/api/chat/conversations/$conversationId/messages',
@@ -120,6 +121,7 @@ class ChatRepository {
           'attachmentContentType': attachmentContentType,
         if (attachmentSizeBytes != null)
           'attachmentSizeBytes': attachmentSizeBytes,
+        if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
       },
       parse: (d) => ChatMessage.fromJson(d as Map<String, dynamic>),
     );

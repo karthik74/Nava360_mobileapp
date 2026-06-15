@@ -1307,19 +1307,34 @@ class UserAvatar extends StatelessWidget {
     required this.name,
     this.size = 38,
     this.radius = 11,
+    this.imageUrl,
   });
 
   final String name;
   final double size;
   final double radius;
 
+  /// Optional absolute photo URL. When set, the image is shown with the
+  /// initial as a fallback (during load or on error).
+  final String? imageUrl;
+
   String get initial => name.isNotEmpty ? name[0].toUpperCase() : '?';
 
   @override
   Widget build(BuildContext context) {
+    final hasImage = imageUrl != null && imageUrl!.isNotEmpty;
+    final initialText = Text(
+      initial,
+      style: TextStyle(
+        color: Colors.white,
+        fontSize: size * 0.42,
+        fontWeight: FontWeight.w800,
+      ),
+    );
     return Container(
       width: size,
       height: size,
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         gradient: AppColors.heroGradient,
         borderRadius: BorderRadius.circular(radius),
@@ -1333,14 +1348,17 @@ class UserAvatar extends StatelessWidget {
         border: Border.all(color: Colors.white.withOpacity(0.55)),
       ),
       alignment: Alignment.center,
-      child: Text(
-        initial,
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: size * 0.42,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
+      child: hasImage
+          ? Image.network(
+              imageUrl!,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Center(child: initialText),
+              loadingBuilder: (context, child, progress) =>
+                  progress == null ? child : Center(child: initialText),
+            )
+          : initialText,
     );
   }
 }

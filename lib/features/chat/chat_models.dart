@@ -86,6 +86,16 @@ class Conversation {
   bool get isDirect => type == ConversationType.DIRECT;
   bool get isGroup => type == ConversationType.GROUP;
 
+  /// Profile photo URL of the other person in a direct chat (null for groups
+  /// or when members aren't populated).
+  String? get otherAvatarUrl {
+    if (!isDirect || otherEmployeeId == null) return null;
+    for (final m in members) {
+      if (m.employeeId == otherEmployeeId) return m.avatarUrl;
+    }
+    return null;
+  }
+
   factory Conversation.fromJson(Map<String, dynamic> j) {
     final membersList = (j['members'] as List<dynamic>?)
             ?.map((e) => ChatContact.fromJson(e as Map<String, dynamic>))
@@ -150,6 +160,12 @@ class ChatMessage {
   final DateTime createdAt;
   final bool deletedForEveryone;
 
+  /// Quoted-reply snapshot (null when this message isn't a reply).
+  final int? replyToId;
+  final String? replyToSenderName;
+  final String? replyToPreview;
+  final bool replyToDeleted;
+
   const ChatMessage({
     required this.id,
     required this.conversationId,
@@ -164,9 +180,21 @@ class ChatMessage {
     this.attachmentUrl,
     required this.createdAt,
     this.deletedForEveryone = false,
+    this.replyToId,
+    this.replyToSenderName,
+    this.replyToPreview,
+    this.replyToDeleted = false,
   });
 
   bool get isSystem => type == ChatMessageType.SYSTEM;
+
+  /// A short one-line preview of this message (for reply quotes / previews).
+  String get previewText {
+    if (deletedForEveryone) return 'This message was deleted';
+    if (content != null && content!.trim().isNotEmpty) return content!.trim();
+    if (type == ChatMessageType.IMAGE) return 'Photo';
+    return attachmentName ?? 'Attachment';
+  }
 
   factory ChatMessage.fromJson(Map<String, dynamic> j) => ChatMessage(
         id: (j['id'] as num).toInt(),
@@ -182,6 +210,10 @@ class ChatMessage {
         attachmentUrl: j['attachmentUrl'] as String?,
         createdAt: _parseDateTime(j['createdAt']) ?? DateTime.now(),
         deletedForEveryone: j['deletedForEveryone'] == true,
+        replyToId: (j['replyToId'] as num?)?.toInt(),
+        replyToSenderName: j['replyToSenderName'] as String?,
+        replyToPreview: j['replyToPreview'] as String?,
+        replyToDeleted: j['replyToDeleted'] == true,
       );
 }
 
