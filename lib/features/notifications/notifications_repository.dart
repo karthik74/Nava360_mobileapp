@@ -16,6 +16,8 @@ class NotificationsRepository {
   Future<void> registerDeviceToken({
     required String token,
     required String platform,
+    String? appVersionName,
+    int? appVersionCode,
   }) async {
     try {
       await _api.raw.post<dynamic>(
@@ -23,6 +25,8 @@ class NotificationsRepository {
         data: {
           'token': token,
           'platform': platform,
+          if (appVersionName != null) 'appVersionName': appVersionName,
+          if (appVersionCode != null) 'appVersionCode': appVersionCode,
         },
       );
     } on DioException catch (e) {

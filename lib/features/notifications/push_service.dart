@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/secure_storage.dart';
@@ -248,7 +249,24 @@ class PushService {
     }
     final platform = Platform.isIOS ? 'IOS' : 'ANDROID';
     debugPrint('Registering FCM token ($platform): ${_redact(token)}');
-    await _repo.registerDeviceToken(token: token, platform: platform);
+
+    // Report the installed app version so HR can track update adoption.
+    String? versionName;
+    int? versionCode;
+    try {
+      final info = await PackageInfo.fromPlatform();
+      versionName = info.version;
+      versionCode = int.tryParse(info.buildNumber);
+    } catch (_) {
+      // Non-fatal — registration proceeds without version info.
+    }
+
+    await _repo.registerDeviceToken(
+      token: token,
+      platform: platform,
+      appVersionName: versionName,
+      appVersionCode: versionCode,
+    );
   }
 
   /// Routes a foreground message: silent control messages (e.g. a live-location
