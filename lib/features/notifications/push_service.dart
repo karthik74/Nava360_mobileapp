@@ -2,14 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../core/secure_storage.dart';
+import '../attendance/live_location_responder.dart';
 import 'notifications_repository.dart';
 
 /// Background handler — must be a top-level / static function so Firebase can
@@ -21,6 +24,10 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // The notification is already rendered by the system tray for "notification"
   // payloads. For data-only payloads we'd schedule a local notification here.
   debugPrint('FCM background: ${message.messageId}');
+  // HR asked for this device's current location — answer even from the background.
+  if (message.data['type'] == 'LOCATION_REQUEST') {
+    await respondToLiveLocationRequest();
+  }
 }
 
 /// Wraps Firebase Messaging + `flutter_local_notifications` and registers the
@@ -141,7 +148,7 @@ class PushService {
         (token) => _register(token),
         onError: (Object e) => debugPrint('FCM token refresh error: $e'),
       );
-      _foregroundSub = FirebaseMessaging.onMessage.listen(_showLocal);
+      _foregroundSub = FirebaseMessaging.onMessage.listen(_onForegroundMessage);
       // Tap handling: app in background → onMessageOpenedApp; app launched cold
       // from a tapped notification → getInitialMessage.
       _openedSub = FirebaseMessaging.onMessageOpenedApp.listen(_handleRemoteTap);
@@ -244,6 +251,16 @@ class PushService {
     await _repo.registerDeviceToken(token: token, platform: platform);
   }
 
+  /// Routes a foreground message: silent control messages (e.g. a live-location
+  /// request) are handled without a notification; everything else is shown.
+  Future<void> _onForegroundMessage(RemoteMessage message) async {
+    if (message.data['type'] == 'LOCATION_REQUEST') {
+      await respondToLiveLocationRequest();
+      return;
+    }
+    await _showLocal(message);
+  }
+
   /// Renders a foreground FCM message as a local notification so the user
   /// sees it even when the app is open. FCM does NOT auto-display in the
   /// foreground — this fills that gap.
@@ -255,6 +272,27 @@ class PushService {
       final title =
           n?.title ?? message.data['title']?.toString() ?? 'Notification';
       final body = n?.body ?? message.data['body']?.toString() ?? '';
+
+      // A large image (e.g. a greeting poster) arrives either on the
+      // notification payload or as `posterUrl` in the data payload. Download it
+      // so the foreground notification shows the poster like the system tray.
+      final imageUrl = android?.imageUrl ??
+          message.notification?.apple?.imageUrl ??
+          message.data['posterUrl']?.toString();
+      final imagePath =
+          (imageUrl != null && imageUrl.isNotEmpty) ? await _downloadImage(imageUrl) : null;
+
+      StyleInformation? androidStyle;
+      List<DarwinNotificationAttachment> iosAttachments = const [];
+      if (imagePath != null) {
+        androidStyle = BigPictureStyleInformation(
+          FilePathAndroidBitmap(imagePath),
+          contentTitle: title,
+          summaryText: body,
+          hideExpandedLargeIcon: true,
+        );
+        iosAttachments = [DarwinNotificationAttachment(imagePath)];
+      }
 
       await _local.show(
         message.hashCode,
@@ -269,17 +307,36 @@ class PushService {
             priority: Priority.high,
             icon: android?.smallIcon ?? '@mipmap/ic_launcher',
             ticker: title,
+            styleInformation: androidStyle,
           ),
-          iOS: const DarwinNotificationDetails(
+          iOS: DarwinNotificationDetails(
             presentAlert: true,
             presentBadge: true,
             presentSound: true,
+            attachments: iosAttachments,
           ),
         ),
         payload: message.data.isEmpty ? null : jsonEncode(message.data),
       );
     } catch (e) {
       debugPrint('Local notification show failed: $e');
+    }
+  }
+
+  /// Downloads an image to a temp file for use as a notification big-picture /
+  /// attachment. Returns the local path, or null on any failure.
+  Future<String?> _downloadImage(String url) async {
+    try {
+      final dir = await getTemporaryDirectory();
+      final file =
+          '${dir.path}/greeting_${url.hashCode}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final resp = await Dio().download(url, file,
+          options: Options(receiveTimeout: const Duration(seconds: 20)));
+      if (resp.statusCode != null && resp.statusCode! < 300) return file;
+      return null;
+    } catch (e) {
+      debugPrint('Notification image download failed: $e');
+      return null;
     }
   }
 

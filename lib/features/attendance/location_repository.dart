@@ -16,6 +16,30 @@ class LocationRepository {
     );
   }
 
+  /// Answers an HR live-location request with the current fix, or the reason
+  /// (permission/GPS off, timed out) it can't share one.
+  Future<void> reportLive({
+    required bool locationEnabled,
+    required bool permissionGranted,
+    required bool tracking,
+    double? latitude,
+    double? longitude,
+    String? reason,
+  }) {
+    return _api.post<void>(
+      '/api/attendance/locations/live-report',
+      body: {
+        'locationEnabled': locationEnabled,
+        'permissionGranted': permissionGranted,
+        'tracking': tracking,
+        if (latitude != null) 'latitude': latitude,
+        if (longitude != null) 'longitude': longitude,
+        if (reason != null) 'reason': reason,
+      },
+      parse: (_) {},
+    );
+  }
+
   /// Heartbeat telling the server whether this device's location/GPS is on.
   /// Sent even when GPS is off, so HR can see "location turned off".
   Future<void> sendStatus({

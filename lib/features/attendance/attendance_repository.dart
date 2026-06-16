@@ -141,11 +141,11 @@ class AttendanceRepository {
     );
   }
 
-  /// Active non-working-day rules used to classify week-offs.
+  /// Active non-working-day rules that apply to the signed-in employee's branch
+  /// (global rules + rules scoped to their branch), used to classify week-offs.
   Future<List<NonWorkingRule>> listNonWorkingDays() {
     return _api.get<List<NonWorkingRule>>(
-      '/api/non-working-days',
-      query: {'activeOnly': true},
+      '/api/non-working-days/applicable',
       parse: (d) {
         final list = (d as List?) ?? const [];
         return list

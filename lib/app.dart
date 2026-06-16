@@ -26,6 +26,7 @@ import 'features/leaves/leaves_screen.dart';
 import 'features/notifications/notifications_screen.dart';
 import 'features/notifications/push_lifecycle.dart';
 import 'features/notifications/push_service.dart';
+import 'features/permissions/permission_gate.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/team/team_screen.dart';
 import 'features/chat/chat_list_screen.dart';
@@ -230,10 +231,15 @@ class HrmsApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       routerConfig: router,
-      // Gate the whole app behind the backend version check: a dismissible
-      // banner when an update is available, a blocking screen when it's forced.
-      builder: (context, child) =>
-          AppUpdateGate(child: child ?? const SizedBox.shrink()),
+      // Gate the app behind, in order:
+      //   1. PermissionGate — once signed in, a hard wall until location
+      //      ("Allow all the time"), battery-optimisation exemption and
+      //      notifications are all granted (pass-through while signed out).
+      //   2. AppUpdateGate — the backend version check (soft banner / forced
+      //      blocking screen).
+      builder: (context, child) => PermissionGate(
+        child: AppUpdateGate(child: child ?? const SizedBox.shrink()),
+      ),
     );
   }
 }

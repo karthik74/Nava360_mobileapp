@@ -163,6 +163,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     setState(() => _attendanceActionBusy = true);
     try {
       if (hasCheckedIn) {
+        final locationError = await _locationBlocker();
+        if (locationError != null) {
+          _showSnack(locationError);
+          return;
+        }
         final position = await _tryCurrentPosition();
         await ref.read(attendanceRepositoryProvider).checkOut(
               employeeId,
@@ -204,6 +209,30 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       _showSnack(e.toString());
     } finally {
       if (mounted) setState(() => _attendanceActionBusy = false);
+    }
+  }
+
+  /// Returns a user-facing error string if location is unavailable for an
+  /// attendance punch (services off, or permission denied/revoked), or `null`
+  /// when location is ready. Used to gate check-out the same way check-in is
+  /// gated through the tracker — so a punch is never recorded without location.
+  Future<String?> _locationBlocker() async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        return 'Turn on location services to check out.';
+      }
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return 'Location permission is required to check out. '
+            'Enable it in app settings.';
+      }
+      return null;
+    } catch (_) {
+      return 'Could not verify location permission. Please try again.';
     }
   }
 

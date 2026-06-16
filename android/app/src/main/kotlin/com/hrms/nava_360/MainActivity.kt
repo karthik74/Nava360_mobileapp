@@ -1,7 +1,9 @@
 package com.hrms.nava_360
 
 import android.Manifest
+import android.app.ActivityManager
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -18,6 +20,7 @@ import java.io.FileOutputStream
 
 class MainActivity : FlutterActivity() {
     private val channelName = "app/downloads"
+    private val batteryChannelName = "app/battery"
     private val storageReqCode = 9911
 
     // Held while we wait for the runtime storage-permission dialog (API < 29).
@@ -57,6 +60,26 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Reports whether the OS has put the app under "Restricted" background
+        // usage (the inverse of the "Allow background activity" toggle). Used by
+        // the in-app permission gate.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, batteryChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isBackgroundRestricted" -> result.success(isBackgroundRestricted())
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    private fun isBackgroundRestricted(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            am.isBackgroundRestricted
+        } else {
+            false
+        }
     }
 
     private fun saveOrRequest(
