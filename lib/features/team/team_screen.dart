@@ -6,6 +6,7 @@ import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import '../leaves/leave_models.dart';
 import '../leaves/leave_repository.dart';
+import 'team_member_tracking_screen.dart';
 import 'team_models.dart';
 import 'team_repository.dart';
 
@@ -173,12 +174,22 @@ class _MemberCard extends StatelessWidget {
       if (m.designation != null && m.designation!.isNotEmpty) m.designation!,
       if (m.department != null && m.department!.isNotEmpty) m.department!,
     ].join(' · ');
-    return GlassCard(
-      padding: const EdgeInsets.all(12),
-      shadow: AppShadows.soft,
-      child: Row(
-        children: [
-          UserAvatar(name: m.name, size: 42, radius: 12),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) =>
+                TeamMemberTrackingScreen(employeeId: m.id, name: m.name),
+          ),
+        ),
+        child: GlassCard(
+          padding: const EdgeInsets.all(12),
+          shadow: AppShadows.soft,
+          child: Row(
+            children: [
+              UserAvatar(name: m.name, size: 42, radius: 12),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -227,9 +238,11 @@ class _MemberCard extends StatelessWidget {
               ],
             ),
           ),
-          if (m.employeeCode != null && m.employeeCode!.isNotEmpty)
-            StatusPill(label: m.employeeCode!, color: AppColors.primary),
-        ],
+              if (m.employeeCode != null && m.employeeCode!.isNotEmpty)
+                StatusPill(label: m.employeeCode!, color: AppColors.primary),
+            ],
+          ),
+        ),
       ),
     );
   }

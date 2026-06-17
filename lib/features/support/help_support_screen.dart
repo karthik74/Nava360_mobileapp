@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/env.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 
@@ -84,6 +85,14 @@ class HelpSupportScreen extends StatelessWidget {
                 label: 'Website',
                 value: _website.replaceFirst('https://', ''),
                 onTap: () => _launch(context, Uri.parse(_website)),
+              ),
+              const SizedBox(height: 8),
+              _ContactTile(
+                icon: Icons.privacy_tip_outlined,
+                color: AppColors.primary,
+                label: 'Privacy Policy',
+                value: 'How we handle your data',
+                onTap: () => _launch(context, Uri.parse(Env.privacyPolicyUrl)),
               ),
               const SizedBox(height: 22),
               const AppSectionHeader(title: 'Frequently asked'),

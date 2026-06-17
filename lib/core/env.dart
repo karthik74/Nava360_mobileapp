@@ -20,5 +20,7 @@ class Env {
         apiBaseUrl.endsWith('/') ? apiBaseUrl.substring(0, apiBaseUrl.length - 1) : apiBaseUrl;
     return base + (path.startsWith('/') ? path : '/$path');
   }
-  
+
+  /// Public privacy policy URL (hosted by the web app).
+  static String get privacyPolicyUrl => fileUrl('/privacy-policy.html')!;
 }

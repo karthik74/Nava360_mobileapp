@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/env.dart';
 import '../../core/theme.dart';
 import 'auth_controller.dart';
 
@@ -448,15 +450,37 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 // Footer — pinned at the bottom of the screen.
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12, top: 4),
-                  child: Center(
-                    child: Text(
-                      'Secured by Nava360 · v1.0',
-                      style: TextStyle(
-                        color: AppColors.muted.withOpacity(0.85),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      InkWell(
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: () => launchUrl(
+                          Uri.parse(Env.privacyPolicyUrl),
+                          mode: LaunchMode.externalApplication,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                          child: Text(
+                            'Privacy Policy',
+                            style: TextStyle(
+                              color: AppColors.primary.withOpacity(0.9),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Secured by Nava360 · v1.0',
+                        style: TextStyle(
+                          color: AppColors.muted.withOpacity(0.85),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],

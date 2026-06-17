@@ -1,11 +1,17 @@
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/env.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import 'training_test_screen.dart';
 import 'trainings_models.dart';
 import 'trainings_repository.dart';
 
@@ -164,7 +170,7 @@ class TrainingsScreen extends ConsumerWidget {
   }
 }
 
-class _TrainingCard extends StatelessWidget {
+class _TrainingCard extends ConsumerWidget {
   const _TrainingCard({required this.enrollment});
   final TrainingEnrollment enrollment;
 
@@ -178,8 +184,210 @@ class _TrainingCard extends StatelessWidget {
     }
   }
 
+  void _openMaterials(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => FutureBuilder<List<TrainingMaterial>>(
+        future: ref.read(trainingsRepositoryProvider).getMaterials(enrollment.trainingId),
+        builder: (ctx, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final mats = snap.data ?? const [];
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Materials',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink)),
+                const SizedBox(height: 12),
+                if (mats.isEmpty)
+                  const Text('No materials shared yet.',
+                      style: TextStyle(color: AppColors.muted))
+                else
+                  ...mats.map((m) => ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(
+                          m.kind == 'LINK' ? Icons.link_rounded : Icons.description_rounded,
+                          color: AppColors.primary,
+                        ),
+                        title: Text(m.title,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600, color: AppColors.ink)),
+                        subtitle: m.description != null && m.description!.isNotEmpty
+                            ? Text(m.description!)
+                            : (m.fileName != null ? Text(m.fileName!) : null),
+                        trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+                        onTap: () {
+                          final base = Env.apiBaseUrl.endsWith('/')
+                              ? Env.apiBaseUrl.substring(0, Env.apiBaseUrl.length - 1)
+                              : Env.apiBaseUrl;
+                          final url = m.kind == 'LINK' ? m.url : '$base${m.url}';
+                          launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                        },
+                      )),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _openTests(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) => FutureBuilder<TrainingTestStatus>(
+        future: ref.read(trainingsRepositoryProvider).getTestStatus(enrollment.trainingId),
+        builder: (ctx, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Padding(
+              padding: EdgeInsets.all(32),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final s = snap.data;
+          if (s == null) {
+            return const Padding(padding: EdgeInsets.all(24), child: Text('Unavailable.'));
+          }
+
+          void open(String section, String label) {
+            Navigator.pop(sheetCtx);
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => TrainingTestScreen(
+                trainingId: enrollment.trainingId,
+                section: section,
+                titleLabel: label,
+              ),
+            ));
+          }
+
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Tests & Feedback',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink)),
+                if (s.improvement != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Pre ${s.preBestPercentage}% → Post ${s.postBestPercentage}% (${s.improvement! >= 0 ? '+' : ''}${s.improvement}%)',
+                    style: const TextStyle(color: AppColors.inkSoft, fontWeight: FontWeight.w600),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                if (s.preQuestionCount > 0)
+                  _testTile('Pre Test',
+                      done: s.preAttempts > 0 && !s.allowRetake,
+                      doneLabel: s.preBestPercentage != null ? '${s.preBestPercentage}%' : '✓',
+                      onTap: () => open('PRE_TEST', 'Pre Test')),
+                if (s.postQuestionCount > 0)
+                  _testTile('Post Test',
+                      done: s.postAttempts > 0 && !s.allowRetake,
+                      doneLabel: s.postBestPercentage != null ? '${s.postBestPercentage}%' : '✓',
+                      onTap: () => open('POST_TEST', 'Post Test')),
+                if (s.feedbackQuestionCount > 0)
+                  _testTile('Feedback',
+                      done: s.feedbackSubmitted,
+                      doneLabel: '✓',
+                      onTap: () => open('FEEDBACK', 'Feedback')),
+                if (s.preQuestionCount == 0 &&
+                    s.postQuestionCount == 0 &&
+                    s.feedbackQuestionCount == 0)
+                  const Text('No tests or feedback for this training.',
+                      style: TextStyle(color: AppColors.muted)),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _testTile(String label,
+      {required bool done, required String doneLabel, required VoidCallback onTap}) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(done ? Icons.check_circle_rounded : Icons.quiz_rounded,
+          color: done ? AppColors.success : AppColors.primary),
+      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+      trailing: done
+          ? Text(doneLabel,
+              style: const TextStyle(color: AppColors.success, fontWeight: FontWeight.w700))
+          : const Icon(Icons.chevron_right_rounded),
+      onTap: done ? null : onTap,
+    );
+  }
+
+  Future<void> _markAttendance(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final shot = await ImagePicker().pickImage(
+      source: ImageSource.camera,
+      preferredCameraDevice: CameraDevice.front,
+      imageQuality: 70,
+      maxWidth: 1080,
+    );
+    if (shot == null) return;
+
+    double? lat;
+    double? lng;
+    try {
+      final serviceOn = await Geolocator.isLocationServiceEnabled();
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      final granted = perm == LocationPermission.always ||
+          perm == LocationPermission.whileInUse;
+      if (serviceOn && granted) {
+        final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 12),
+        );
+        lat = pos.latitude;
+        lng = pos.longitude;
+      }
+    } catch (_) {
+      // GPS optional — proceed without it.
+    }
+
+    try {
+      await ref.read(trainingsRepositoryProvider).markAttendance(
+            trainingId: enrollment.trainingId,
+            selfiePath: shot.path,
+            latitude: lat,
+            longitude: lng,
+            deviceInfo: '${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
+          );
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Attendance marked ✓')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not mark attendance: $e')),
+      );
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final status = enrollment.status.toUpperCase();
     final isDone = status == 'COMPLETED';
     final isInProgress = status == 'IN_PROGRESS' || status == 'ACTIVE';
@@ -246,6 +454,41 @@ class _TrainingCard extends StatelessWidget {
               ],
             ],
           ),
+          if (enrollment.trainingMode == 'ONLINE' &&
+              (enrollment.trainingMeetLink?.isNotEmpty ?? false)) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => launchUrl(
+                  Uri.parse(enrollment.trainingMeetLink!),
+                  mode: LaunchMode.externalApplication,
+                ),
+                icon: const Icon(Icons.videocam_rounded, size: 18),
+                label: const Text('Join Google Meet'),
+              ),
+            ),
+          ] else if (enrollment.trainingMode != 'ONLINE' &&
+              (enrollment.trainingVenue?.isNotEmpty ?? false)) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(Icons.location_on_rounded,
+                    size: 14, color: AppColors.inkSoft),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    enrollment.trainingVenue!,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.inkSoft,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (isDone && enrollment.score > 0) ...[
             const SizedBox(height: 12),
             Container(
@@ -271,6 +514,47 @@ class _TrainingCard extends StatelessWidget {
               ),
             ),
           ],
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              TextButton.icon(
+                onPressed: () => _openMaterials(context, ref),
+                icon: const Icon(Icons.folder_open_rounded, size: 18),
+                label: const Text('Materials'),
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  foregroundColor: AppColors.primary,
+                  minimumSize: const Size(0, 0),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+              const SizedBox(width: 16),
+              TextButton.icon(
+                onPressed: () => _openTests(context, ref),
+                icon: const Icon(Icons.quiz_rounded, size: 18),
+                label: const Text('Tests'),
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  foregroundColor: AppColors.primary,
+                  minimumSize: const Size(0, 0),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+              const SizedBox(width: 16),
+              if (!isDone)
+                TextButton.icon(
+                  onPressed: () => _markAttendance(context, ref),
+                  icon: const Icon(Icons.camera_alt_rounded, size: 18),
+                  label: const Text('Attend'),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    foregroundColor: AppColors.success,
+                    minimumSize: const Size(0, 0),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+            ],
+          ),
           if (enrollment.feedback != null && enrollment.feedback!.isNotEmpty) ...[
             const SizedBox(height: 12),
             const Divider(),
