@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'core/api_client.dart';
 import 'core/theme.dart';
-import 'features/app_version/app_version_gate.dart';
+import 'features/app_update/in_app_update_gate.dart';
 import 'features/attendance/attendance_screen.dart';
 import 'features/attendance/location_lifecycle.dart';
 import 'features/auth/auth_controller.dart';
@@ -235,10 +235,9 @@ class HrmsApp extends ConsumerWidget {
       //   1. PermissionGate — once signed in, a hard wall until location
       //      ("Allow all the time"), battery-optimisation exemption and
       //      notifications are all granted (pass-through while signed out).
-      //   2. AppUpdateGate — the backend version check (soft banner / forced
-      //      blocking screen).
+      //   2. InAppUpdateGate — Google Play's native in-app update flow.
       builder: (context, child) => PermissionGate(
-        child: AppUpdateGate(child: child ?? const SizedBox.shrink()),
+        child: InAppUpdateGate(child: child ?? const SizedBox.shrink()),
       ),
     );
   }

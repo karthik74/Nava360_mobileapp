@@ -1,7 +1,7 @@
 name: nava360
 description: Nava360 mobile app — employee self-service and manager approvals.
 publish_to: "none"
-version: 0.1.7+7
+version: 0.1.9+9
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -52,6 +52,9 @@ dependencies:
 
   # App version / build number for the backend update check
   package_info_plus: ^8.0.2
+
+  # Google Play in-app updates (Android only; Play-compliant, no sideloading)
+  in_app_update: ^4.2.5
 
   # Payslip PDF download: save to disk + open in the system viewer
   path_provider: ^2.1.4

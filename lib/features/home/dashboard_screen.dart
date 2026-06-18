@@ -187,11 +187,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         }
 
         final position = await _tryCurrentPosition();
+        if (position == null) {
+          await ref
+              .read(locationTrackerProvider.notifier)
+              .stop(flushBuffer: false);
+          _showSnack(
+            'Could not get your location. Move to an open area with a clear sky '
+            'view and try again.',
+          );
+          return;
+        }
         try {
           await ref.read(attendanceRepositoryProvider).checkIn(
                 employeeId,
-                latitude: position?.latitude,
-                longitude: position?.longitude,
+                latitude: position.latitude,
+                longitude: position.longitude,
               );
           _showSnack('Checked in successfully.');
           // Ask to lift battery restrictions so background tracking stays reliable.
@@ -236,11 +246,30 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     }
   }
 
+  /// Best-effort current position with fallbacks so a slow GPS fix doesn't
+  /// record a check-in without coordinates:
+  ///   1) a fresh high-accuracy fix (12s)
+  ///   2) the last known position (instant)
+  ///   3) a fresh medium-accuracy fix with a longer timeout (20s)
   Future<Position?> _tryCurrentPosition() async {
     try {
       return await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 10),
+        timeLimit: const Duration(seconds: 12),
+      );
+    } catch (_) {
+      // fall through
+    }
+    try {
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null) return last;
+    } catch (_) {
+      // fall through
+    }
+    try {
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+        timeLimit: const Duration(seconds: 20),
       );
     } catch (_) {
       return null;
