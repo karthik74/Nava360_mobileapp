@@ -33,6 +33,10 @@ import 'features/chat/chat_list_screen.dart';
 import 'features/chat/chat_thread_by_id_screen.dart';
 import 'features/meetings/meetings_screen.dart';
 import 'features/trainings/trainings_screen.dart';
+import 'features/announcements/announcements_screen.dart';
+import 'features/announcements/announcement_detail_screen.dart';
+import 'features/assets/my_assets_screen.dart';
+import 'features/assets/asset_scan_screen.dart';
 import 'features/payslips/payslips_screen.dart';
 import 'features/resignation/resignation_screen.dart';
 
@@ -154,6 +158,24 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const TrainingsScreen(),
       ),
       GoRoute(
+        path: '/announcements',
+        builder: (_, __) => const AnnouncementsScreen(),
+      ),
+      GoRoute(
+        path: '/announcements/:id',
+        builder: (_, state) => AnnouncementDetailScreen(
+          announcementId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/assets',
+        builder: (_, __) => const MyAssetsScreen(),
+      ),
+      GoRoute(
+        path: '/assets/scan',
+        builder: (_, __) => const AssetScanScreen(),
+      ),
+      GoRoute(
         path: '/my-payslips',
         builder: (_, __) => const PayslipsScreen(),
       ),
@@ -226,6 +248,11 @@ class HrmsApp extends ConsumerWidget {
     };
     // Let push-notification taps deep-link into a chat thread.
     ref.read(pushServiceProvider).onOpenChat = (id) => router.push('/chats/$id');
+    // …and into an announcement.
+    ref.read(pushServiceProvider).onOpenAnnouncement =
+        (id) => router.push('/announcements/$id');
+    // …and into the employee's assets (asset assignment / warranty pushes).
+    ref.read(pushServiceProvider).onOpenAssets = () => router.push('/assets');
     return MaterialApp.router(
       title: 'Nava360',
       debugShowCheckedModeBanner: false,

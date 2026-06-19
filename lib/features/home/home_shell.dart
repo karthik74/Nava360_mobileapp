@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/api_client.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../announcements/announcements_repository.dart';
 import '../auth/auth_controller.dart';
 import '../chat/chat_controller.dart';
 import '../leaves/leave_repository.dart';
@@ -51,6 +52,17 @@ final employeeProfileProvider =
     );
   } catch (_) {
     return null;
+  }
+});
+
+final _drawerUnreadAnnouncementsProvider =
+    FutureProvider.autoDispose<int>((ref) async {
+  final user = ref.watch(authUserProvider);
+  if (user?.employeeId == null) return 0;
+  try {
+    return await ref.watch(announcementsRepositoryProvider).getUnreadCount();
+  } catch (_) {
+    return 0;
   }
 });
 
@@ -362,6 +374,8 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
         ref.watch(_drawerActiveTasksProvider).asData?.value ?? 0;
     final pendingApprovals =
         ref.watch(_drawerPendingApprovalsProvider).asData?.value ?? 0;
+    final unreadAnnouncements =
+        ref.watch(_drawerUnreadAnnouncementsProvider).asData?.value ?? 0;
 
     final overviewItems = <_NavItemData>[
       const _NavItemData(
@@ -428,6 +442,14 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
           accent: AppColors.pink,
           isPush: true,
         ),
+      _NavItemData(
+        label: 'Announcements',
+        icon: Icons.campaign_rounded,
+        path: '/announcements',
+        accent: AppColors.primary,
+        badge: unreadAnnouncements > 0 ? unreadAnnouncements : null,
+        isPush: true,
+      ),
       const _NavItemData(
         label: 'My Meetings',
         icon: Icons.event_rounded,
@@ -440,6 +462,13 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
         icon: Icons.school_rounded,
         path: '/my-trainings',
         accent: AppColors.warning,
+        isPush: true,
+      ),
+      const _NavItemData(
+        label: 'My Assets',
+        icon: Icons.devices_other_rounded,
+        path: '/assets',
+        accent: AppColors.primary,
         isPush: true,
       ),
       const _NavItemData(

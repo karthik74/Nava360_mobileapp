@@ -15,6 +15,21 @@
          API 29+ uses scoped MediaStore and needs no permission. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"/>
+
+    <!-- Photo & Video Permissions policy compliance.
+         The open_filex plugin (used only to open our own downloaded payslip
+         PDFs via a FileProvider content URI) injects broad gallery-access
+         permissions we don't need. Media picking uses the Android Photo Picker
+         (image_picker) which needs no permission, so strip these from the
+         merged manifest to satisfy Google Play. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"
+        tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"
+        tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"
+        tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        tools:node="remove"/>
     <application
         android:label="Nava360"
         android:name="${applicationName}"
