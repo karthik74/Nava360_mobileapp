@@ -10,6 +10,8 @@ class AssetAssignment {
   final int assetId;
   final String assetName;
   final String assetTag;
+  final String? serialNumber;
+  final String? imeiNumber;
   final String assignedToType;
   final int? employeeId;
   final String? employeeName;
@@ -28,6 +30,8 @@ class AssetAssignment {
     required this.assetName,
     required this.assetTag,
     required this.assignedToType,
+    this.serialNumber,
+    this.imeiNumber,
     required this.acknowledgementRequired,
     required this.acknowledgementStatus,
     required this.status,
@@ -45,6 +49,8 @@ class AssetAssignment {
         assetId: (j['assetId'] as num).toInt(),
         assetName: j['assetName'] as String? ?? 'Asset',
         assetTag: j['assetTag'] as String? ?? '',
+        serialNumber: j['serialNumber'] as String?,
+        imeiNumber: j['imeiNumber'] as String?,
         assignedToType: j['assignedToType'] as String? ?? 'EMPLOYEE',
         employeeId: (j['employeeId'] as num?)?.toInt(),
         employeeName: j['employeeName'] as String?,

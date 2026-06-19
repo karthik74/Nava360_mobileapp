@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -25,6 +26,36 @@ class ProfileScreen extends ConsumerWidget {
       );
     }
     final mq = MediaQuery.of(context);
+
+    // Full employee record from /api/employees/{id}. Null while it loads or
+    // when the account isn't linked to an employee — fields fall back to '—'.
+    final empId = user.employeeId;
+    final profile = empId == null
+        ? null
+        : ref.watch(employeeProfileProvider(empId)).valueOrNull;
+
+    String? field(String key) {
+      final v = profile?[key];
+      if (v == null) return null;
+      final s = v.toString().trim();
+      return s.isEmpty ? null : s;
+    }
+
+    String fmtDate(String? iso) {
+      if (iso == null) return '—';
+      final d = DateTime.tryParse(iso);
+      return d == null ? iso : DateFormat('d MMM yyyy').format(d);
+    }
+
+    final fullName = [field('firstName'), field('lastName')]
+        .where((e) => e != null)
+        .join(' ')
+        .trim();
+    final displayName = fullName.isNotEmpty ? fullName : user.displayName;
+    final employeeCode = field('employeeCode') ??
+        (empId != null
+            ? 'EMP-${empId.toString().padLeft(4, '0')}'
+            : 'Not linked');
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -62,7 +93,8 @@ class ProfileScreen extends ConsumerWidget {
                         _ProfileAvatar(user: user),
                         const SizedBox(height: 12),
                         Text(
-                          user.username,
+                          displayName,
+                          textAlign: TextAlign.center,
                           style: const TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.w800,
@@ -102,24 +134,66 @@ class ProfileScreen extends ConsumerWidget {
                   const AppSectionHeader(title: 'Account info'),
                   const SizedBox(height: 8),
                   _InfoCard(
-                    icon: Icons.email_outlined,
-                    label: 'Email',
-                    value: user.email,
-                    color: AppColors.info,
+                    icon: Icons.person_outline_rounded,
+                    label: 'Full name',
+                    value: displayName,
+                    color: AppColors.primary,
                   ),
                   const SizedBox(height: 8),
                   _InfoCard(
                     icon: Icons.badge_outlined,
                     label: 'Employee ID',
-                    value: user.employeeId?.toString() ?? 'Not linked',
+                    value: employeeCode,
                     color: AppColors.accent,
                   ),
                   const SizedBox(height: 8),
                   _InfoCard(
-                    icon: Icons.person_outline,
-                    label: 'User ID',
-                    value: '#${user.userId}',
+                    icon: Icons.apartment_rounded,
+                    label: 'Department',
+                    value: field('department') ?? '—',
+                    color: AppColors.info,
+                  ),
+                  const SizedBox(height: 8),
+                  _InfoCard(
+                    icon: Icons.work_outline_rounded,
+                    label: 'Designation',
+                    value: field('designation') ?? '—',
+                    color: AppColors.pink,
+                  ),
+                  const SizedBox(height: 8),
+                  _InfoCard(
+                    icon: Icons.event_outlined,
+                    label: 'Joining date',
+                    value: fmtDate(field('joiningDate')),
+                    color: AppColors.warning,
+                  ),
+                  const SizedBox(height: 8),
+                  _InfoCard(
+                    icon: Icons.email_outlined,
+                    label: 'Email',
+                    value: field('email') ?? user.email,
+                    color: AppColors.info,
+                  ),
+                  const SizedBox(height: 8),
+                  _InfoCard(
+                    icon: Icons.phone_outlined,
+                    label: 'Phone',
+                    value: field('phone') ?? '—',
                     color: AppColors.success,
+                  ),
+                  const SizedBox(height: 8),
+                  _InfoCard(
+                    icon: Icons.supervisor_account_outlined,
+                    label: 'Manager',
+                    value: field('reportingManagerName') ?? '—',
+                    color: AppColors.accent,
+                  ),
+                  const SizedBox(height: 8),
+                  _InfoCard(
+                    icon: Icons.store_mall_directory_outlined,
+                    label: 'Working branch',
+                    value: field('branchLabel') ?? '—',
+                    color: AppColors.primary,
                   ),
                   const SizedBox(height: 22),
 
