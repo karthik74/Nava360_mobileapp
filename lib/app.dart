@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/api_client.dart';
+import 'core/nava360_splash_screen.dart';
 import 'core/theme.dart';
 import 'features/app_update/in_app_update_gate.dart';
 import 'features/attendance/attendance_screen.dart';
@@ -207,27 +208,17 @@ class _GoRouterRefresh extends ChangeNotifier {
   }
 }
 
+/// App-opening splash. Shown by the router while auth/welcome flags bootstrap;
+/// the redirect then sends the user to Home (logged in) or Login/Welcome
+/// (logged out). Navigation lives in the router — this only renders the
+/// branded loader, replacing the old blank/gradient spinner.
 class _SplashScreen extends StatelessWidget {
   const _SplashScreen();
 
+  // No onFinish — the router redirect moves off /splash once auth/welcome
+  // finish bootstrapping, so navigation stays exactly as before.
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(gradient: AppColors.heroGradient),
-        child: const Center(
-          child: SizedBox(
-            width: 36,
-            height: 36,
-            child: CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation(Colors.white),
-              strokeWidth: 3,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => const Nava360SplashScreen();
 }
 
 class HrmsApp extends ConsumerWidget {

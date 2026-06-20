@@ -76,3 +76,10 @@ flutter:
   assets:
     - assets/logo-mark.png
     - assets/logo.png
+    # Branded app-opening splash / loading logo (see AppLoadingScreen).
+    - assets/images/nava360_logo.png
+    # Nava360SplashScreen split assets: rotating outer ring + static centre.
+    # NOTE: these are currently placeholders (full logo) — replace with the
+    # transparent ring-only and centre-only PNGs for the ring-spin effect.
+    - assets/nava360_ring.png
+    - assets/nava360_center.png

@@ -14,14 +14,20 @@ Future<void> main() async {
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
   final container = ProviderContainer();
-  // PushService.init() handles Firebase + local notifications and swallows
-  // any failures (e.g. missing google-services.json), so the UI always boots.
-  await container.read(pushServiceProvider).init();
 
+  // Paint the app (and its branded splash loader) on the very first frame —
+  // do NOT await any async init before runApp, otherwise the OS shows a blank
+  // launch window until init finishes.
   runApp(
     UncontrolledProviderScope(
       container: container,
       child: const HrmsApp(),
     ),
   );
+
+  // PushService.init() handles Firebase + local notifications and swallows any
+  // failures (e.g. missing google-services.json), so the UI always boots. Run
+  // it after the first frame so the loader appears instantly; push setup
+  // completes a moment later in the background.
+  container.read(pushServiceProvider).init();
 }
