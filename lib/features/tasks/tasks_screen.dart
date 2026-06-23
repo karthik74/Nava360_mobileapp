@@ -82,6 +82,16 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
   DateTime? _toDate;
   bool _creating = false;
 
+  final TextEditingController _titleCtrl = TextEditingController();
+  String _titleQuery = '';
+  String? _priorityFilter; // null = all; else URGENT / HIGH / MEDIUM / LOW
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    super.dispose();
+  }
+
   /// Self-task creation: pick an INTERNAL template, raise the task assigned to
   /// the current employee, then open it to fill and submit.
   Future<void> _createSelfTask() async {
@@ -129,6 +139,68 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
       if (_toDate != null && day.isAfter(_toDate!)) return false;
       return true;
     }).toList();
+  }
+
+  /// Apply all client-side filters: date range, task-title search and priority.
+  List<Task> _applyFilters(List<Task> tasks) {
+    var list = _applyDateFilter(tasks);
+    final q = _titleQuery.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      list = list.where((t) => t.title.toLowerCase().contains(q)).toList();
+    }
+    if (_priorityFilter != null) {
+      list = list
+          .where((t) => (t.priority ?? '').toUpperCase() == _priorityFilter)
+          .toList();
+    }
+    return list;
+  }
+
+  bool get _hasActiveFilters =>
+      _fromDate != null ||
+      _toDate != null ||
+      _titleQuery.trim().isNotEmpty ||
+      _priorityFilter != null;
+
+  /// Compact filter chip shared by the status and priority rows.
+  Widget _filterChip({
+    required String label,
+    required bool selected,
+    required Color accent,
+    required VoidCallback onTap,
+  }) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      selectedColor: accent,
+      showCheckmark: false,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      labelStyle: TextStyle(
+        fontSize: 12.5,
+        color: selected ? Colors.white : AppColors.inkSoft,
+        fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+      ),
+      backgroundColor: Colors.white.withOpacity(0.55),
+      side: BorderSide(
+        color: selected ? accent : Colors.white.withOpacity(0.55),
+      ),
+      onSelected: (v) {
+        if (v) onTap();
+      },
+    );
+  }
+
+  /// A single priority filter chip; [value] null means "All".
+  Widget _priorityChip(String? value, String label) {
+    return _filterChip(
+      label: label,
+      selected: _priorityFilter == value,
+      accent: value == null ? AppColors.primary : priorityColor(value),
+      onTap: () => setState(() => _priorityFilter = value),
+    );
   }
 
   Future<void> _pickFromDate() async {
@@ -236,37 +308,79 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
           children: [
             if (widget.header != null) widget.header!,
             const SizedBox(height: 12),
-            const AppSectionHeader(
-              title: 'My tasks',
-              subtitle: 'Tasks assigned to your employee account',
+            const AppSectionHeader(title: 'My tasks'),
+            const SizedBox(height: 12),
+            // Search by task title.
+            TextField(
+              controller: _titleCtrl,
+              onChanged: (v) => setState(() => _titleQuery = v),
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: 'Search by task title…',
+                prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                suffixIcon: _titleQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        tooltip: 'Clear',
+                        onPressed: () {
+                          _titleCtrl.clear();
+                          setState(() => _titleQuery = '');
+                        },
+                      )
+                    : null,
+                isDense: true,
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.7),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppRadii.lg),
+                  borderSide: BorderSide(color: Colors.white.withOpacity(0.55)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(AppRadii.lg),
+                  borderSide: const BorderSide(color: AppColors.primary),
+                ),
+              ),
             ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: _TaskFilter.values.map((filter) {
-                final selected = filter == _selectedFilter;
-                return ChoiceChip(
-                  label: Text(filter.label),
-                  selected: selected,
-                  selectedColor: AppColors.primary,
-                  showCheckmark: false,
-                  labelStyle: TextStyle(
-                    color: selected ? Colors.white : AppColors.inkSoft,
-                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                  ),
-                  backgroundColor: Colors.white.withOpacity(0.55),
-                  side: BorderSide(
-                    color: selected
-                        ? AppColors.primary
-                        : Colors.white.withOpacity(0.55),
-                  ),
-                  onSelected: (value) {
-                    if (!value) return;
-                    setState(() => _selectedFilter = filter);
-                  },
-                );
-              }).toList(),
+            const SizedBox(height: 10),
+            // Status — compact, single-line scrollable chips.
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                children: [
+                  for (final filter in _TaskFilter.values) ...[
+                    _filterChip(
+                      label: filter.label,
+                      selected: filter == _selectedFilter,
+                      accent: AppColors.primary,
+                      onTap: () => setState(() => _selectedFilter = filter),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Priority — compact, single-line scrollable chips.
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                children: [
+                  const Icon(Icons.flag_outlined,
+                      size: 16, color: AppColors.muted),
+                  const SizedBox(width: 8),
+                  _priorityChip(null, 'All'),
+                  const SizedBox(width: 8),
+                  _priorityChip('URGENT', 'Urgent'),
+                  const SizedBox(width: 8),
+                  _priorityChip('HIGH', 'High'),
+                  const SizedBox(width: 8),
+                  _priorityChip('MEDIUM', 'Medium'),
+                  const SizedBox(width: 8),
+                  _priorityChip('LOW', 'Low'),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
             _DateRangeBar(
@@ -279,12 +393,12 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
             const SizedBox(height: 18),
             tasks.when(
               data: (rows) {
-                final filtered = _applyDateFilter(rows);
+                final filtered = _applyFilters(rows);
                 if (filtered.isEmpty) {
                   return AppEmptyState(
                     icon: Icons.task_alt_rounded,
-                    message: (_fromDate != null || _toDate != null)
-                        ? 'No tasks match this filter and date range.'
+                    message: _hasActiveFilters
+                        ? 'No tasks match your filters.'
                         : 'No tasks found for this filter.',
                   );
                 }
@@ -407,116 +521,79 @@ class _TaskCard extends StatelessWidget {
     final showProgress = task.completionPercentage > 0 && !task.isDone;
 
     return GlassCard(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       shadow: AppShadows.soft,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Title + status.
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (task.taskCode != null && task.taskCode!.isNotEmpty)
-                      Text(
-                        task.taskCode!,
-                        style: const TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.muted,
-                          letterSpacing: 0.4,
-                        ),
-                      ),
-                    Text(
-                      task.title,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.ink,
-                        height: 1.3,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  task.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.ink,
+                    height: 1.25,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 110),
+                constraints: const BoxConstraints(maxWidth: 104),
                 child: TaskStatusPill(status: task.status),
               ),
             ],
           ),
-          if (task.categoryName != null || priority != null) ...[
+          // One dense meta line: priority · category · due · assigned-by.
+          if (priority != null ||
+              task.categoryName != null ||
+              due != null ||
+              task.assignedByName != null) ...[
             const SizedBox(height: 8),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                if (task.categoryName != null)
-                  _MetaPill(
-                    icon: Icons.folder_open_rounded,
-                    label: task.categoryName!,
-                    color: AppColors.primary,
-                  ),
                 if (priority != null)
                   _MetaPill(
                     icon: Icons.flag_rounded,
                     label: humanizeEnum(priority),
                     color: priorityColor(priority),
                   ),
-              ],
-            ),
-          ],
-          if (task.description != null && task.description!.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              task.description!,
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: AppColors.inkSoft,
-                height: 1.4,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-          if (showProgress) ...[
-            const SizedBox(height: 10),
-            _ProgressBar(percent: task.completionPercentage),
-          ],
-          if (due != null || task.assignedByName != null) ...[
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 10,
-              runSpacing: 6,
-              children: [
+                if (task.categoryName != null)
+                  _MetaPill(
+                    icon: Icons.folder_open_rounded,
+                    label: task.categoryName!,
+                    color: AppColors.primary,
+                  ),
                 if (due != null)
                   _MetaText(
-                    icon: Icons.calendar_today_outlined,
-                    label: (isOverdue ? 'Overdue $due' : 'Due $due') +
+                    icon: Icons.event_outlined,
+                    label: (isOverdue ? 'Overdue $due' : due) +
                         (dueTime != null ? ' · $dueTime' : ''),
                     color: isOverdue ? AppColors.danger : AppColors.muted,
                   ),
                 if (task.assignedByName != null)
                   _MetaText(
                     icon: Icons.person_outline,
-                    label: 'Assigned by ${task.assignedByName!}',
+                    label: task.assignedByName!,
                     color: AppColors.muted,
                   ),
               ],
             ),
           ],
-          const SizedBox(height: 8),
-          const Align(
-            alignment: Alignment.centerRight,
-            child: Icon(
-              Icons.arrow_forward_rounded,
-              size: 16,
-              color: AppColors.muted,
-            ),
-          ),
+          // Inline progress (only while in progress).
+          if (showProgress) ...[
+            const SizedBox(height: 8),
+            _ProgressBar(percent: task.completionPercentage),
+          ],
         ],
       ),
     );
@@ -530,38 +607,26 @@ class _ProgressBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final clamped = percent.clamp(0, 100);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'Progress',
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
-                color: AppColors.muted,
-              ),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              value: clamped / 100,
+              minHeight: 5,
+              backgroundColor: AppColors.primary.withOpacity(0.12),
+              valueColor: const AlwaysStoppedAnimation(AppColors.primary),
             ),
-            Text(
-              '$clamped%',
-              style: const TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w800,
-                color: AppColors.primary,
-              ),
-            ),
-          ],
+          ),
         ),
-        const SizedBox(height: 4),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: LinearProgressIndicator(
-            value: clamped / 100,
-            minHeight: 6,
-            backgroundColor: AppColors.primary.withOpacity(0.12),
-            valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+        const SizedBox(width: 8),
+        Text(
+          '$clamped%',
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            color: AppColors.primary,
           ),
         ),
       ],

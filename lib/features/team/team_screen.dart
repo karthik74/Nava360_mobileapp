@@ -6,7 +6,7 @@ import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import '../leaves/leave_models.dart';
 import '../leaves/leave_repository.dart';
-import 'team_member_tracking_screen.dart';
+import 'employee_detail_screen.dart';
 import 'team_models.dart';
 import 'team_repository.dart';
 
@@ -181,7 +181,7 @@ class _MemberCard extends StatelessWidget {
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) =>
-                TeamMemberTrackingScreen(employeeId: m.id, name: m.name),
+                EmployeeDetailScreen(employeeId: m.id, name: m.name),
           ),
         ),
         child: GlassCard(
@@ -781,10 +781,13 @@ class _MiniStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Left-aligned so the first stat lines up under the card's title/subtitle
+    // (which use CrossAxisAlignment.start) instead of sitting indented.
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.start,
           children: [
             Container(
               width: 5,

@@ -69,6 +69,35 @@ class LiveLocation {
       );
 }
 
+/// A single location on/off transition event (mirrors LocationStatusEventResponse).
+class LocationStatusEvent {
+  final int id;
+  final DateTime occurredAt;
+  final String state; // ON | LOCATION_OFF | PERMISSION_OFF | NOT_TRACKING | UNKNOWN
+  final double? latitude;
+  final double? longitude;
+
+  LocationStatusEvent({
+    required this.id,
+    required this.occurredAt,
+    required this.state,
+    this.latitude,
+    this.longitude,
+  });
+
+  /// Whether location is currently considered "on" (tracking) at this event.
+  bool get isOn => state == 'ON';
+
+  factory LocationStatusEvent.fromJson(Map<String, dynamic> j) =>
+      LocationStatusEvent(
+        id: (j['id'] as num).toInt(),
+        occurredAt: DateTime.parse(j['occurredAt'] as String).toLocal(),
+        state: (j['state'] as String?) ?? 'UNKNOWN',
+        latitude: (j['latitude'] as num?)?.toDouble(),
+        longitude: (j['longitude'] as num?)?.toDouble(),
+      );
+}
+
 class TeamTrackingRepository {
   TeamTrackingRepository(this._api);
   final ApiClient _api;
@@ -102,6 +131,46 @@ class TeamTrackingRepository {
     return _api.get<LiveLocation>(
       '/api/attendance/locations/team/$employeeId/live',
       parse: (d) => LiveLocation.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
+  /// HR-style live-location request, matching the web "Live location" button.
+  /// POST /api/attendance/locations/{id}/live-request (needs LOCATION_PING_VIEW).
+  Future<LiveLocation> requestLiveDirect(int employeeId) {
+    return _api.post<LiveLocation>(
+      '/api/attendance/locations/$employeeId/live-request',
+      parse: (d) => LiveLocation.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
+  /// Latest live snapshot via the HR endpoint the web polls.
+  /// GET /api/attendance/locations/{id}/live (needs LOCATION_PING_VIEW).
+  Future<LiveLocation> getLiveDirect(int employeeId) {
+    return _api.get<LiveLocation>(
+      '/api/attendance/locations/$employeeId/live',
+      parse: (d) => LiveLocation.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
+  /// On/off transition timeline for [employeeId] in [from, to] (newest first).
+  /// Backend: GET /api/attendance/locations/status/{id}/history (LOCATION_PING_VIEW).
+  /// The first event is the employee's current on/off status.
+  Future<List<LocationStatusEvent>> statusHistory(
+    int employeeId, {
+    required DateTime from,
+    required DateTime to,
+  }) {
+    String d(DateTime x) =>
+        '${x.year.toString().padLeft(4, '0')}-${x.month.toString().padLeft(2, '0')}-${x.day.toString().padLeft(2, '0')}';
+    return _api.get<List<LocationStatusEvent>>(
+      '/api/attendance/locations/status/$employeeId/history',
+      query: {'from': d(from), 'to': d(to)},
+      parse: (data) {
+        final list = (data as List?) ?? const [];
+        return list
+            .map((e) => LocationStatusEvent.fromJson(e as Map<String, dynamic>))
+            .toList();
+      },
     );
   }
 }

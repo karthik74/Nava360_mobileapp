@@ -22,6 +22,20 @@ class AssetsRepository {
     );
   }
 
+  /// Assets currently assigned to [employeeId] (manager / HR view).
+  /// Backend: GET /api/assets/employee/{id} (own, or ASSET_VIEW authority).
+  Future<List<AssetAssignment>> listForEmployee(int employeeId) {
+    return _api.get<List<AssetAssignment>>(
+      '/api/assets/employee/$employeeId',
+      parse: (d) {
+        final list = (d is List) ? d : const [];
+        return list
+            .map((e) => AssetAssignment.fromJson(e as Map<String, dynamic>))
+            .toList();
+      },
+    );
+  }
+
   Future<AssetScanResult> scan(String code) {
     return _api.get<AssetScanResult>(
       '/api/assets/scan',

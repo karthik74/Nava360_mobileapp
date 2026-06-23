@@ -1,7 +1,7 @@
 name: nava360
 description: Nava360 mobile app — employee self-service and manager approvals.
 publish_to: "none"
-version: 0.1.11+11
+version: 0.1.12+12
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
