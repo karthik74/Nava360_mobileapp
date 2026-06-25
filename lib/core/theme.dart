@@ -627,4 +627,20 @@ class StatusTone {
         return const StatusTone(AppColors.warning, 'Pending');
     }
   }
+
+  /// Today's attendance state for a team member (from /my-team/today-status).
+  static StatusTone forTeamState(String s) {
+    switch (s) {
+      case 'PUNCHED_IN':
+        return const StatusTone(AppColors.success, 'Punched In');
+      case 'PUNCHED_OUT':
+        return const StatusTone(AppColors.info, 'Punched Out');
+      case 'LEAVE':
+        return const StatusTone(AppColors.warning, 'Leave');
+      case 'ABSENT':
+        return const StatusTone(AppColors.danger, 'Absent');
+      default:
+        return const StatusTone(AppColors.muted, 'Not In');
+    }
+  }
 }

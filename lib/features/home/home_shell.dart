@@ -121,7 +121,12 @@ class HomeShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final loc = GoRouterState.of(context).matchedLocation;
     final user = ref.watch(authUserProvider);
-    final isManager = user?.hasRole(const {'ADMIN', 'HR'}) ?? false;
+    // Anyone who can have a team sees the Team tab. Gated on EMPLOYEE_VIEW
+    // (held by HR, MANAGER and any custom managerial role) rather than hard-coded
+    // role names, so it survives the dynamic RBAC setup. Admin always sees it.
+    // The Team screen shows "No team members…" gracefully if they have none.
+    final isManager = (user?.hasRole(const {'ADMIN'}) ?? false) ||
+        (user?.hasPermission('EMPLOYEE_VIEW') ?? false);
     final visibleTabs = isManager ? _bottomTabs : _bottomTabs.take(2).toList();
     final index = _indexFromLocation(loc, visibleTabs);
 

@@ -23,12 +23,13 @@ class _CreateRequisitionScreenState
     extends ConsumerState<CreateRequisitionScreen> {
   final _formKey = GlobalKey<FormState>();
   final _title = TextEditingController();
-  final _department = TextEditingController();
   final _positions = TextEditingController(text: '1');
   final _jobDescription = TextEditingController();
   final _requiredSkills = TextEditingController();
   final _notes = TextEditingController();
 
+  String? _department; // selected department label (from master lookup)
+  String? _designation; // selected designation label (from master lookup)
   ExperienceLevel? _experience;
   RequisitionPriority _priority = RequisitionPriority.medium;
   DateTime? _targetDate;
@@ -39,7 +40,6 @@ class _CreateRequisitionScreenState
   @override
   void dispose() {
     _title.dispose();
-    _department.dispose();
     _positions.dispose();
     _jobDescription.dispose();
     _requiredSkills.dispose();
@@ -68,7 +68,8 @@ class _CreateRequisitionScreenState
     try {
       final payload = NewRequisition(
         title: _title.text,
-        department: _department.text,
+        department: _department,
+        designation: _designation,
         branchId: _branchId,
         numberOfPositions: int.tryParse(_positions.text.trim()) ?? 1,
         jobDescription: _jobDescription.text,
@@ -318,9 +319,71 @@ class _CreateRequisitionScreenState
     );
   }
 
+  /// A dropdown fed by a master-data lookup (department / designation). Handles
+  /// loading / error / empty states gracefully and keeps the current value even
+  /// if it isn't in the active list (so editing never loses a stored value).
+  Widget _lookupDropdown({
+    required AsyncValue<List<LookupOption>> async,
+    required String label,
+    required IconData icon,
+    required String? value,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return async.when(
+      loading: () => InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon, size: 20),
+        ),
+        child: Row(
+          children: const [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 10),
+            Text('Loading…',
+                style: TextStyle(color: AppColors.muted, fontSize: 13)),
+          ],
+        ),
+      ),
+      error: (_, __) => TextFormField(
+        initialValue: value,
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon, size: 20),
+          helperText: 'Could not load options — type a value',
+        ),
+        onChanged: onChanged,
+      ),
+      data: (options) {
+        final labels = <String>{
+          for (final o in options) o.label,
+          if (value != null && value.isNotEmpty) value,
+        }.toList();
+        return DropdownButtonFormField<String>(
+          value: value,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: label,
+            prefixIcon: Icon(icon, size: 20),
+          ),
+          items: [
+            for (final l in labels)
+              DropdownMenuItem(value: l, child: Text(l)),
+          ],
+          onChanged: onChanged,
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final branchesAsync = ref.watch(scopedBranchesProvider);
+    final departmentsAsync = ref.watch(departmentOptionsProvider);
+    final designationsAsync = ref.watch(designationOptionsProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('New requisition')),
       body: GlassBackdrop(
@@ -355,14 +418,20 @@ class _CreateRequisitionScreenState
                               : null,
                         ),
                         const SizedBox(height: 14),
-                        TextFormField(
-                          controller: _department,
-                          textCapitalization: TextCapitalization.words,
-                          decoration: const InputDecoration(
-                            labelText: 'Department',
-                            prefixIcon:
-                                Icon(Icons.apartment_rounded, size: 20),
-                          ),
+                        _lookupDropdown(
+                          async: departmentsAsync,
+                          label: 'Department',
+                          icon: Icons.apartment_rounded,
+                          value: _department,
+                          onChanged: (v) => setState(() => _department = v),
+                        ),
+                        const SizedBox(height: 14),
+                        _lookupDropdown(
+                          async: designationsAsync,
+                          label: 'Designation',
+                          icon: Icons.badge_outlined,
+                          value: _designation,
+                          onChanged: (v) => setState(() => _designation = v),
                         ),
                         const SizedBox(height: 14),
                         TextFormField(

@@ -1,6 +1,7 @@
 import '../../core/theme.dart';
 
-/// A direct report of the current manager (from `GET /api/employees/my-team`).
+/// A direct report of the current manager, with today's attendance state
+/// (from `GET /api/employees/my-team/today-status`).
 class TeamMember {
   final int id;
   final String name;
@@ -11,6 +12,11 @@ class TeamMember {
   final String? email;
   final String? branchLabel;
 
+  /// PUNCHED_IN | PUNCHED_OUT | ABSENT | LEAVE | NOT_LOGGED_IN
+  final String state;
+  final String? checkIn; // ISO datetime, when punched in
+  final String? checkOut; // ISO datetime, when punched out
+
   const TeamMember({
     required this.id,
     required this.name,
@@ -20,21 +26,49 @@ class TeamMember {
     required this.phone,
     required this.email,
     required this.branchLabel,
+    this.state = 'NOT_LOGGED_IN',
+    this.checkIn,
+    this.checkOut,
   });
 
   factory TeamMember.fromJson(Map<String, dynamic> j) {
-    final name =
-        '${j['firstName'] ?? ''} ${j['lastName'] ?? ''}'.trim();
+    // Tolerates both the plain /my-team shape (id, firstName, lastName) and the
+    // /my-team/today-status shape (employeeId, name, state, checkIn, checkOut).
+    final composed = '${j['firstName'] ?? ''} ${j['lastName'] ?? ''}'.trim();
+    final given = (j['name'] as String?)?.trim();
+    final resolvedName = (given != null && given.isNotEmpty)
+        ? given
+        : (composed.isNotEmpty
+            ? composed
+            : (j['employeeCode'] as String? ?? 'Employee'));
+    final rawId = (j['id'] ?? j['employeeId']) as num;
     return TeamMember(
-      id: (j['id'] as num).toInt(),
-      name: name.isEmpty ? (j['employeeCode'] as String? ?? 'Employee') : name,
+      id: rawId.toInt(),
+      name: resolvedName,
       employeeCode: j['employeeCode'] as String?,
       designation: j['designation'] as String?,
       department: j['department'] as String?,
       phone: j['phone'] as String?,
       email: j['email'] as String?,
       branchLabel: j['branchLabel'] as String?,
+      state: (j['state'] as String?) ?? 'NOT_LOGGED_IN',
+      checkIn: j['checkIn'] as String?,
+      checkOut: j['checkOut'] as String?,
     );
+  }
+
+  StatusTone get statusTone => StatusTone.forTeamState(state);
+
+  String? get checkInHm => _hm(checkIn);
+  String? get checkOutHm => _hm(checkOut);
+
+  /// "HH:mm" (local) from an ISO datetime, or null.
+  static String? _hm(String? iso) {
+    if (iso == null || iso.isEmpty) return null;
+    final t = DateTime.tryParse(iso);
+    if (t == null) return null;
+    final l = t.toLocal();
+    return '${l.hour.toString().padLeft(2, '0')}:${l.minute.toString().padLeft(2, '0')}';
   }
 }
 
