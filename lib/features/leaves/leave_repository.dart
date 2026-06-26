@@ -21,6 +21,33 @@ class LeaveRepository {
     );
   }
 
+  /// Dates in [from..to] (yyyy-MM-dd) covered by a PENDING leave request for the
+  /// employee, expanded across each request's from→to span. Used to flag
+  /// "Leave request submitted" days on the attendance screen.
+  Future<Set<String>> myPendingLeaveDates(
+    int employeeId, {
+    String? from,
+    String? to,
+  }) async {
+    final leaves = await listForEmployee(employeeId, size: 100);
+    final out = <String>{};
+    for (final lv in leaves) {
+      if (lv.status != 'PENDING') continue;
+      final start = DateTime.tryParse(lv.fromDate);
+      final end = DateTime.tryParse(lv.toDate);
+      if (start == null || end == null) continue;
+      for (var d = start; !d.isAfter(end); d = d.add(const Duration(days: 1))) {
+        final iso = '${d.year.toString().padLeft(4, '0')}-'
+            '${d.month.toString().padLeft(2, '0')}-'
+            '${d.day.toString().padLeft(2, '0')}';
+        if (from != null && iso.compareTo(from) < 0) continue;
+        if (to != null && iso.compareTo(to) > 0) continue;
+        out.add(iso);
+      }
+    }
+    return out;
+  }
+
   Future<List<LeaveRequest>> listForTeam({int page = 0, int size = 50}) async {
     return _api.get<List<LeaveRequest>>(
       '/api/leaves/team',
