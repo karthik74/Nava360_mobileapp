@@ -36,6 +36,9 @@ import 'features/meetings/meetings_screen.dart';
 import 'features/trainings/trainings_screen.dart';
 import 'features/announcements/announcements_screen.dart';
 import 'features/announcements/announcement_detail_screen.dart';
+import 'features/policies/policies_screen.dart';
+import 'features/policies/policy_detail_screen.dart';
+import 'features/whistleblower/whistleblower_form_screen.dart';
 import 'features/assets/my_assets_screen.dart';
 import 'features/assets/asset_scan_screen.dart';
 import 'features/payslips/payslips_screen.dart';
@@ -169,6 +172,20 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: '/policies',
+        builder: (_, __) => const PoliciesScreen(),
+      ),
+      GoRoute(
+        path: '/policies/:id',
+        builder: (_, state) => PolicyDetailScreen(
+          policyId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/whistleblower',
+        builder: (_, __) => const WhistleblowerFormScreen(),
+      ),
+      GoRoute(
         path: '/assets',
         builder: (_, __) => const MyAssetsScreen(),
       ),
@@ -242,6 +259,9 @@ class HrmsApp extends ConsumerWidget {
     // …and into an announcement.
     ref.read(pushServiceProvider).onOpenAnnouncement =
         (id) => router.push('/announcements/$id');
+    // …and into a company policy.
+    ref.read(pushServiceProvider).onOpenPolicy =
+        (id) => router.push('/policies/$id');
     // …and into the employee's assets (asset assignment / warranty pushes).
     ref.read(pushServiceProvider).onOpenAssets = () => router.push('/assets');
     return MaterialApp.router(

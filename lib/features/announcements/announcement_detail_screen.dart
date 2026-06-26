@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -15,18 +16,6 @@ final announcementDetailProvider =
     FutureProvider.autoDispose.family<MyAnnouncement, int>((ref, id) {
   return ref.watch(announcementsRepositoryProvider).markRead(id);
 });
-
-String _stripHtml(String s) => s
-    .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
-    .replaceAll(RegExp(r'</p>', caseSensitive: false), '\n\n')
-    .replaceAll(RegExp(r'<li>', caseSensitive: false), '• ')
-    .replaceAll(RegExp(r'</li>', caseSensitive: false), '\n')
-    .replaceAll(RegExp(r'<[^>]+>'), '')
-    .replaceAll('&nbsp;', ' ')
-    .replaceAll('&amp;', '&')
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .trim();
 
 Color priorityColor(String p) {
   switch (p) {
@@ -104,9 +93,14 @@ class AnnouncementDetailScreen extends ConsumerWidget {
               if (a.description != null && a.description!.trim().isNotEmpty)
                 GlassCard(
                   shadow: AppShadows.soft,
-                  child: Text(
-                    _stripHtml(a.description!),
-                    style: const TextStyle(fontSize: 14, height: 1.5, color: AppColors.inkSoft),
+                  // The body is HTML (rich text with inline styles) — render it so
+                  // headings, lists, colours and links show as intended. Links open
+                  // in the external browser.
+                  child: HtmlWidget(
+                    a.description!,
+                    textStyle: const TextStyle(fontSize: 14, height: 1.5, color: AppColors.inkSoft),
+                    onTapUrl: (url) =>
+                        launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
                   ),
                 ),
               if (a.attachments.isNotEmpty) ...[

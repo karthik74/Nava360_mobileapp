@@ -8,6 +8,7 @@ import '../../core/api_client.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../announcements/announcements_repository.dart';
+import '../policies/policies_repository.dart';
 import '../auth/auth_controller.dart';
 import '../chat/chat_controller.dart';
 import '../leaves/leave_repository.dart';
@@ -61,6 +62,18 @@ final _drawerUnreadAnnouncementsProvider =
   if (user?.employeeId == null) return 0;
   try {
     return await ref.watch(announcementsRepositoryProvider).getUnreadCount();
+  } catch (_) {
+    return 0;
+  }
+});
+
+final _drawerUnreadPoliciesProvider =
+    FutureProvider.autoDispose<int>((ref) async {
+  final user = ref.watch(authUserProvider);
+  if (user?.employeeId == null) return 0;
+  try {
+    final list = await ref.watch(policiesRepositoryProvider).myPolicies();
+    return list.where((p) => !p.read).length;
   } catch (_) {
     return 0;
   }
@@ -381,6 +394,8 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
         ref.watch(_drawerPendingApprovalsProvider).asData?.value ?? 0;
     final unreadAnnouncements =
         ref.watch(_drawerUnreadAnnouncementsProvider).asData?.value ?? 0;
+    final unreadPolicies =
+        ref.watch(_drawerUnreadPoliciesProvider).asData?.value ?? 0;
 
     final overviewItems = <_NavItemData>[
       const _NavItemData(
@@ -453,6 +468,14 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
         path: '/announcements',
         accent: AppColors.primary,
         badge: unreadAnnouncements > 0 ? unreadAnnouncements : null,
+        isPush: true,
+      ),
+      _NavItemData(
+        label: 'Policies',
+        icon: Icons.description_rounded,
+        path: '/policies',
+        accent: AppColors.info,
+        badge: unreadPolicies > 0 ? unreadPolicies : null,
         isPush: true,
       ),
       const _NavItemData(

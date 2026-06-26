@@ -402,7 +402,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final activeTasks = pendingTasks + inProgressTasks;
 
     final mq = MediaQuery.of(context);
-    return RefreshIndicator(
+    return Stack(
+      children: [
+        RefreshIndicator(
       color: AppColors.primary,
       backgroundColor: Colors.white.withOpacity(0.85),
       onRefresh: () async {
@@ -526,6 +528,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ],
         ],
       ),
+        ),
+        Positioned(
+          right: 16,
+          bottom: mq.padding.bottom + AppChrome.bottomNavHeight + 14,
+          child: const _ReportConcernButton(),
+        ),
+      ],
     );
   }
 
@@ -617,6 +626,28 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       default:
         return s.toLowerCase();
     }
+  }
+}
+
+/// Bottom-left "Report a Concern" launcher → confidential whistleblower form.
+class _ReportConcernButton extends StatelessWidget {
+  const _ReportConcernButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.danger,
+      elevation: 4,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: () => context.push('/whistleblower'),
+        child: const Padding(
+          padding: EdgeInsets.all(15),
+          child: Icon(Icons.shield_outlined, color: Colors.white, size: 24),
+        ),
+      ),
+    );
   }
 }
 

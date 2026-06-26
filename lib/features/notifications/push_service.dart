@@ -84,6 +84,33 @@ class PushService {
     }
   }
 
+  /// Called with a policyId when a policy notification is tapped.
+  /// Buffered like [onOpenChat] for cold-start taps.
+  void Function(int policyId)? _onOpenPolicy;
+  int? _pendingPolicyId;
+
+  set onOpenPolicy(void Function(int policyId)? cb) {
+    _onOpenPolicy = cb;
+    final pending = _pendingPolicyId;
+    if (cb != null && pending != null) {
+      _pendingPolicyId = null;
+      cb(pending);
+    }
+  }
+
+  /// Called with a whistleblower caseId when the reporter taps a status push.
+  void Function(int caseId)? _onOpenWhistleblower;
+  int? _pendingWhistleblowerId;
+
+  set onOpenWhistleblower(void Function(int caseId)? cb) {
+    _onOpenWhistleblower = cb;
+    final pending = _pendingWhistleblowerId;
+    if (cb != null && pending != null) {
+      _pendingWhistleblowerId = null;
+      cb(pending);
+    }
+  }
+
   /// Opens the employee's assets list when an asset notification is tapped.
   void Function()? _onOpenAssets;
   bool _pendingAssets = false;
@@ -263,6 +290,28 @@ class PushService {
         cb(id);
       } else {
         _pendingAnnouncementId = id;
+      }
+      return;
+    }
+    if (type == 'POLICY') {
+      final id = int.tryParse('${data['policyId']}');
+      if (id == null) return;
+      final cb = _onOpenPolicy;
+      if (cb != null) {
+        cb(id);
+      } else {
+        _pendingPolicyId = id;
+      }
+      return;
+    }
+    if (type == 'WHISTLEBLOWER') {
+      final id = int.tryParse('${data['caseId']}');
+      if (id == null) return;
+      final cb = _onOpenWhistleblower;
+      if (cb != null) {
+        cb(id);
+      } else {
+        _pendingWhistleblowerId = id;
       }
       return;
     }

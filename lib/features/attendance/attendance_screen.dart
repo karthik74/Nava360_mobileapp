@@ -128,6 +128,8 @@ String _deriveBucket(DateTime d, AttendanceRecord? rec, String? holidayName,
       return (color: AppColors.pink, label: 'Holiday', type: holidayName ?? 'Holiday');
     case 'nonworking':
       return (color: AppColors.muted, label: 'Non-working', type: 'Non-working day');
+    case 'future':
+      return (color: AppColors.muted, label: 'Upcoming', type: 'Upcoming');
     default:
       return (color: AppColors.hairline, label: '—', type: '—');
   }
@@ -170,7 +172,8 @@ final _monthDataProvider =
       await repo.listForEmployee(user!.employeeId!, from: from, to: to, size: 100);
   final holidays = await repo.listMyHolidays(from: from, to: to);
   final nonworking = await repo.listNonWorkingDays();
-  final regs = await repo.myRegularizationStatusByDate(from: from, to: to);
+  final regs =
+      await repo.myRegularizationStatusByDate(user.employeeId!, from: from, to: to);
   final pendingLeaves = await ref
       .watch(leaveRepositoryProvider)
       .myPendingLeaveDates(user.employeeId!, from: from, to: to);
@@ -293,8 +296,14 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     double totalHours = 0;
     final fmt = DateFormat('yyyy-MM-dd');
     for (final date in data.cycle) {
-      if (date.isAfter(todayStart)) continue; // no future days
       final iso = fmt.format(date);
+      final isFuture = date.isAfter(todayStart);
+      final regStatus = data.regs[iso];
+      final leavePending = data.pendingLeaves.contains(iso);
+      // Past/today days always show. Future days are normally hidden, but a future
+      // day with a pending leave (leaves are usually future-dated) or pending
+      // regularization must still appear so the request shows on its exact day.
+      if (isFuture && !(leavePending || regStatus == 'PENDING')) continue;
       final holidayName = data.holidays[iso];
       final rec = data.recordsByDate[iso];
       final bucket = _deriveBucket(date, rec, holidayName, data.nonworking);
@@ -307,8 +316,8 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
         record: rec,
         holidayName: holidayName,
         hasReg: data.regs.containsKey(iso),
-        regStatus: data.regs[iso],
-        leavePending: data.pendingLeaves.contains(iso),
+        regStatus: regStatus,
+        leavePending: leavePending,
       ));
     }
     // Newest first.
@@ -368,10 +377,13 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
   void _openDayActions(_DayCellData c) {
     final meta = _bucketMeta(c.bucket, c.holidayName);
     final regPending = c.regStatus == 'PENDING';
-    // Regularization only for real working days (not holiday/non-working), and
-    // not when one is already awaiting approval for this day.
-    final canRegularize =
-        c.bucket != 'holiday' && c.bucket != 'nonworking' && !regPending;
+    // Regularization only for real, past working days (not holiday/non-working,
+    // not future — the backend rejects regularizing a future date), and not when
+    // one is already awaiting approval for this day.
+    final canRegularize = c.bucket != 'holiday' &&
+        c.bucket != 'nonworking' &&
+        c.bucket != 'future' &&
+        !regPending;
     // Leave only for days that aren't already present/leave/holiday/non-working,
     // and not when a leave request is already pending for this day.
     final canLeave =
