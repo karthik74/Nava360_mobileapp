@@ -121,6 +121,8 @@ class AttendanceRepository {
   }
 
   /// Holidays visible to the current employee in [from..to], as date→name.
+  /// Restricted (optional) holidays are excluded — they appear only on the
+  /// Holidays screen and must not be marked as a holiday in attendance.
   Future<Map<String, String>> listMyHolidays({String? from, String? to}) {
     return _api.get<Map<String, String>>(
       '/api/holidays/my',
@@ -134,7 +136,9 @@ class AttendanceRepository {
         for (final e in list) {
           final m = e as Map<String, dynamic>;
           final dt = m['date'] as String?;
-          if (dt != null) out[dt] = (m['name'] as String?) ?? 'Holiday';
+          if (dt != null && m['optional'] != true) {
+            out[dt] = (m['name'] as String?) ?? 'Holiday';
+          }
         }
         return out;
       },
