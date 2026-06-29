@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/api_client.dart';
+import '../../core/navigation/mobile_menu_config.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../announcements/announcements_repository.dart';
@@ -13,6 +14,22 @@ import '../auth/auth_controller.dart';
 import '../chat/chat_controller.dart';
 import '../leaves/leave_repository.dart';
 import '../tasks/task_repository.dart';
+
+// ─────────────────────────────────────────────────────────────────────
+// Drawer presentation styles (all driven by the same mobile_menu_config):
+//   collapsible — #1: expandable module sections, menus inline.
+//   moduleList  — #2: module cards → each opens a dedicated module screen.
+// (chips — #3 — will be added when implemented.) Flip this one variable to
+// switch the drawer between implementations.
+// ─────────────────────────────────────────────────────────────────────
+enum _DrawerStyle { collapsible, moduleList }
+
+// `final` (not `const`) on purpose: it keeps BOTH branches live for the
+// analyzer, so the inactive style's code is never flagged as dead.
+// collapsible = everything stays IN the drawer (tap a module → its menus
+// expand inline, no new screen). moduleList = module cards → dedicated screens.
+// ignore: prefer_const_declarations
+final _DrawerStyle _kDrawerStyle = _DrawerStyle.collapsible;
 
 // ─────────────────────────────────────────────────────────────────────
 // Drawer badge counters — populated when the drawer is on screen.
@@ -92,27 +109,7 @@ class HomeShell extends ConsumerWidget {
   const HomeShell({super.key, required this.child});
   final Widget child;
 
-  // Bottom-nav tabs — Attendance removed
-  static const _bottomTabs = [
-    _Tab(
-      label: 'Home',
-      icon: Icons.home_outlined,
-      selectedIcon: Icons.home_rounded,
-      path: '/home',
-    ),
-    _Tab(
-      label: 'Tasks',
-      icon: Icons.task_alt_outlined,
-      selectedIcon: Icons.task_alt_rounded,
-      path: '/tasks',
-    ),
-    _Tab(
-      label: 'Team',
-      icon: Icons.groups_2_outlined,
-      selectedIcon: Icons.groups_2_rounded,
-      path: '/team',
-    ),
-  ];
+  // Bottom-nav tabs are sourced from mobile_menu_config.dart (bottomNavTabs).
 
   int _indexFromLocation(String loc, List<_Tab> tabs) {
     for (var i = 0; i < tabs.length; i++) {
@@ -134,16 +131,22 @@ class HomeShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final loc = GoRouterState.of(context).matchedLocation;
     final user = ref.watch(authUserProvider);
-    // Anyone who can have a team sees the Team tab. Gated on EMPLOYEE_VIEW
-    // (held by HR, MANAGER and any custom managerial role) rather than hard-coded
-    // role names, so it survives the dynamic RBAC setup. Admin always sees it.
-    // The Team screen shows "No team members…" gracefully if they have none.
-    final isManager = (user?.hasRole(const {'ADMIN'}) ?? false) ||
-        (user?.hasPermission('EMPLOYEE_VIEW') ?? false);
-    final visibleTabs = isManager ? _bottomTabs : _bottomTabs.take(2).toList();
+    final isManager = isManagerUser(user);
+    // Bottom-nav tabs come from the centralized mobile_menu_config (Home, HRMS,
+    // Payroll, My Team*, More — My Team only for managers). No hardcoded tabs.
+    final visibleTabs = bottomNavTabs(user)
+        .map((m) => _Tab(label: m.label, icon: m.icon, selectedIcon: m.icon, path: m.route))
+        .toList();
     final index = _indexFromLocation(loc, visibleTabs);
 
-    return Scaffold(
+    return PopScope(
+      // On a root tab, intercept Android back → go Home instead of exiting;
+      // deeper (pushed) screens pop normally because the shell isn't the top route.
+      canPop: index == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) context.go('/home');
+      },
+      child: Scaffold(
       key: const ValueKey('home_shell_scaffold'),
       backgroundColor: Colors.transparent,
       extendBody: true,
@@ -284,6 +287,7 @@ class HomeShell extends ConsumerWidget {
           ),
         ),
       ),
+      ),
     );
   }
 }
@@ -397,130 +401,86 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
     final unreadPolicies =
         ref.watch(_drawerUnreadPoliciesProvider).asData?.value ?? 0;
 
-    final overviewItems = <_NavItemData>[
-      const _NavItemData(
-        label: 'Dashboard',
-        icon: Icons.home_rounded,
-        path: '/home',
-      ),
-      const _NavItemData(
-        label: 'Attendance',
-        icon: Icons.fingerprint_rounded,
-        path: '/attendance',
-        accent: AppColors.accent,
-      ),
-      _NavItemData(
-        label: 'Leaves',
-        icon: Icons.event_available_rounded,
-        path: '/leaves',
-        accent: AppColors.success,
-        badge: pendingLeaves > 0 ? pendingLeaves : null,
-      ),
-      _NavItemData(
-        label: 'Tasks',
-        icon: Icons.task_alt_rounded,
-        path: '/tasks',
-        accent: AppColors.warning,
-        badge: activeTasks > 0 ? activeTasks : null,
-      ),
-    ];
-
     final unreadChats = ref.watch(totalUnreadProvider);
 
-    final workspaceItems = <_NavItemData>[
-      _NavItemData(
-        label: 'Chats',
-        icon: Icons.chat_rounded,
-        path: '/chats',
-        accent: AppColors.accent,
-        badge: unreadChats > 0 ? unreadChats : null,
-        isPush: true,
-      ),
-      if (widget.isManager)
-        _NavItemData(
-          label: 'Team',
-          icon: Icons.groups_2_rounded,
-          path: '/team',
-          accent: AppColors.pink,
-          badge: pendingApprovals > 0 ? pendingApprovals : null,
-        ),
-      // Recruitment — shown per the user's permissions (INTERVIEW_VIEW /
-      // REQUISITION_CREATE). HR, DHR, RHR, RM and Admin get these.
-      if (user?.hasPermission('INTERVIEW_VIEW') ?? false)
-        const _NavItemData(
-          label: 'My Interviews',
-          icon: Icons.event_note_rounded,
-          path: '/interviews',
-          accent: AppColors.primary,
-          isPush: true,
-        ),
-      if (user?.hasPermission('REQUISITION_CREATE') ?? false)
-        const _NavItemData(
-          label: 'Job Requisitions',
-          icon: Icons.work_outline_rounded,
-          path: '/requisitions',
-          accent: AppColors.pink,
-          isPush: true,
-        ),
-      _NavItemData(
-        label: 'Announcements',
-        icon: Icons.campaign_rounded,
-        path: '/announcements',
-        accent: AppColors.primary,
-        badge: unreadAnnouncements > 0 ? unreadAnnouncements : null,
-        isPush: true,
-      ),
-      _NavItemData(
-        label: 'Policies',
-        icon: Icons.description_rounded,
-        path: '/policies',
-        accent: AppColors.info,
-        badge: unreadPolicies > 0 ? unreadPolicies : null,
-        isPush: true,
-      ),
-      const _NavItemData(
-        label: 'My Meetings',
-        icon: Icons.event_rounded,
-        path: '/my-meetings',
-        accent: AppColors.primary,
-        isPush: true,
-      ),
-      const _NavItemData(
-        label: 'My Trainings',
-        icon: Icons.school_rounded,
-        path: '/my-trainings',
-        accent: AppColors.warning,
-        isPush: true,
-      ),
-      const _NavItemData(
-        label: 'My Assets',
-        icon: Icons.devices_other_rounded,
-        path: '/assets',
-        accent: AppColors.primary,
-        isPush: true,
-      ),
-      const _NavItemData(
-        label: 'My Payslips',
-        icon: Icons.receipt_long_rounded,
-        path: '/my-payslips',
-        accent: AppColors.success,
-        isPush: true,
-      ),
-      const _NavItemData(
-        label: 'My Resignation',
-        icon: Icons.logout_rounded,
-        path: '/my-resignation',
-        accent: AppColors.danger,
-        isPush: true,
-      ),
-    ];
+    // Live badges keyed by route, applied to the config-driven items below.
+    final badges = <String, int>{
+      '/leaves': pendingLeaves,
+      '/tasks': activeTasks,
+      '/chats': unreadChats,
+      '/team': pendingApprovals,
+      '/announcements': unreadAnnouncements,
+      '/policies': unreadPolicies,
+    };
+    // Routes hosted by the bottom-nav ShellRoute navigate with `go` (switch tab);
+    // everything else pushes so the back button returns to the previous screen.
+    const tabRoutes = {'/home', '/attendance', '/leaves', '/tasks', '/team', '/hrms', '/payroll', '/more'};
 
-    // Local fuzzy filter on label.
+    Color moduleAccent(MobileModule m) {
+      switch (m) {
+        case MobileModule.hrms:
+          return AppColors.primary;
+        case MobileModule.payroll:
+          return AppColors.success;
+        case MobileModule.team:
+          return AppColors.pink;
+        case MobileModule.more:
+          return AppColors.info;
+        case MobileModule.home:
+          return AppColors.accent;
+      }
+    }
+
+    // Aggregate badge for a module = sum of its menu items' route badges.
+    int moduleBadge(MobileModule m) =>
+        menuFor(m, user).fold(0, (s, item) => s + (badges[item.route] ?? 0));
+
+    // Items for a module — deduped by route (collapses stubbed Payroll/Team
+    // sub-cards to one entry per destination).
+    List<_NavItemData> itemsForModule(MobileModule module) {
+      final seen = <String>{};
+      final out = <_NavItemData>[];
+      for (final m in menuFor(module, user)) {
+        if (!seen.add(m.route)) continue;
+        final b = badges[m.route] ?? 0;
+        out.add(_NavItemData(
+          label: m.label,
+          icon: m.icon,
+          path: m.route,
+          badge: b > 0 ? b : null,
+          isPush: !tabRoutes.contains(m.route),
+        ));
+      }
+      return out;
+    }
+
+    // Collapsible module sections (Home is the bottom-nav tab — surfaced as a
+    // direct Dashboard tile above, not a section).
+    final moduleSections = modulesFor(user)
+        .where((mi) => mi.module != MobileModule.home)
+        .map((mi) => (info: mi, items: itemsForModule(mi.module)))
+        .where((s) => s.items.isNotEmpty)
+        .toList();
+    final anyActive = moduleSections
+        .any((s) => s.items.any((i) => widget.currentPath.startsWith(i.path)));
+
+    // When the user types, search jumps straight to any menu across all modules.
     final query = _query.trim().toLowerCase();
-    bool matches(_NavItemData item) =>
-        query.isEmpty || item.label.toLowerCase().contains(query);
-    final filteredOverview = overviewItems.where(matches).toList();
-    final filteredWorkspace = workspaceItems.where(matches).toList();
+    final searchItems = query.isEmpty
+        ? <_NavItemData>[]
+        : allMenuItems(user)
+            .where((m) => m.label.toLowerCase().contains(query))
+            .map((m) {
+              final b = badges[m.route] ?? 0;
+              return _NavItemData(
+                label: m.label,
+                icon: m.icon,
+                path: m.route,
+                badge: b > 0 ? b : null,
+                isPush: !tabRoutes.contains(m.route),
+              );
+            })
+            .toList();
 
     return Drawer(
       backgroundColor: Colors.transparent,
@@ -568,18 +528,63 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
                       padding:
                           const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       children: [
-                        if (filteredOverview.isNotEmpty) ...[
-                          const _DrawerSectionLabel(label: 'OVERVIEW'),
-                          for (final item in filteredOverview)
-                            _DrawerNavTile(
-                              item: item,
-                              currentPath: widget.currentPath,
+                        // Implementation #1 — collapsible module sections.
+                        if (query.isEmpty &&
+                            _kDrawerStyle == _DrawerStyle.collapsible) ...[
+                          _DrawerNavTile(
+                            item: const _NavItemData(
+                              label: 'Dashboard',
+                              icon: Icons.home_rounded,
+                              path: '/home',
+                              accent: AppColors.accent,
                             ),
-                        ],
-                        if (filteredWorkspace.isNotEmpty) ...[
+                            currentPath: widget.currentPath,
+                          ),
                           const SizedBox(height: 6),
-                          const _DrawerSectionLabel(label: 'WORKSPACE'),
-                          for (final item in filteredWorkspace)
+                          const _DrawerSectionLabel(label: 'MODULES'),
+                          for (var s = 0; s < moduleSections.length; s++)
+                            _ModuleSection(
+                              label: moduleSections[s].info.label,
+                              icon: moduleSections[s].info.icon,
+                              accent: moduleAccent(moduleSections[s].info.module),
+                              badge: moduleBadge(moduleSections[s].info.module),
+                              items: moduleSections[s].items,
+                              currentPath: widget.currentPath,
+                              initiallyExpanded: moduleSections[s].items.any(
+                                      (i) => widget.currentPath.startsWith(i.path)) ||
+                                  (!anyActive && s == 0),
+                            ),
+                        ]
+                        // Implementation #2 — module list (cards) → module screen.
+                        else if (query.isEmpty &&
+                            _kDrawerStyle == _DrawerStyle.moduleList) ...[
+                          const _DrawerSectionLabel(label: 'MODULES'),
+                          for (final mi in modulesFor(user)
+                              .where((m) => m.module != MobileModule.home))
+                            _ModuleCard(
+                              label: mi.label,
+                              icon: mi.icon,
+                              accent: moduleAccent(mi.module),
+                              badge: moduleBadge(mi.module),
+                              itemCount: itemsForModule(mi.module).length,
+                              active: widget.currentPath.startsWith(mi.route) ||
+                                  itemsForModule(mi.module)
+                                      .any((i) => widget.currentPath.startsWith(i.path)),
+                              // Push (not go) so the system Back returns to the
+                              // previous screen — predictable drawer navigation.
+                              onTap: () {
+                                Navigator.pop(context);
+                                context.push(mi.route);
+                              },
+                            ),
+                        ] else if (searchItems.isEmpty) ...[
+                          const Padding(
+                            padding: EdgeInsets.fromLTRB(16, 20, 16, 8),
+                            child: Text('No menus match your search.'),
+                          ),
+                        ] else ...[
+                          const _DrawerSectionLabel(label: 'RESULTS'),
+                          for (final item in searchItems)
                             _DrawerNavTile(
                               item: item,
                               currentPath: widget.currentPath,
@@ -901,6 +906,218 @@ class _DrawerSectionLabel extends StatelessWidget {
           fontWeight: FontWeight.w800,
           letterSpacing: 1.4,
           color: AppColors.muted,
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Collapsible module section (Implementation #1) — an expandable header
+// (module icon + label + aggregate badge + animated chevron) that reveals
+// the module's menu tiles inline. Material-3 motion via AnimatedSize /
+// AnimatedRotation. State is local so each module expands independently.
+// ─────────────────────────────────────────────────────────────────────
+class _ModuleSection extends StatefulWidget {
+  const _ModuleSection({
+    required this.label,
+    required this.icon,
+    required this.accent,
+    required this.badge,
+    required this.items,
+    required this.currentPath,
+    required this.initiallyExpanded,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color accent;
+  final int badge;
+  final List<_NavItemData> items;
+  final String currentPath;
+  final bool initiallyExpanded;
+
+  @override
+  State<_ModuleSection> createState() => _ModuleSectionState();
+}
+
+class _ModuleSectionState extends State<_ModuleSection> {
+  late bool _expanded = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              child: Row(
+                children: [
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: widget.accent.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Icon(widget.icon, size: 18, color: widget.accent),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      widget.label,
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  if (widget.badge > 0)
+                    Container(
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: widget.accent,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${widget.badge}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  AnimatedRotation(
+                    turns: _expanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: const Icon(Icons.keyboard_arrow_down_rounded, size: 22),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeInOut,
+          alignment: Alignment.topCenter,
+          child: _expanded
+              ? Padding(
+                  padding: const EdgeInsets.only(left: 10, bottom: 4),
+                  child: Column(
+                    children: [
+                      for (final item in widget.items)
+                        _DrawerNavTile(item: item, currentPath: widget.currentPath),
+                    ],
+                  ),
+                )
+              : const SizedBox(width: double.infinity),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Module card (Implementation #2) — a tappable card for a top-level module
+// (icon + label + menu count + aggregate badge + chevron). Highlights when
+// the current route belongs to the module; tapping opens its module screen.
+// ─────────────────────────────────────────────────────────────────────
+class _ModuleCard extends StatelessWidget {
+  const _ModuleCard({
+    required this.label,
+    required this.icon,
+    required this.accent,
+    required this.badge,
+    required this.itemCount,
+    required this.active,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color accent;
+  final int badge;
+  final int itemCount;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Material(
+        color: active ? accent.withValues(alpha: 0.10) : Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: active ? accent : AppColors.hairline,
+                width: active ? 1.4 : 1,
+              ),
+            ),
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(icon, size: 20, color: accent),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        itemCount == 1 ? '1 menu' : '$itemCount menus',
+                        style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+                      ),
+                    ],
+                  ),
+                ),
+                if (badge > 0)
+                  Container(
+                    margin: const EdgeInsets.only(right: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: accent,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '$badge',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 22,
+                  color: active ? accent : AppColors.muted,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

@@ -23,6 +23,7 @@ import 'features/support/help_support_screen.dart';
 import 'features/customers/customers_screen.dart';
 import 'features/home/dashboard_screen.dart';
 import 'features/home/home_shell.dart';
+import 'features/home/module_screens.dart';
 import 'features/leaves/leaves_screen.dart';
 import 'features/notifications/notifications_screen.dart';
 import 'features/notifications/push_lifecycle.dart';
@@ -43,6 +44,14 @@ import 'features/assets/my_assets_screen.dart';
 import 'features/assets/asset_scan_screen.dart';
 import 'features/payslips/payslips_screen.dart';
 import 'features/resignation/resignation_screen.dart';
+import 'features/travel/travel_models.dart';
+import 'features/travel/travel_plans_screen.dart';
+import 'features/travel/travel_plan_form_screen.dart';
+import 'features/travel/travel_claims_screen.dart';
+import 'features/travel/travel_claim_form_screen.dart';
+import 'features/travel/travel_claim_detail_screen.dart';
+import 'features/travel/travel_approvals_screen.dart';
+import 'features/travel/travel_claim_review_screen.dart';
 
 final goRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -201,6 +210,51 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '/my-resignation',
         builder: (_, __) => const ResignationScreen(),
       ),
+      // ── Travel Management (employee self-service) ──
+      GoRoute(
+        path: '/travel/plans',
+        builder: (_, __) => const TravelPlansScreen(),
+      ),
+      GoRoute(
+        path: '/travel/plans/new',
+        builder: (_, __) => const TravelPlanFormScreen(),
+      ),
+      GoRoute(
+        path: '/travel/plans/edit',
+        builder: (_, state) =>
+            TravelPlanFormScreen(plan: state.extra as TravelPlan?),
+      ),
+      GoRoute(
+        path: '/travel/claims',
+        builder: (_, __) => const TravelClaimsScreen(),
+      ),
+      // Static sub-routes must precede '/travel/claims/:id' so they aren't
+      // captured as an id.
+      GoRoute(
+        path: '/travel/claims/new',
+        builder: (_, __) => const TravelClaimFormScreen(),
+      ),
+      GoRoute(
+        path: '/travel/claims/edit',
+        builder: (_, state) =>
+            TravelClaimFormScreen(claim: state.extra as TravelClaim?),
+      ),
+      GoRoute(
+        path: '/travel/claims/:id',
+        builder: (_, state) => TravelClaimDetailScreen(
+          claimId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/travel/approvals',
+        builder: (_, __) => const TravelApprovalsScreen(),
+      ),
+      GoRoute(
+        path: '/travel/review/:id',
+        builder: (_, state) => TravelClaimReviewScreen(
+          claimId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
       ShellRoute(
         builder: (_, __, child) => HomeShell(child: child),
         routes: [
@@ -212,6 +266,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/leaves', builder: (_, __) => const LeavesScreen()),
           GoRoute(path: '/tasks', builder: (_, __) => const CustomerTasksHub()),
           GoRoute(path: '/team', builder: (_, __) => const TeamScreen()),
+          GoRoute(path: '/hrms', builder: (_, __) => const HrmsScreen()),
+          GoRoute(path: '/payroll', builder: (_, __) => const PayrollScreen()),
+          GoRoute(path: '/more', builder: (_, __) => const MoreScreen()),
         ],
       ),
     ],
