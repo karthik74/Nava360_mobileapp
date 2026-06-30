@@ -124,6 +124,7 @@ class HomeShell extends ConsumerWidget {
     if (loc.startsWith('/leaves')) return 'Leaves';
     if (loc.startsWith('/tasks')) return 'Tasks';
     if (loc.startsWith('/team')) return 'Team';
+    if (loc.startsWith('/performance')) return 'Performance';
     return 'Nava360';
   }
 
@@ -414,7 +415,7 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
     };
     // Routes hosted by the bottom-nav ShellRoute navigate with `go` (switch tab);
     // everything else pushes so the back button returns to the previous screen.
-    const tabRoutes = {'/home', '/attendance', '/leaves', '/tasks', '/team', '/hrms', '/payroll', '/more'};
+    const tabRoutes = {'/home', '/attendance', '/leaves', '/tasks', '/team', '/performance', '/hrms', '/payroll', '/more'};
 
     Color moduleAccent(MobileModule m) {
       switch (m) {

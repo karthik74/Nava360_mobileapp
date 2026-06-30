@@ -62,7 +62,10 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'home', label: 'Home', route: '/home', icon: Icons.home_rounded, module: MobileModule.home, order: 0, showInBottomNav: true),
   MobileMenuItem(key: 'nav.tasks', label: 'Tasks', route: '/tasks', icon: Icons.task_alt_rounded, module: MobileModule.hrms, order: 1, showInBottomNav: true),
   MobileMenuItem(key: 'team', label: 'My Team', route: '/team', icon: Icons.supervisor_account_rounded, module: MobileModule.team, order: 3, employeeAllowed: false, showInBottomNav: true),
-  MobileMenuItem(key: 'more', label: 'More', route: '/more', icon: Icons.more_horiz_rounded, module: MobileModule.more, order: 4, showInBottomNav: true),
+  // Performance replaces the old "More" bottom-nav tab. Visible to everyone: it shows
+  // the user's own scorecard plus (for managers/HR) their direct+indirect downline.
+  // The More MODULE screen (/more) and its items remain reachable from the drawer.
+  MobileMenuItem(key: 'nav.performance', label: 'Performance', route: '/performance', icon: Icons.insights_rounded, module: MobileModule.hrms, order: 4, showInBottomNav: true),
 
   // ── HRMS module cards ──
   // Dashboard (= Home) is surfaced as the drawer's top tile / Home tab, not an HRMS item.
@@ -81,6 +84,7 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'hrms.trainings', label: 'My Trainings', route: '/my-trainings', icon: Icons.school_rounded, module: MobileModule.hrms, order: 14),
   MobileMenuItem(key: 'hrms.assets', label: 'My Assets', route: '/assets', icon: Icons.devices_other_rounded, module: MobileModule.hrms, order: 15),
   MobileMenuItem(key: 'hrms.resignation', label: 'My Resignation', route: '/my-resignation', icon: Icons.logout_rounded, module: MobileModule.hrms, order: 16),
+  MobileMenuItem(key: 'hrms.performance', label: 'My Performance', route: '/my-performance', icon: Icons.insights_rounded, module: MobileModule.hrms, order: 17, requiredPermissions: ['VIEW_SELF_PERFORMANCE']),
   // Whistleblower is intentionally NOT in the menu — reached via the dashboard's
   // "Report a concern" button (keeps the reporting entry low-profile).
 

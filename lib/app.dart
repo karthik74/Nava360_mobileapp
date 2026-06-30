@@ -43,6 +43,8 @@ import 'features/whistleblower/whistleblower_form_screen.dart';
 import 'features/assets/my_assets_screen.dart';
 import 'features/assets/asset_scan_screen.dart';
 import 'features/payslips/payslips_screen.dart';
+import 'features/performance/my_performance_screen.dart';
+import 'features/performance/team_performance_screen.dart';
 import 'features/resignation/resignation_screen.dart';
 import 'features/travel/travel_models.dart';
 import 'features/travel/travel_plans_screen.dart';
@@ -210,6 +212,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '/my-resignation',
         builder: (_, __) => const ResignationScreen(),
       ),
+      GoRoute(
+        path: '/my-performance',
+        builder: (_, __) => const MyPerformanceScreen(),
+      ),
       // ── Travel Management (employee self-service) ──
       GoRoute(
         path: '/travel/plans',
@@ -266,6 +272,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/leaves', builder: (_, __) => const LeavesScreen()),
           GoRoute(path: '/tasks', builder: (_, __) => const CustomerTasksHub()),
           GoRoute(path: '/team', builder: (_, __) => const TeamScreen()),
+          GoRoute(path: '/performance', builder: (_, __) => const TeamPerformanceScreen()),
           GoRoute(path: '/hrms', builder: (_, __) => const HrmsScreen()),
           GoRoute(path: '/payroll', builder: (_, __) => const PayrollScreen()),
           GoRoute(path: '/more', builder: (_, __) => const MoreScreen()),

@@ -15,6 +15,7 @@ import '../attendance/attendance_repository.dart';
 import '../auth/auth_controller.dart';
 import '../leaves/leave_models.dart';
 import '../leaves/leave_repository.dart';
+import '../performance/performance_tab.dart';
 import '../tasks/task_models.dart';
 import '../tasks/task_repository.dart';
 import 'employee_detail_repository.dart';
@@ -140,6 +141,7 @@ class EmployeeDetailScreen extends ConsumerWidget {
     ('Leave', Icons.beach_access_rounded),
     ('Documents', Icons.folder_rounded),
     ('Assets', Icons.devices_other_rounded),
+    ('Performance', Icons.insights_rounded),
     ('Timeline', Icons.timeline_rounded),
   ];
 
@@ -225,6 +227,7 @@ class EmployeeDetailScreen extends ConsumerWidget {
                     canViewSensitive: canViewSensitive,
                   ),
                   _AssetsTab(employeeId: employeeId),
+                  _PerformanceTab(employeeId: employeeId),
                   _TimelineTab(employeeId: employeeId),
                 ],
               ),
@@ -1549,7 +1552,21 @@ class _AssetCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 8. Timeline (composed client-side from the other domains)
+// 8. Performance (FO scorecard — delegates to the shared performance tab body)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PerformanceTab extends StatelessWidget {
+  const _PerformanceTab({required this.employeeId});
+  final int employeeId;
+
+  @override
+  Widget build(BuildContext context) {
+    return PerformanceTabBody(employeeId: employeeId);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. Timeline (composed client-side from the other domains)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _TimelineEvent {
