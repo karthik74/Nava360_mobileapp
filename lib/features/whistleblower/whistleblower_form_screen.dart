@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/employee_lookup.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'whistleblower_evidence.dart';
@@ -23,6 +24,7 @@ class _WhistleblowerFormScreenState extends ConsumerState<WhistleblowerFormScree
   DateTime? _incidentDate;
   final _department = TextEditingController();
   final _persons = TextEditingController();
+  final List<EmployeeLookup> _selectedPersons = [];
   bool _anonymous = false;
   final List<EvidenceFile> _evidence = [];
 
@@ -68,7 +70,7 @@ class _WhistleblowerFormScreenState extends ConsumerState<WhistleblowerFormScree
             description: _description.text.trim(),
             incidentDate: _incidentDate,
             department: _department.text,
-            personsInvolved: _persons.text,
+            personsInvolved: _personsInvolvedValue(),
             anonymous: _anonymous,
             evidence: _evidence,
             onProgress: (s, t) {
@@ -81,6 +83,14 @@ class _WhistleblowerFormScreenState extends ConsumerState<WhistleblowerFormScree
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  String _personsInvolvedValue() {
+    final parts = <String>[
+      ..._selectedPersons.map((e) => e.label),
+      if (_persons.text.trim().isNotEmpty) _persons.text.trim(),
+    ];
+    return parts.join(', ');
   }
 
   Future<void> _showSubmitted() async {
@@ -176,7 +186,21 @@ class _WhistleblowerFormScreenState extends ConsumerState<WhistleblowerFormScree
           TextField(controller: _department),
           const SizedBox(height: 12),
           _label('Person(s) involved'),
-          TextField(controller: _persons),
+          _PersonSelector(
+            selected: _selectedPersons,
+            onAdd: (e) => setState(() {
+              if (!_selectedPersons.contains(e)) _selectedPersons.add(e);
+            }),
+            onRemove: (e) => setState(() => _selectedPersons.remove(e)),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _persons,
+            decoration: const InputDecoration(
+              hintText: 'Add others not in the directory (optional)',
+              prefixIcon: Icon(Icons.person_add_alt_1_outlined, size: 20),
+            ),
+          ),
           const SizedBox(height: 16),
           SwitchListTile.adaptive(
             contentPadding: EdgeInsets.zero,
@@ -235,4 +259,116 @@ class _WhistleblowerFormScreenState extends ConsumerState<WhistleblowerFormScree
         padding: const EdgeInsets.only(bottom: 4, top: 4),
         child: Text(t, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
       );
+}
+
+/// Multi-select employee picker: search the org directory and add one or more
+/// employees as chips. Backed by the slim /api/employees/lookup endpoint.
+class _PersonSelector extends ConsumerStatefulWidget {
+  const _PersonSelector({required this.selected, required this.onAdd, required this.onRemove});
+  final List<EmployeeLookup> selected;
+  final ValueChanged<EmployeeLookup> onAdd;
+  final ValueChanged<EmployeeLookup> onRemove;
+
+  @override
+  ConsumerState<_PersonSelector> createState() => _PersonSelectorState();
+}
+
+class _PersonSelectorState extends ConsumerState<_PersonSelector> {
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _add(EmployeeLookup e) {
+    widget.onAdd(e);
+    _searchCtrl.clear();
+    setState(() => _query = '');
+    FocusScope.of(context).unfocus();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final results = _query.trim().length >= 2
+        ? ref.watch(employeeLookupProvider(_query.trim()))
+        : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.selected.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final e in widget.selected)
+                  Chip(
+                    label: Text(e.label, style: const TextStyle(fontSize: 12)),
+                    onDeleted: () => widget.onRemove(e),
+                    deleteIcon: const Icon(Icons.close_rounded, size: 16),
+                    backgroundColor: AppColors.primary.withValues(alpha: 0.10),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+              ],
+            ),
+          ),
+        TextField(
+          controller: _searchCtrl,
+          onChanged: (v) => setState(() => _query = v),
+          decoration: const InputDecoration(
+            hintText: 'Search employees by name or code',
+            prefixIcon: Icon(Icons.search_rounded, size: 20),
+          ),
+        ),
+        if (results != null)
+          results.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: 10),
+              child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+            ),
+            error: (e, _) => const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text('Could not search employees', style: TextStyle(fontSize: 12, color: AppColors.danger)),
+            ),
+            data: (list) {
+              final available = list.where((e) => !widget.selected.contains(e)).toList();
+              if (available.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text('No matching employees', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+                );
+              }
+              return Container(
+                margin: const EdgeInsets.only(top: 6),
+                constraints: const BoxConstraints(maxHeight: 220),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  border: Border.all(color: AppColors.hairline),
+                ),
+                child: ListView(
+                  shrinkWrap: true,
+                  padding: EdgeInsets.zero,
+                  children: [
+                    for (final e in available)
+                      ListTile(
+                        dense: true,
+                        title: Text(e.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                        subtitle: e.code == null ? null : Text(e.code!, style: const TextStyle(fontSize: 11.5)),
+                        trailing: const Icon(Icons.add_circle_outline_rounded, size: 20, color: AppColors.primary),
+                        onTap: () => _add(e),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+      ],
+    );
+  }
 }

@@ -8,6 +8,9 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/env.dart';
 import '../../core/theme.dart';
 import 'auth_controller.dart';
+import 'biometric/biometric_controller.dart';
+import 'biometric/biometric_enroll_gate.dart';
+import 'biometric/biometric_service.dart';
 
 /// Login screen — port of the design canvas's `LoginScreen`.
 class LoginScreen extends ConsumerStatefulWidget {
@@ -27,6 +30,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _password = TextEditingController();
   bool _obscure = true;
   bool _justSignedIn = false;
+  bool _autoBioTried = false;
+  bool _bioBusy = false;
 
   @override
   void dispose() {
@@ -42,10 +47,46 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         .read(authControllerProvider.notifier)
         .login(_username.text, _password.text);
     if (mounted && ref.read(authControllerProvider).asData?.value != null) {
+      // Signal the enroll gate to offer biometric enrollment after this login.
+      ref.read(justPasswordLoggedInProvider.notifier).state = true;
       setState(() => _justSignedIn = true);
     }
     // Required OS permissions (location, notifications, battery) are requested
     // by the PermissionGate that wraps the app once the user is signed in.
+  }
+
+  /// Case A / D: prompt fingerprint / Face ID, allowing up to 3 attempts before
+  /// falling back to the password form. A backend/state error stops retrying and
+  /// surfaces the reason (e.g. session expired, account inactive).
+  Future<void> _biometricLogin({required bool auto}) async {
+    if (_bioBusy) return;
+    setState(() => _bioBusy = true);
+    final ctrl = ref.read(biometricControllerProvider.notifier);
+    try {
+      for (var attempt = 1; attempt <= 3; attempt++) {
+        final err = await ctrl.loginWithBiometric();
+        if (err == null) {
+          if (mounted) setState(() => _justSignedIn = true); // router redirects
+          return;
+        }
+        // Only a local verification miss is worth retrying; anything else
+        // (device wiped server-side, expired, inactive) should stop immediately.
+        final retriable = err.contains('failed');
+        if (!retriable) {
+          if (mounted) _flash(err);
+          return;
+        }
+        if (attempt == 3 && mounted && !auto) {
+          _flash('Biometric authentication failed. Please login using your password.');
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _bioBusy = false);
+    }
+  }
+
+  void _flash(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   void _goBackToWelcome() {
@@ -61,6 +102,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final state = ref.watch(authControllerProvider);
     final loading = state.isLoading;
     final error = state.hasError ? state.error.toString() : null;
+    final bio = ref.watch(biometricControllerProvider);
+
+    // Case A: if a biometric enrollment exists and the device can use it, prompt
+    // automatically the first time the login screen appears.
+    if (bio.canOfferLogin && !_autoBioTried && !loading && !_justSignedIn) {
+      _autoBioTried = true;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _biometricLogin(auto: true),
+      );
+    }
     // Fields, navigation and the Sign-in CTA are usable whenever a login isn't
     // already in flight. OS permissions are handled after sign-in by the
     // app-level PermissionGate, so the login form doesn't request them here.
@@ -244,6 +295,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               onPressed: (loading || _justSignedIn)
                                   ? null
                                   : _submit,
+                            ),
+                            _BiometricLoginSection(
+                              state: bio,
+                              busy: _bioBusy,
+                              onTap: () => _biometricLogin(auto: false),
                             ),
                             const SizedBox(height: 16),
                             Center(
@@ -872,6 +928,93 @@ class _GradientAuthButton extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Biometric login affordance on the login screen.
+/// - Case A (enrolled + usable): an "or" divider + "Login with Fingerprint/Face ID".
+/// - Case C (enrolled but nothing enrolled on device): a hint to add one.
+/// - Case B (no hardware) / not enrolled here: nothing.
+class _BiometricLoginSection extends StatelessWidget {
+  const _BiometricLoginSection({
+    required this.state,
+    required this.busy,
+    required this.onTap,
+  });
+
+  final BiometricState state;
+  final bool busy;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (state.canOfferLogin) {
+      final isFace = state.label == 'Face ID';
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(child: Divider(color: AppColors.muted.withOpacity(0.3))),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Text('or',
+                    style: TextStyle(color: AppColors.muted, fontSize: 12)),
+              ),
+              Expanded(child: Divider(color: AppColors.muted.withOpacity(0.3))),
+            ],
+          ),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: busy ? null : onTap,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              side: const BorderSide(color: AppColors.primary, width: 1.3),
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2.2),
+                  )
+                : Icon(isFace ? Icons.face_rounded : Icons.fingerprint_rounded,
+                    size: 20),
+            label: Text(
+              busy ? 'Verifying…' : 'Login with ${state.label}',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Case C — enrolled on the account but no fingerprint/Face ID on this device.
+    if (state.enabled &&
+        state.availability == BiometricAvailability.notEnrolled) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.info_outline_rounded,
+                size: 16, color: AppColors.muted),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'To use biometric login, please add a fingerprint or Face ID in your device settings.',
+                style: TextStyle(color: AppColors.muted, fontSize: 12.5),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 }
 

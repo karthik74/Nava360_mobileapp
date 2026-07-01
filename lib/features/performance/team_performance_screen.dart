@@ -90,8 +90,10 @@ class _TeamPerformanceScreenState extends ConsumerState<TeamPerformanceScreen> {
       },
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
+        // Match the My Team screen's spacing: status-bar inset + 8 at top (the
+        // shell's glass app bar floats over), 16 horizontal, nav-bar inset at bottom.
         padding: EdgeInsets.fromLTRB(
-            14, MediaQuery.of(context).padding.top + AppChrome.appBarHeight + 10, 14,
+            16, MediaQuery.of(context).padding.top + 8, 16,
             MediaQuery.of(context).padding.bottom + AppChrome.bottomNavHeight + 16),
         children: [
           // Sticky-feel month selector.
@@ -117,7 +119,7 @@ class _TeamPerformanceScreenState extends ConsumerState<TeamPerformanceScreen> {
                 Icon(Icons.groups_2_rounded, size: 17, color: AppColors.primary),
                 SizedBox(width: 8),
                 Text(
-                  'My Team (direct & indirect)',
+                  'My Team',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w800,

@@ -28,6 +28,14 @@ class AuthController extends StateNotifier<AsyncValue<AuthUser?>> {
     }
   }
 
+  /// Marks the user signed-in after a successful biometric login. The biometric
+  /// flow (verify → exchange credential → persist tokens) is owned by
+  /// BiometricController; this only flips the shared auth state so the router
+  /// redirects to /home, exactly like a password login.
+  void applySignedIn(AuthUser user) {
+    state = AsyncValue.data(user);
+  }
+
   Future<void> logout() async {
     await _repo.logout();
     state = const AsyncValue.data(null);

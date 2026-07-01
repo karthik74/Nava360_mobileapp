@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Optional biometric login (fingerprint / Face). -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <uses-permission android:name="android.permission.USE_FINGERPRINT"/>
     <!-- Voice evidence recording in the Whistleblower module. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- Prompt to exclude the app from battery optimisation for reliable background tracking. -->

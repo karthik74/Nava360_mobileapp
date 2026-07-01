@@ -9,6 +9,8 @@ import 'features/app_update/in_app_update_gate.dart';
 import 'features/attendance/attendance_screen.dart';
 import 'features/attendance/location_lifecycle.dart';
 import 'features/auth/auth_controller.dart';
+import 'features/auth/biometric/biometric_enroll_gate.dart';
+import 'features/auth/biometric/registered_devices_screen.dart';
 import 'features/auth/welcome_seen_controller.dart';
 import 'features/auth/change_password_screen.dart';
 import 'features/auth/first_login_screen.dart';
@@ -45,6 +47,7 @@ import 'features/assets/asset_scan_screen.dart';
 import 'features/payslips/payslips_screen.dart';
 import 'features/performance/my_performance_screen.dart';
 import 'features/performance/team_performance_screen.dart';
+import 'features/audit/my_audits_screen.dart';
 import 'features/resignation/resignation_screen.dart';
 import 'features/travel/travel_models.dart';
 import 'features/travel/travel_plans_screen.dart';
@@ -135,6 +138,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const ChangePasswordScreen(),
       ),
       GoRoute(
+        path: '/security/devices',
+        builder: (_, __) => const RegisteredDevicesScreen(),
+      ),
+      GoRoute(
         path: '/help-support',
         builder: (_, __) => const HelpSupportScreen(),
       ),
@@ -215,6 +222,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/my-performance',
         builder: (_, __) => const MyPerformanceScreen(),
+      ),
+      GoRoute(
+        path: '/audit',
+        builder: (_, __) => const MyAuditsScreen(),
       ),
       // ── Travel Management (employee self-service) ──
       GoRoute(
@@ -338,8 +349,12 @@ class HrmsApp extends ConsumerWidget {
       //      ("Allow all the time"), battery-optimisation exemption and
       //      notifications are all granted (pass-through while signed out).
       //   2. InAppUpdateGate — Google Play's native in-app update flow.
+      //   3. BiometricEnrollGate — offers biometric enrollment once, right after
+      //      a fresh password login (no-op otherwise).
       builder: (context, child) => PermissionGate(
-        child: InAppUpdateGate(child: child ?? const SizedBox.shrink()),
+        child: InAppUpdateGate(
+          child: BiometricEnrollGate(child: child ?? const SizedBox.shrink()),
+        ),
       ),
     );
   }

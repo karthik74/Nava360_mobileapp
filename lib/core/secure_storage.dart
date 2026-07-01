@@ -11,6 +11,15 @@ class SecureStorage {
   static const _kWelcomeSeen = 'onboarding.welcome_seen';
   static const _kNotifEnabled = 'notifications.enabled';
 
+  // ── Biometric login (mobile only) — survive a "logout only" sign-out so the
+  // next open can offer fingerprint / Face ID; wiped by clearBiometric(). ──
+  static const _kBioEnabled = 'biometric.enabled';
+  static const _kBioToken = 'biometric.token'; // rotated opaque credential
+  static const _kBioDeviceId = 'biometric.device_id';
+  static const _kBioEmployeeId = 'biometric.employee_id';
+  static const _kBioUsername = 'biometric.username';
+  static const _kBioLabel = 'biometric.device_label';
+
   static Future<void> writeToken(String token) => _write(_kToken, token);
 
   static Future<String?> readToken() => _read(_kToken);
@@ -76,10 +85,62 @@ class SecureStorage {
   static Future<void> writeNotificationsEnabled(bool enabled) =>
       _write(_kNotifEnabled, enabled ? '1' : '0');
 
-  /// Clears auth credentials. The welcome flag is intentionally preserved
-  /// so signing out doesn't replay the welcome screen.
+  /// Clears auth credentials. The welcome flag and any biometric enrollment are
+  /// intentionally preserved — a "logout only" keeps biometric login available.
   static Future<void> clear() async {
     await _storage.delete(key: _kToken);
     await _storage.delete(key: _kUserJson);
+  }
+
+  // ── Biometric enrollment ──────────────────────────────────────────────────
+
+  /// Whether this device currently has a biometric enrollment stored.
+  static Future<bool> readBiometricEnabled() async {
+    final v = await _read(_kBioEnabled);
+    return v == '1';
+  }
+
+  /// Persist a biometric enrollment (after enable or a rotated login credential).
+  static Future<void> writeBiometricEnrollment({
+    required String token,
+    required String deviceId,
+    int? employeeId,
+    String? username,
+    String? deviceLabel,
+  }) async {
+    await _write(_kBioEnabled, '1');
+    await _write(_kBioToken, token);
+    await _write(_kBioDeviceId, deviceId);
+    if (employeeId != null) await _write(_kBioEmployeeId, employeeId.toString());
+    if (username != null) await _write(_kBioUsername, username);
+    if (deviceLabel != null) await _write(_kBioLabel, deviceLabel);
+  }
+
+  /// Update just the rotated credential returned by a biometric login.
+  static Future<void> updateBiometricToken(String token) => _write(_kBioToken, token);
+
+  static Future<String?> readBiometricToken() => _read(_kBioToken);
+  static Future<String?> readBiometricDeviceId() => _read(_kBioDeviceId);
+  static Future<String?> readBiometricUsername() => _read(_kBioUsername);
+  static Future<String?> readBiometricLabel() => _read(_kBioLabel);
+
+  /// Remove the biometric enrollment entirely (disable / logout-and-disable).
+  static Future<void> clearBiometric() async {
+    await _storage.delete(key: _kBioEnabled);
+    await _storage.delete(key: _kBioToken);
+    await _storage.delete(key: _kBioDeviceId);
+    await _storage.delete(key: _kBioEmployeeId);
+    await _storage.delete(key: _kBioUsername);
+    await _storage.delete(key: _kBioLabel);
+  }
+
+  /// A stable per-install device id: reuse the biometric one if present, else
+  /// generate + persist a fresh UUID so it survives across enrollments.
+  static Future<String> readOrCreateDeviceId(String Function() generate) async {
+    final existing = await _read(_kBioDeviceId);
+    if (existing != null && existing.isNotEmpty) return existing;
+    final id = generate();
+    await _write(_kBioDeviceId, id);
+    return id;
   }
 }

@@ -70,16 +70,18 @@ IconData expenseCategoryIcon(String category) {
 /// Icon for a `TravelMode`.
 IconData travelModeIcon(String? mode) {
   switch (mode) {
-    case 'FLIGHT':
-      return Icons.flight_rounded;
-    case 'TRAIN':
-      return Icons.train_rounded;
+    case 'BIKE':
+      return Icons.two_wheeler_rounded;
     case 'BUS':
       return Icons.directions_bus_rounded;
-    case 'CAB':
+    case 'TRAIN':
+      return Icons.train_rounded;
+    case 'TAXI':
       return Icons.local_taxi_rounded;
-    case 'OWN_VEHICLE':
+    case 'OWN_CAR':
       return Icons.directions_car_rounded;
+    case 'OFFICE_CAR':
+      return Icons.directions_car_filled_rounded;
     default:
       return Icons.alt_route_rounded;
   }

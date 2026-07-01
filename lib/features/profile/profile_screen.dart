@@ -10,6 +10,7 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import '../auth/auth_models.dart';
+import '../auth/biometric/biometric_controller.dart';
 import '../home/home_shell.dart' show employeeProfileProvider;
 import '../notifications/push_service.dart';
 import 'profile_repository.dart';
@@ -228,53 +229,30 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 22),
 
+                  // Security
+                  const AppSectionHeader(title: 'Security'),
+                  const SizedBox(height: 8),
+                  _SettingSwitchTile(
+                    icon: Icons.fingerprint_rounded,
+                    label: 'Biometric login',
+                    value: ref.watch(biometricControllerProvider).enabled,
+                    onChanged: ref.watch(biometricControllerProvider).busy
+                        ? (_) {}
+                        : (v) => _toggleBiometric(context, ref, v),
+                  ),
+                  const SizedBox(height: 8),
+                  _SettingTile(
+                    icon: Icons.devices_other_rounded,
+                    label: 'Registered devices',
+                    onTap: () => context.push('/security/devices'),
+                  ),
+                  const SizedBox(height: 22),
+
                   // Logout
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
-                      onPressed: () {
-                        showDialog(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            backgroundColor: AppColors.surface,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(AppRadii.lg),
-                            ),
-                            title: const Text(
-                              'Sign out?',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            content: const Text(
-                              'You will need to sign in again to access your workspace.',
-                              style: TextStyle(
-                                color: AppColors.inkSoft,
-                                fontSize: 14,
-                              ),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(ctx),
-                                child: const Text('Cancel'),
-                              ),
-                              FilledButton(
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: AppColors.danger,
-                                ),
-                                onPressed: () {
-                                  Navigator.pop(ctx);
-                                  ref
-                                      .read(authControllerProvider.notifier)
-                                      .logout();
-                                },
-                                child: const Text('Sign out'),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                      onPressed: () => _handleLogout(context, ref),
                       icon: const Icon(Icons.logout_rounded,
                           color: AppColors.danger),
                       label: const Text(
@@ -311,6 +289,123 @@ class ProfileScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Turns biometric login on (verify + enroll) or off (confirm + disable).
+Future<void> _toggleBiometric(
+    BuildContext context, WidgetRef ref, bool enable) async {
+  final ctrl = ref.read(biometricControllerProvider.notifier);
+  if (enable) {
+    final err = await ctrl.enable();
+    if (context.mounted) {
+      final label = ref.read(biometricControllerProvider).label;
+      _snack(context, err ?? '$label login enabled', error: err != null);
+    }
+    return;
+  }
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (dctx) => AlertDialog(
+      backgroundColor: AppColors.surface,
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.lg)),
+      title: const Text('Disable Biometric Login?',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+      content: const Text(
+        'This device will require Employee ID and Password for the next login.',
+        style: TextStyle(color: AppColors.inkSoft, fontSize: 14),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(dctx, false),
+            child: const Text('Cancel')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+          onPressed: () => Navigator.pop(dctx, true),
+          child: const Text('Disable'),
+        ),
+      ],
+    ),
+  );
+  if (ok == true) {
+    await ctrl.disable();
+    if (context.mounted) _snack(context, 'Biometric login disabled');
+  }
+}
+
+/// Sign out. When biometric is enabled, offer to keep it or disable it (spec §6).
+Future<void> _handleLogout(BuildContext context, WidgetRef ref) async {
+  final biometricEnabled = ref.read(biometricControllerProvider).enabled;
+
+  if (!biometricEnabled) {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.lg)),
+        title: const Text('Sign out?',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        content: const Text(
+          'You will need to sign in again to access your workspace.',
+          style: TextStyle(color: AppColors.inkSoft, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await ref.read(authControllerProvider.notifier).logout();
+    return;
+  }
+
+  final choice = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: AppColors.surface,
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.lg)),
+      title: const Text('Sign out',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+      content: const Text(
+        'Do you want to keep Biometric Login enabled for the next sign-in?',
+        style: TextStyle(color: AppColors.inkSoft, fontSize: 14),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, 'disable'),
+          child: const Text('Logout & disable',
+              style: TextStyle(color: AppColors.danger)),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, 'keep'),
+          child: const Text('Logout only'),
+        ),
+      ],
+    ),
+  );
+  if (choice == null) return;
+  if (choice == 'disable') {
+    await ref.read(biometricControllerProvider.notifier).disable();
+  }
+  await ref.read(authControllerProvider.notifier).logout();
+}
+
+void _snack(BuildContext context, String msg, {bool error = false}) {
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    content: Text(msg),
+    backgroundColor: error ? AppColors.danger : null,
+  ));
 }
 
 class _BackButton extends StatelessWidget {

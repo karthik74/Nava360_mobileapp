@@ -20,11 +20,12 @@ class TravelEnums {
 
   /// `TravelMode`
   static const travelModes = <String>[
-    'FLIGHT',
-    'TRAIN',
+    'BIKE',
     'BUS',
-    'CAB',
-    'OWN_VEHICLE',
+    'TRAIN',
+    'TAXI',
+    'OWN_CAR',
+    'OFFICE_CAR',
     'OTHER',
   ];
 
