@@ -154,6 +154,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       return;
     }
 
+    // Confirm the punch — same pattern for check-in and check-out.
+    final confirmed = await _confirmPunch(isCheckOut: hasCheckedIn);
+    if (!confirmed || !mounted) return;
+
     final employeeId = ref.read(authUserProvider)?.employeeId;
     if (employeeId == null) {
       _showSnack('Employee profile is missing. Please sign in again.');
@@ -312,6 +316,34 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     } catch (_) {
       // Best-effort — never block check-in on this.
     }
+  }
+
+  /// Confirmation dialog shown before a punch. The same pattern is used for both
+  /// check-in and check-out for a consistent attendance experience:
+  ///   • Check In  → "Do you want to check in?"  [Cancel] [Check In]
+  ///   • Check Out → "Do you want to check out?" [Cancel] [Check Out]
+  Future<bool> _confirmPunch({required bool isCheckOut}) async {
+    final label = isCheckOut ? 'Check Out' : 'Check In';
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(label),
+        content: Text(
+          isCheckOut ? 'Do you want to check out?' : 'Do you want to check in?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(label),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
   }
 
   void _showSnack(String message) {

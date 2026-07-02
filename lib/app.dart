@@ -48,6 +48,11 @@ import 'features/payslips/payslips_screen.dart';
 import 'features/performance/my_performance_screen.dart';
 import 'features/performance/team_performance_screen.dart';
 import 'features/audit/my_audits_screen.dart';
+import 'features/helpdesk/helpdesk_tickets_screen.dart';
+import 'features/helpdesk/helpdesk_raise_screen.dart';
+import 'features/helpdesk/helpdesk_ticket_detail_screen.dart';
+import 'features/helpdesk/helpdesk_kb_screen.dart';
+import 'features/helpdesk/helpdesk_dashboard_screen.dart';
 import 'features/resignation/resignation_screen.dart';
 import 'features/travel/travel_models.dart';
 import 'features/travel/travel_plans_screen.dart';
@@ -226,6 +231,32 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/audit',
         builder: (_, __) => const MyAuditsScreen(),
+      ),
+      // ── Helpdesk (Enterprise Service Desk) ──
+      GoRoute(
+        path: '/helpdesk',
+        builder: (_, __) => const HelpdeskTicketsScreen(),
+      ),
+      GoRoute(
+        path: '/helpdesk/raise',
+        builder: (_, __) => const HelpdeskRaiseScreen(),
+      ),
+      GoRoute(
+        path: '/helpdesk/tickets/:id',
+        builder: (_, state) =>
+            HelpdeskTicketDetailScreen(ticketId: int.parse(state.pathParameters['id']!)),
+      ),
+      GoRoute(
+        path: '/helpdesk/kb',
+        builder: (_, __) => const KnowledgeBaseScreen(),
+      ),
+      GoRoute(
+        path: '/helpdesk/kb/:id',
+        builder: (_, state) => KbArticleScreen(articleId: int.parse(state.pathParameters['id']!)),
+      ),
+      GoRoute(
+        path: '/helpdesk/dashboard',
+        builder: (_, __) => const HelpdeskDashboardScreen(),
       ),
       // ── Travel Management (employee self-service) ──
       GoRoute(

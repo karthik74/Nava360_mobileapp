@@ -91,6 +91,26 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
       setState(() => _error = 'Please enter a destination.');
       return;
     }
+    if (_from.text.trim().isEmpty) {
+      setState(() => _error = 'Please enter the From location.');
+      return;
+    }
+    if (_mode == null || _mode!.isEmpty) {
+      setState(() => _error = 'Please select a travel mode.');
+      return;
+    }
+    if (_startDate == null) {
+      setState(() => _error = 'Please select a start date.');
+      return;
+    }
+    if (_endDate == null) {
+      setState(() => _error = 'Please select an end date.');
+      return;
+    }
+    if (_endDate!.isBefore(_startDate!)) {
+      setState(() => _error = "End date can't be before the start date.");
+      return;
+    }
     setState(() {
       _saving = true;
       _progress = 0;
@@ -157,13 +177,13 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
           children: [
             _label('Title *'),
             TextField(controller: _title, maxLength: 150),
-            _label('From'),
+            _label('From *'),
             TextField(controller: _from),
             const SizedBox(height: 12),
             _label('Destination *'),
             TextField(controller: _destination),
             const SizedBox(height: 12),
-            _label('Travel mode'),
+            _label('Travel mode *'),
             DropdownButtonFormField<String>(
               value: _mode,
               isExpanded: true,
@@ -180,7 +200,7 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
               children: [
                 Expanded(
                   child: _DateField(
-                    label: 'Start date',
+                    label: 'Start date *',
                     value: _startDate == null ? 'Not set' : df.format(_startDate!),
                     onTap: () => _pickDate(isStart: true),
                   ),
@@ -188,7 +208,7 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: _DateField(
-                    label: 'End date',
+                    label: 'End date *',
                     value: _endDate == null ? 'Not set' : df.format(_endDate!),
                     onTap: () => _pickDate(isStart: false),
                   ),

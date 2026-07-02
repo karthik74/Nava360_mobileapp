@@ -456,7 +456,11 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authUserProvider);
-    final canReview = user?.hasRole(const {'ADMIN', 'HR'}) ?? false;
+    // Every leave from /api/leaves/team is a direct report's request, which the
+    // backend authorises this user to review (HR/Admin via DATA_SCOPE_ALL, or the
+    // report's direct manager). Managers — not just ADMIN/HR — must see the
+    // approve/reject actions here, matching the web app and the backend rule.
+    final canReview = user != null;
     final leaves = ref.watch(_teamLeavesProvider);
     final mq = MediaQuery.of(context);
     final pad = EdgeInsets.fromLTRB(

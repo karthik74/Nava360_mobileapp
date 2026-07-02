@@ -2083,14 +2083,18 @@ bool _isOverdue(Task t) {
 
 double? _routeDistanceKm(List<TrackPing> pings) {
   if (pings.length < 2) return null;
+  // Ignore sub-15m hops so stationary GPS drift doesn't inflate the total —
+  // matches the backend travel-distance report (MIN_SEGMENT_METERS).
+  const minSegmentMeters = 15.0;
   var meters = 0.0;
   for (var i = 1; i < pings.length; i++) {
-    meters += _haversineMeters(
+    final m = _haversineMeters(
       pings[i - 1].latitude,
       pings[i - 1].longitude,
       pings[i].latitude,
       pings[i].longitude,
     );
+    if (m >= minSegmentMeters) meters += m;
   }
   return meters / 1000.0;
 }
