@@ -710,7 +710,6 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                 onSend: _send,
                 onEmoji: _showEmojiPicker,
                 onAttach: _pickAttachment,
-                onMention: () => _insertText('@'),
               ),
             ],
           ),
@@ -1165,14 +1164,12 @@ class _InputBar extends StatelessWidget {
     required this.onSend,
     required this.onEmoji,
     required this.onAttach,
-    required this.onMention,
   });
   final TextEditingController controller;
   final bool sending;
   final VoidCallback onSend;
   final VoidCallback onEmoji;
   final VoidCallback onAttach;
-  final VoidCallback onMention;
 
   @override
   Widget build(BuildContext context) {
@@ -1238,12 +1235,6 @@ class _InputBar extends StatelessWidget {
                         ),
                       ),
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.alternate_email_rounded,
-                        color: Color(0xFF8696A0), size: 21),
-                    tooltip: 'Mention someone',
-                    onPressed: onMention,
                   ),
                   IconButton(
                     icon: const Icon(Icons.attach_file_rounded,
