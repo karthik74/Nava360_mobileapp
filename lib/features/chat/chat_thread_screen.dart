@@ -35,6 +35,11 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   /// The current "@..." token being typed (without the @); null = not tagging.
   String? _mentionQuery;
 
+  /// Per-message keys so a reply-tap can scroll its original into view.
+  final Map<int, GlobalKey> _msgKeys = {};
+  /// Message to briefly flash-highlight after a reply-jump.
+  int? _highlightMsgId;
+
   @override
   void initState() {
     super.initState();
@@ -100,6 +105,31 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeOut,
         );
+      }
+    });
+  }
+
+  /// Scroll to (and briefly highlight) the original of a tapped reply. Works for
+  /// messages currently built in the list; if the original is far up and not yet
+  /// built, we nudge the user to scroll up so pagination can pull it in.
+  void _jumpToMessage(int id) {
+    final ctx = _msgKeys[id]?.currentContext;
+    if (ctx == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Scroll up to load the original message')),
+      );
+      return;
+    }
+    Scrollable.ensureVisible(
+      ctx,
+      alignment: 0.5,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+    setState(() => _highlightMsgId = id);
+    Future.delayed(const Duration(milliseconds: 1800), () {
+      if (mounted && _highlightMsgId == id) {
+        setState(() => _highlightMsgId = null);
       }
     });
   }
@@ -624,22 +654,31 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                               !msg.createdAt.isAfter(conv.otherLastReadAt!);
                         }
 
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (separator != null) separator,
-                            if (msg.isSystem)
-                              _SystemBubble(msg: msg)
-                            else
-                              _MessageBubble(
-                                msg: msg,
-                                isMine: isMine,
-                                isRead: isRead,
-                                showSender: conv.isGroup && !isMine,
-                                onLongPress: () =>
-                                    _showDeleteSheet(msg, isMine),
-                              ),
-                          ],
+                        return Container(
+                          key: _msgKeys.putIfAbsent(msg.id, () => GlobalKey()),
+                          color: _highlightMsgId == msg.id
+                              ? const Color(0xFF008069).withOpacity(0.12)
+                              : Colors.transparent,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (separator != null) separator,
+                              if (msg.isSystem)
+                                _SystemBubble(msg: msg)
+                              else
+                                _MessageBubble(
+                                  msg: msg,
+                                  isMine: isMine,
+                                  isRead: isRead,
+                                  showSender: conv.isGroup && !isMine,
+                                  onLongPress: () =>
+                                      _showDeleteSheet(msg, isMine),
+                                  onTapReply: msg.replyToId != null
+                                      ? () => _jumpToMessage(msg.replyToId!)
+                                      : null,
+                                ),
+                            ],
+                          ),
                         );
                       },
                     );
@@ -772,12 +811,15 @@ class _MessageBubble extends StatelessWidget {
     required this.isRead,
     required this.showSender,
     required this.onLongPress,
+    this.onTapReply,
   });
   final ChatMessage msg;
   final bool isMine;
   final bool isRead;
   final bool showSender;
   final VoidCallback onLongPress;
+  /// Tapping the quoted reply jumps to the original message (null = no original).
+  final VoidCallback? onTapReply;
 
   /// Renders an inline image preview for image attachments, else a file chip.
   Widget _attachment(BuildContext context) {
@@ -948,7 +990,7 @@ class _MessageBubble extends StatelessWidget {
                     )
                   else ...[
                     if (msg.replyToId != null)
-                      _QuotedReply(msg: msg, isMine: isMine),
+                      _QuotedReply(msg: msg, isMine: isMine, onTap: onTapReply),
                     if (msg.attachmentName != null) ...[
                       _attachment(context),
                     ],
@@ -1264,16 +1306,19 @@ class _InputBar extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _QuotedReply extends StatelessWidget {
-  const _QuotedReply({required this.msg, required this.isMine});
+  const _QuotedReply({required this.msg, required this.isMine, this.onTap});
   final ChatMessage msg;
   final bool isMine;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final deleted = msg.replyToDeleted;
     final preview =
         deleted ? 'This message was deleted' : (msg.replyToPreview ?? '');
-    return Container(
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
       margin: const EdgeInsets.only(bottom: 5),
       decoration: BoxDecoration(
         color: const Color(0xFF008069).withOpacity(0.07),
@@ -1321,6 +1366,7 @@ class _QuotedReply extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }
