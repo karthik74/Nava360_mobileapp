@@ -77,8 +77,10 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'hrms.interviews', label: 'My Interviews', route: '/interviews', icon: Icons.event_note_rounded, module: MobileModule.hrms, order: 7, requiredPermissions: ['INTERVIEW_VIEW']),
   MobileMenuItem(key: 'hrms.requisitions', label: 'Job Requisitions', route: '/requisitions', icon: Icons.work_outline_rounded, module: MobileModule.hrms, order: 8, requiredPermissions: ['REQUISITION_VIEW']),
   MobileMenuItem(key: 'hrms.helpdesk', label: 'Helpdesk', route: '/helpdesk', icon: Icons.support_agent_rounded, module: MobileModule.hrms, order: 8, requiredPermissions: ['HELPDESK_CREATE_TICKET']),
-  MobileMenuItem(key: 'hrms.helpdeskKb', label: 'Knowledge Base', route: '/helpdesk/kb', icon: Icons.menu_book_rounded, module: MobileModule.hrms, order: 8),
-  MobileMenuItem(key: 'hrms.helpdeskDashboard', label: 'Helpdesk Dashboard', route: '/helpdesk/dashboard', icon: Icons.insights_rounded, module: MobileModule.hrms, order: 8, requiredPermissions: ['HELPDESK_VIEW_TEAM', 'HELPDESK_VIEW_ALL']),
+  // Knowledge Base lives under More (moved from HRMS 2026-07-04).
+  // Helpdesk Dashboard intentionally removed from the mobile drawer (2026-07-04)
+  // — it stays a web-only view; the /helpdesk/dashboard route still exists for
+  // deep links if ever needed.
   MobileMenuItem(key: 'hrms.travelClaims', label: 'Travel Claims', route: '/travel/claims', icon: Icons.flight_takeoff_rounded, module: MobileModule.hrms, order: 9),
   MobileMenuItem(key: 'hrms.travelPlans', label: 'Travel Plans', route: '/travel/plans', icon: Icons.luggage_rounded, module: MobileModule.hrms, order: 10),
   MobileMenuItem(key: 'hrms.announcements', label: 'Announcements', route: '/announcements', icon: Icons.campaign_rounded, module: MobileModule.hrms, order: 11),
@@ -113,6 +115,7 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'more.notifications', label: 'Notifications', route: '/notifications', icon: Icons.notifications_rounded, module: MobileModule.more, order: 1),
   MobileMenuItem(key: 'more.password', label: 'Change Password', route: '/change-password', icon: Icons.lock_rounded, module: MobileModule.more, order: 2),
   MobileMenuItem(key: 'more.support', label: 'Help / Support', route: '/help-support', icon: Icons.help_rounded, module: MobileModule.more, order: 3),
+  MobileMenuItem(key: 'more.helpdeskKb', label: 'Knowledge Base', route: '/helpdesk/kb', icon: Icons.menu_book_rounded, module: MobileModule.more, order: 4),
 ];
 
 /// True when the signed-in user may see manager-only entries. Heuristic (until

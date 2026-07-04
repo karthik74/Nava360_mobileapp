@@ -37,6 +37,18 @@ class _TravelClaimFormScreenState extends ConsumerState<TravelClaimFormScreen> {
 
   bool get _isEdit => widget.claim != null;
 
+  /// Selecting a plan copies its trip details into the claim header — the plan
+  /// is picked FIRST, so title/purpose/dates always start from the plan.
+  void _applyPlan(TravelPlan p) {
+    setState(() {
+      _planId = p.id;
+      _title.text = p.title;
+      _purpose.text = p.purpose ?? '';
+      if (p.startDate != null) _fromDate = p.startDate;
+      if (p.endDate != null) _toDate = p.endDate;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -76,6 +88,11 @@ class _TravelClaimFormScreenState extends ConsumerState<TravelClaimFormScreen> {
 
   Future<void> _save() async {
     setState(() => _error = null);
+    if (_planId == null) {
+      setState(() =>
+          _error = 'Select the travel plan this claim is for. Create the plan first if it doesn\'t exist.');
+      return;
+    }
     if (_title.text.trim().isEmpty) {
       setState(() => _error = 'Please enter a title.');
       return;
@@ -137,7 +154,7 @@ class _TravelClaimFormScreenState extends ConsumerState<TravelClaimFormScreen> {
                     SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Create the claim first, then add expense lines, bills and submit it for approval.',
+                        'Select your travel plan first — the claim details fill in automatically. Then add expense lines, bills and submit for approval.',
                         style: TextStyle(fontSize: 12.5, color: AppColors.inkSoft, height: 1.4),
                       ),
                     ),
@@ -145,6 +162,47 @@ class _TravelClaimFormScreenState extends ConsumerState<TravelClaimFormScreen> {
                 ),
               ),
             if (!_isEdit) const SizedBox(height: 14),
+            // ── Plan first: picking it auto-fills title / purpose / dates ──
+            _label('Travel plan *'),
+            plans.when(
+              loading: () => const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: SizedBox(
+                    height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+              ),
+              error: (e, _) => const Text('Could not load plans.',
+                  style: TextStyle(color: AppColors.muted, fontSize: 12)),
+              data: (rows) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DropdownButtonFormField<int?>(
+                    value: _planId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.luggage_rounded, size: 20),
+                        hintText: 'Select the plan this claim is for'),
+                    items: [
+                      for (final p in rows)
+                        DropdownMenuItem<int?>(value: p.id, child: Text(p.title)),
+                    ],
+                    onChanged: (v) {
+                      if (v == null) return;
+                      final p = rows.where((x) => x.id == v).firstOrNull;
+                      if (p != null) _applyPlan(p);
+                    },
+                  ),
+                  if (rows.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 6),
+                      child: Text(
+                        'No travel plans yet — create a travel plan first, then raise the claim for it.',
+                        style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
             _label('Title *'),
             TextField(controller: _title, maxLength: 150),
             _label('Purpose'),
@@ -168,29 +226,6 @@ class _TravelClaimFormScreenState extends ConsumerState<TravelClaimFormScreen> {
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 14),
-            _label('Link a travel plan (optional)'),
-            plans.when(
-              loading: () => const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: SizedBox(
-                    height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-              ),
-              error: (e, _) => const Text('Could not load plans.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 12)),
-              data: (rows) => DropdownButtonFormField<int?>(
-                value: _planId,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.luggage_rounded, size: 20)),
-                items: [
-                  const DropdownMenuItem<int?>(value: null, child: Text('None')),
-                  for (final p in rows)
-                    DropdownMenuItem<int?>(value: p.id, child: Text(p.title)),
-                ],
-                onChanged: (v) => setState(() => _planId = v),
-              ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),

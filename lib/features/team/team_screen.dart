@@ -123,6 +123,8 @@ class _MembersView extends ConsumerStatefulWidget {
 
 class _MembersViewState extends ConsumerState<_MembersView> {
   String _filter = 'ALL';
+  final _searchCtrl = TextEditingController();
+  String _query = '';
 
   // (state key, label) — order shown in the filter row.
   static const _filters = [
@@ -133,6 +135,22 @@ class _MembersViewState extends ConsumerState<_MembersView> {
     ('ABSENT', 'Absent'),
     ('NOT_LOGGED_IN', 'Not In'),
   ];
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  bool _matchesQuery(TeamMember m) {
+    if (_query.isEmpty) return true;
+    bool has(String? s) => s != null && s.toLowerCase().contains(_query);
+    return has(m.name) ||
+        has(m.employeeCode) ||
+        has(m.designation) ||
+        has(m.department) ||
+        has(m.branchLabel);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -178,9 +196,11 @@ class _MembersViewState extends ConsumerState<_MembersView> {
             'ABSENT': countOf('ABSENT'),
             'NOT_LOGGED_IN': countOf('NOT_LOGGED_IN'),
           };
-          final filtered = _filter == 'ALL'
-              ? members
-              : members.where((m) => m.state == _filter).toList();
+          final filtered = (_filter == 'ALL'
+                  ? members
+                  : members.where((m) => m.state == _filter).toList())
+              .where(_matchesQuery)
+              .toList();
 
           return ListView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -194,6 +214,27 @@ class _MembersViewState extends ConsumerState<_MembersView> {
                 absent: counts['ABSENT']!,
               ),
               const SizedBox(height: 16),
+              // ── Search across the whole downline (name / code / role / branch) ──
+              TextField(
+                controller: _searchCtrl,
+                decoration: InputDecoration(
+                  hintText: 'Search members by name, code, role or branch…',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  isDense: true,
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            setState(() => _query = '');
+                          },
+                        ),
+                ),
+                onChanged: (v) =>
+                    setState(() => _query = v.trim().toLowerCase()),
+              ),
+              const SizedBox(height: 12),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 physics: const BouncingScrollPhysics(),
@@ -213,9 +254,11 @@ class _MembersViewState extends ConsumerState<_MembersView> {
               ),
               const SizedBox(height: 14),
               if (filtered.isEmpty)
-                const AppEmptyState(
+                AppEmptyState(
                   icon: Icons.groups_2_rounded,
-                  message: 'No members in this status.',
+                  message: _query.isNotEmpty
+                      ? 'No members match your search.'
+                      : 'No members in this status.',
                 )
               else
                 for (final m in filtered)
