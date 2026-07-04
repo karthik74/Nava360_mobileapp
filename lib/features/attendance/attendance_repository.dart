@@ -81,15 +81,18 @@ class AttendanceRepository {
     );
   }
 
-  /// The current user's own regularization requests in [from..to] (yyyy-MM-dd),
-  /// returned as a date→status map for quick per-day lookups.
-  Future<Map<String, String>> myRegularizationStatusByDate({
+  /// The given employee's own regularization requests in [from..to] (yyyy-MM-dd),
+  /// returned as a date→status map for quick per-day lookups. Scoped to
+  /// [employeeId] — without it, a manager/admin caller would receive every
+  /// employee's regularizations, not just their own.
+  Future<Map<String, String>> myRegularizationStatusByDate(
+    int employeeId, {
     String? from,
     String? to,
   }) async {
     return _api.get<Map<String, String>>(
       '/api/regularizations',
-      query: {'size': 100, 'sort': 'date,desc'},
+      query: {'employeeId': employeeId, 'size': 100, 'sort': 'date,desc'},
       parse: (d) {
         final map = (d as Map<String, dynamic>?) ?? const {};
         final content = (map['content'] as List?) ?? const [];
@@ -121,6 +124,8 @@ class AttendanceRepository {
   }
 
   /// Holidays visible to the current employee in [from..to], as date→name.
+  /// Restricted (optional) holidays are excluded — they appear only on the
+  /// Holidays screen and must not be marked as a holiday in attendance.
   Future<Map<String, String>> listMyHolidays({String? from, String? to}) {
     return _api.get<Map<String, String>>(
       '/api/holidays/my',
@@ -134,7 +139,9 @@ class AttendanceRepository {
         for (final e in list) {
           final m = e as Map<String, dynamic>;
           final dt = m['date'] as String?;
-          if (dt != null) out[dt] = (m['name'] as String?) ?? 'Holiday';
+          if (dt != null && m['optional'] != true) {
+            out[dt] = (m['name'] as String?) ?? 'Holiday';
+          }
         }
         return out;
       },

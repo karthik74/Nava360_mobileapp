@@ -7,16 +7,34 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.INTERNET"/>
-    <!-- Lets the app launch the system installer for an in-app downloaded APK update. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Optional biometric login (fingerprint / Face). -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <uses-permission android:name="android.permission.USE_FINGERPRINT"/>
+    <!-- Voice evidence recording in the Whistleblower module. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- Prompt to exclude the app from battery optimisation for reliable background tracking. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <!-- Saving payslip PDFs to public Downloads on Android <= 9 (API 28).
          API 29+ uses scoped MediaStore and needs no permission. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"/>
+
+    <!-- Photo & Video Permissions policy compliance.
+         The open_filex plugin (used only to open our own downloaded payslip
+         PDFs via a FileProvider content URI) injects broad gallery-access
+         permissions we don't need. Media picking uses the Android Photo Picker
+         (image_picker) which needs no permission, so strip these from the
+         merged manifest to satisfy Google Play. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"
+        tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"
+        tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"
+        tools:node="remove"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        tools:node="remove"/>
     <application
         android:label="Nava360"
         android:name="${applicationName}"

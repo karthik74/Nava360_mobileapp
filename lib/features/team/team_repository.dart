@@ -7,10 +7,12 @@ class TeamRepository {
   TeamRepository(this._api);
   final ApiClient _api;
 
-  /// Direct reports of the signed-in manager.
+  /// Full reporting downline of the signed-in manager — direct AND indirect
+  /// reportees (all levels) — each with today's attendance state
+  /// (Punched In / Punched Out / Absent / Leave / Not In). HR/Admin see everyone.
   Future<List<TeamMember>> myTeam() {
     return _api.get<List<TeamMember>>(
-      '/api/employees/my-team',
+      '/api/employees/my-team/full/today-status',
       parse: (d) {
         final list = (d as List?) ?? const [];
         return list

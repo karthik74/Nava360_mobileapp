@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Use Face ID to sign in to Nava360 quickly and securely.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
@@ -41,6 +43,8 @@
 	<string>Nava360 uses the camera so you can attach photos to a customer task.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Nava360 needs photo access so you can attach images to a customer task.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access is required to record a voice message as evidence for your confidential concern.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -1,7 +1,7 @@
 name: nava360
 description: Nava360 mobile app — employee self-service and manager approvals.
 publish_to: "none"
-version: 0.1.7+7
+version: 0.1.16+16
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -27,6 +27,12 @@ dependencies:
   # Storage
   flutter_secure_storage: ^9.2.2
 
+  # Optional biometric login (mobile only) — on-device fingerprint / Face ID.
+  # local_auth never exposes biometric data; it only returns pass/fail.
+  local_auth: ^2.3.0
+  # Stable device name/platform for the "Registered devices" list.
+  device_info_plus: ^10.1.2
+
   # Geolocation for punch in/out
   geolocator: ^12.0.0
 
@@ -50,17 +56,31 @@ dependencies:
   # URL Launcher
   url_launcher: ^6.3.0
 
+  # Render rich-text/HTML announcement bodies (pure Dart, no native plugin)
+  flutter_widget_from_html_core: ^0.15.2
+
   # App version / build number for the backend update check
   package_info_plus: ^8.0.2
+
+  # Google Play in-app updates (Android only; Play-compliant, no sideloading)
+  in_app_update: ^4.2.5
 
   # Payslip PDF download: save to disk + open in the system viewer
   path_provider: ^2.1.4
   open_filex: ^4.5.0
 
+  # In-app, view-only PDF rendering (company policies + whistleblower evidence)
+  flutter_pdfview: ^1.3.2
+
+  # Whistleblower voice evidence: record + play back audio in-app
+  record: ^6.0.0
+  audioplayers: ^6.1.0
+
   # Push notifications
   firebase_core: ^3.6.0
   firebase_messaging: ^15.1.3
   flutter_local_notifications: ^17.2.3
+  mobile_scanner: ^7.2.0
 
 dev_dependencies:
   flutter_test:
@@ -72,3 +92,10 @@ flutter:
   assets:
     - assets/logo-mark.png
     - assets/logo.png
+    # Branded app-opening splash / loading logo (see AppLoadingScreen).
+    - assets/images/nava360_logo.png
+    # Nava360SplashScreen split assets: rotating outer ring + static centre.
+    # NOTE: these are currently placeholders (full logo) — replace with the
+    # transparent ring-only and centre-only PNGs for the ring-spin effect.
+    - assets/nava360_ring.png
+    - assets/nava360_center.png

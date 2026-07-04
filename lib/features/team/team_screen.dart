@@ -6,7 +6,7 @@ import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import '../leaves/leave_models.dart';
 import '../leaves/leave_repository.dart';
-import 'team_member_tracking_screen.dart';
+import 'employee_detail_screen.dart';
 import 'team_models.dart';
 import 'team_repository.dart';
 
@@ -114,11 +114,28 @@ class _SegmentBar extends StatelessWidget {
 // Members tab
 // ─────────────────────────────────────────────────────────────────────
 
-class _MembersView extends ConsumerWidget {
+class _MembersView extends ConsumerStatefulWidget {
   const _MembersView();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_MembersView> createState() => _MembersViewState();
+}
+
+class _MembersViewState extends ConsumerState<_MembersView> {
+  String _filter = 'ALL';
+
+  // (state key, label) — order shown in the filter row.
+  static const _filters = [
+    ('ALL', 'All'),
+    ('PUNCHED_IN', 'Punched In'),
+    ('PUNCHED_OUT', 'Punched Out'),
+    ('LEAVE', 'Leave'),
+    ('ABSENT', 'Absent'),
+    ('NOT_LOGGED_IN', 'Not In'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
     final async = ref.watch(teamMembersProvider);
     final mq = MediaQuery.of(context);
     final pad = EdgeInsets.fromLTRB(
@@ -151,17 +168,165 @@ class _MembersView extends ConsumerWidget {
               ],
             );
           }
-          return ListView.separated(
+
+          int countOf(String s) => members.where((m) => m.state == s).length;
+          final counts = <String, int>{
+            'ALL': members.length,
+            'PUNCHED_IN': countOf('PUNCHED_IN'),
+            'PUNCHED_OUT': countOf('PUNCHED_OUT'),
+            'LEAVE': countOf('LEAVE'),
+            'ABSENT': countOf('ABSENT'),
+            'NOT_LOGGED_IN': countOf('NOT_LOGGED_IN'),
+          };
+          final filtered = _filter == 'ALL'
+              ? members
+              : members.where((m) => m.state == _filter).toList();
+
+          return ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: pad,
-            itemCount: members.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) => _MemberCard(m: members[i]),
+            children: [
+              _MembersSummary(
+                total: members.length,
+                punchedIn: counts['PUNCHED_IN']!,
+                punchedOut: counts['PUNCHED_OUT']!,
+                leave: counts['LEAVE']!,
+                absent: counts['ABSENT']!,
+              ),
+              const SizedBox(height: 16),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: [
+                    for (final it in _filters) ...[
+                      _FilterChip(
+                        label: it.$2,
+                        count: counts[it.$1] ?? 0,
+                        selected: _filter == it.$1,
+                        onTap: () => setState(() => _filter = it.$1),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              if (filtered.isEmpty)
+                const AppEmptyState(
+                  icon: Icons.groups_2_rounded,
+                  message: 'No members in this status.',
+                )
+              else
+                for (final m in filtered)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _MemberCard(m: m),
+                  ),
+            ],
           );
         },
       ),
     );
   }
+}
+
+/// Today's-attendance hero card for the Members tab (mirrors _TeamSummary).
+class _MembersSummary extends StatelessWidget {
+  const _MembersSummary({
+    required this.total,
+    required this.punchedIn,
+    required this.punchedOut,
+    required this.leave,
+    required this.absent,
+  });
+  final int total;
+  final int punchedIn;
+  final int punchedOut;
+  final int leave;
+  final int absent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: AppColors.heroGradient,
+        borderRadius: BorderRadius.circular(AppRadii.xl),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withOpacity(0.32),
+            blurRadius: 26,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '$total member${total == 1 ? '' : 's'}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              "Today's attendance",
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.85),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _MiniStat(
+                    label: 'Punched In',
+                    value: punchedIn,
+                    color: const Color(0xFF34D399),
+                  ),
+                ),
+                _divider(),
+                Expanded(
+                  child: _MiniStat(
+                    label: 'Punched Out',
+                    value: punchedOut,
+                    color: const Color(0xFF60A5FA),
+                  ),
+                ),
+                _divider(),
+                Expanded(
+                  child: _MiniStat(
+                    label: 'Leave',
+                    value: leave,
+                    color: const Color(0xFFFBBF24),
+                  ),
+                ),
+                _divider(),
+                Expanded(
+                  child: _MiniStat(
+                    label: 'Absent',
+                    value: absent,
+                    color: const Color(0xFFF87171),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _divider() =>
+      Container(width: 1, height: 28, color: Colors.white.withOpacity(0.18));
 }
 
 class _MemberCard extends StatelessWidget {
@@ -171,9 +336,15 @@ class _MemberCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final meta = <String>[
+      if (m.employeeCode != null && m.employeeCode!.isNotEmpty) m.employeeCode!,
       if (m.designation != null && m.designation!.isNotEmpty) m.designation!,
       if (m.department != null && m.department!.isNotEmpty) m.department!,
     ].join(' · ');
+    final tone = m.statusTone;
+    final times = <String>[
+      if (m.checkInHm != null) 'In ${m.checkInHm}',
+      if (m.checkOutHm != null) 'Out ${m.checkOutHm}',
+    ].join('   ');
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -181,7 +352,7 @@ class _MemberCard extends StatelessWidget {
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) =>
-                TeamMemberTrackingScreen(employeeId: m.id, name: m.name),
+                EmployeeDetailScreen(employeeId: m.id, name: m.name),
           ),
         ),
         child: GlassCard(
@@ -190,56 +361,76 @@ class _MemberCard extends StatelessWidget {
           child: Row(
             children: [
               UserAvatar(name: m.name, size: 42, radius: 12),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  m.name,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
-                ),
-                if (meta.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    meta,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.muted,
-                      fontWeight: FontWeight.w500,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      m.name,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.ink,
+                      ),
                     ),
-                  ),
-                ],
-                if (m.branchLabel != null && m.branchLabel!.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on_outlined,
-                          size: 12, color: AppColors.muted),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          m.branchLabel!,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: AppColors.inkSoft,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          overflow: TextOverflow.ellipsis,
+                    if (meta.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        meta,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.muted,
+                          fontWeight: FontWeight.w500,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-              if (m.employeeCode != null && m.employeeCode!.isNotEmpty)
-                StatusPill(label: m.employeeCode!, color: AppColors.primary),
+                    if (times.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          const Icon(Icons.schedule_rounded,
+                              size: 12, color: AppColors.muted),
+                          const SizedBox(width: 4),
+                          Text(
+                            times,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.inkSoft,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ] else if (m.branchLabel != null &&
+                        m.branchLabel!.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on_outlined,
+                              size: 12, color: AppColors.muted),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              m.branchLabel!,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.inkSoft,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              StatusPill(label: tone.label, color: tone.color),
             ],
           ),
         ),
@@ -265,7 +456,11 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authUserProvider);
-    final canReview = user?.hasRole(const {'ADMIN', 'HR'}) ?? false;
+    // Every leave from /api/leaves/team is a direct report's request, which the
+    // backend authorises this user to review (HR/Admin via DATA_SCOPE_ALL, or the
+    // report's direct manager). Managers — not just ADMIN/HR — must see the
+    // approve/reject actions here, matching the web app and the backend rule.
+    final canReview = user != null;
     final leaves = ref.watch(_teamLeavesProvider);
     final mq = MediaQuery.of(context);
     final pad = EdgeInsets.fromLTRB(
@@ -781,10 +976,13 @@ class _MiniStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Left-aligned so the first stat lines up under the card's title/subtitle
+    // (which use CrossAxisAlignment.start) instead of sitting indented.
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.start,
           children: [
             Container(
               width: 5,

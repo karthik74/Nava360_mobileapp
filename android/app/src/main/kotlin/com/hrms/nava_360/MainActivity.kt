@@ -12,13 +12,16 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
 
-class MainActivity : FlutterActivity() {
+// FlutterFragmentActivity (not FlutterActivity) is required by local_auth, which
+// needs a FragmentActivity to host the biometric prompt. All existing method
+// channels are unaffected.
+class MainActivity : FlutterFragmentActivity() {
     private val channelName = "app/downloads"
     private val batteryChannelName = "app/battery"
     private val storageReqCode = 9911

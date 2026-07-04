@@ -599,19 +599,70 @@ class _TaskTile extends StatelessWidget {
 
 // ─────────────────────────── Template picker ──────────────────────────────
 
-class _TemplatePickerSheet extends ConsumerWidget {
+/// Quick category filters surfaced as chips above the template list. Each
+/// matches against the template name or its category (case-insensitive).
+const _kTemplateFilters = <String>[
+  'Collection',
+  'Renewal',
+  'Meeting',
+  'Cheque',
+  'FTOD',
+];
+
+class _TemplatePickerSheet extends ConsumerStatefulWidget {
   const _TemplatePickerSheet();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_TemplatePickerSheet> createState() =>
+      _TemplatePickerSheetState();
+}
+
+class _TemplatePickerSheetState extends ConsumerState<_TemplatePickerSheet> {
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+  String? _filter; // null => All
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Sort by task number ascending, then apply the search query and the
+  /// selected category filter.
+  List<TaskTemplate> _visible(List<TaskTemplate> all) {
+    final list = [...all]..sort((a, b) => a.id.compareTo(b.id));
+    final q = _query.trim().toLowerCase();
+    final f = _filter?.toLowerCase();
+    return list.where((t) {
+      final name = t.name.toLowerCase();
+      final cat = t.categoryName?.toLowerCase() ?? '';
+      if (q.isNotEmpty &&
+          !name.contains(q) &&
+          !cat.contains(q) &&
+          !'${t.id}'.contains(q)) {
+        return false;
+      }
+      if (f != null && !name.contains(f) && !cat.contains(f)) return false;
+      return true;
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final async = ref.watch(customerTemplatesProvider);
     final mq = MediaQuery.of(context);
+
+    // Occupy ~88% of the screen, but never exceed the space left above the
+    // keyboard / status bar so the sheet always fits small Android screens.
+    final maxH = mq.size.height - mq.padding.top - mq.viewInsets.bottom - 8;
+    final sheetH = (mq.size.height * 0.88).clamp(0.0, maxH).toDouble();
+
     return Padding(
       padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: mq.size.height * 0.7),
+      child: SizedBox(
+        height: sheetH,
         child: Column(
-          mainAxisSize: MainAxisSize.min,
           children: [
             const SizedBox(height: 10),
             Container(
@@ -623,7 +674,7 @@ class _TemplatePickerSheet extends ConsumerWidget {
               ),
             ),
             const Padding(
-              padding: EdgeInsets.fromLTRB(20, 14, 20, 4),
+              padding: EdgeInsets.fromLTRB(20, 14, 20, 2),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
@@ -637,7 +688,7 @@ class _TemplatePickerSheet extends ConsumerWidget {
               ),
             ),
             const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 10),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
@@ -646,33 +697,102 @@ class _TemplatePickerSheet extends ConsumerWidget {
                 ),
               ),
             ),
-            Flexible(
-              child: async.when(
-                loading: () => const Padding(
-                  padding: EdgeInsets.all(28),
-                  child: Center(child: CircularProgressIndicator()),
+            // ── Search ──────────────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+              child: TextField(
+                controller: _searchCtrl,
+                onChanged: (v) => setState(() => _query = v),
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: 'Search task template',
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  suffixIcon: _query.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            setState(() => _query = '');
+                          },
+                        ),
                 ),
+              ),
+            ),
+            // ── Category filter chips ───────────────────────────────────
+            SizedBox(
+              height: 36,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                children: [
+                  _FilterChip(
+                    label: 'All',
+                    selected: _filter == null,
+                    onTap: () => setState(() => _filter = null),
+                  ),
+                  for (final f in _kTemplateFilters)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: _FilterChip(
+                        label: f,
+                        selected: _filter == f,
+                        onTap: () =>
+                            setState(() => _filter = _filter == f ? null : f),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Divider(height: 1),
+            // ── Template list ───────────────────────────────────────────
+            Expanded(
+              child: async.when(
+                loading: () =>
+                    const Center(child: CircularProgressIndicator()),
                 error: (e, _) => Padding(
                   padding: const EdgeInsets.all(24),
                   child: Text('Could not load tasks: $e',
                       style: const TextStyle(color: AppColors.danger)),
                 ),
-                data: (templates) {
+                data: (all) {
+                  if (all.isEmpty) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(28),
+                        child: Text(
+                          'No customer task templates are available. Ask your admin to publish one.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppColors.muted),
+                        ),
+                      ),
+                    );
+                  }
+                  final templates = _visible(all);
                   if (templates.isEmpty) {
-                    return const Padding(
-                      padding: EdgeInsets.all(28),
-                      child: Text(
-                        'No customer task templates are available. Ask your admin to publish one.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: AppColors.muted),
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(28),
+                        child: Text(
+                          'No templates match your search.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppColors.muted),
+                        ),
                       ),
                     );
                   }
                   return ListView.separated(
-                    shrinkWrap: true,
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+                    physics: const BouncingScrollPhysics(
+                      parent: AlwaysScrollableScrollPhysics(),
+                    ),
+                    // Bottom inset keeps the last card clear of the system nav
+                    // bar / app bottom navigation.
+                    padding: EdgeInsets.fromLTRB(
+                        16, 12, 16, mq.padding.bottom + 24),
                     itemCount: templates.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (_, i) {
                       final t = templates[i];
                       return _TemplateTile(
@@ -685,6 +805,48 @@ class _TemplatePickerSheet extends ConsumerWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Pill-style category filter used in the template picker header.
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? AppColors.primary : AppColors.surfaceAlt,
+      borderRadius: BorderRadius.circular(AppRadii.pill),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+        onTap: onTap,
+        child: Container(
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadii.pill),
+            border: Border.all(
+              color: selected ? AppColors.primary : AppColors.hairline,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: selected ? Colors.white : AppColors.inkSoft,
+            ),
+          ),
         ),
       ),
     );
@@ -707,62 +869,96 @@ class _TemplateTile extends StatelessWidget {
         accent = Color(parsed | 0xFF000000);
       }
     }
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadii.md),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: Border.all(color: AppColors.muted.withOpacity(0.18)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: accent.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: accent.withOpacity(0.22)),
+    final hasCategory =
+        t.categoryName != null && t.categoryName!.trim().isNotEmpty;
+
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(AppRadii.lg),
+            border: Border.all(color: AppColors.hairline),
+            boxShadow: AppShadows.soft,
+          ),
+          child: Row(
+            // Arrow + icon stay vertically centred against the (variable-height)
+            // text block.
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: accent.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: accent.withOpacity(0.22)),
+                ),
+                alignment: Alignment.center,
+                child:
+                    Icon(Icons.assignment_outlined, size: 21, color: accent),
               ),
-              child: Icon(Icons.assignment_outlined, size: 19, color: accent),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    t.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.ink,
-                    ),
-                  ),
-                  if (t.description != null && t.description!.isNotEmpty) ...[
-                    const SizedBox(height: 2),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Line 1: short category (when available).
+                    if (hasCategory) ...[
+                      Text(
+                        t.categoryName!.toUpperCase(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.muted,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                    ],
+                    // Full task name — wraps to up to 3 lines, never a
+                    // single-line ellipsis. Card grows with the text.
                     Text(
-                      t.description!,
-                      maxLines: 2,
+                      t.name,
+                      maxLines: 3,
                       overflow: TextOverflow.ellipsis,
+                      softWrap: true,
                       style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.muted,
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
                         height: 1.3,
                       ),
                     ),
+                    if (t.description != null && t.description!.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        t.description!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.muted,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            const Icon(Icons.chevron_right_rounded,
-                size: 18, color: AppColors.muted),
-          ],
+              const SizedBox(width: 10),
+              const Icon(Icons.chevron_right_rounded,
+                  size: 20, color: AppColors.muted),
+            ],
+          ),
         ),
       ),
     );

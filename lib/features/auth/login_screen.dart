@@ -1,15 +1,16 @@
 import 'dart:ui';
 
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/env.dart';
 import '../../core/theme.dart';
 import 'auth_controller.dart';
+import 'biometric/biometric_controller.dart';
+import 'biometric/biometric_enroll_gate.dart';
+import 'biometric/biometric_service.dart';
 
 /// Login screen — port of the design canvas's `LoginScreen`.
 class LoginScreen extends ConsumerStatefulWidget {
@@ -29,34 +30,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _password = TextEditingController();
   bool _obscure = true;
   bool _justSignedIn = false;
-  bool _checkingPermissions = true;
-  bool _requestingPermissions = false;
-  String? _permissionError;
-  bool _consentAccepted = false;
-  bool _locationServiceEnabled = false;
-  LocationPermission _locationPermission = LocationPermission.denied;
-  AuthorizationStatus _notificationStatus = AuthorizationStatus.notDetermined;
-
-  bool get _locationReady =>
-      _locationServiceEnabled &&
-      _locationPermission == LocationPermission.always;
-
-  bool get _notificationsReady =>
-      _notificationStatus == AuthorizationStatus.authorized ||
-      _notificationStatus == AuthorizationStatus.provisional;
-
-  /// Required permissions for sign-in (SMS is optional, so it's excluded here).
-  bool get _permissionsReady => _locationReady && _notificationsReady;
-
-  /// Required permissions granted AND the user has ticked the consent box.
-  /// Sign-in is only enabled in this state.
-  bool get _readyToSignIn => _permissionsReady && _consentAccepted;
-
-  @override
-  void initState() {
-    super.initState();
-    _refreshRequiredPermissions();
-  }
+  bool _autoBioTried = false;
+  bool _bioBusy = false;
 
   @override
   void dispose() {
@@ -66,131 +41,52 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Future<void> _submit() async {
-    if (!await _ensureRequiredPermissions()) return;
-    if (!mounted) return;
     if (!_formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
     await ref
         .read(authControllerProvider.notifier)
         .login(_username.text, _password.text);
     if (mounted && ref.read(authControllerProvider).asData?.value != null) {
+      // Signal the enroll gate to offer biometric enrollment after this login.
+      ref.read(justPasswordLoggedInProvider.notifier).state = true;
       setState(() => _justSignedIn = true);
     }
+    // Required OS permissions (location, notifications, battery) are requested
+    // by the PermissionGate that wraps the app once the user is signed in.
   }
 
-  /// Reads the FCM notification permission status. If Firebase isn't configured
-  /// (e.g. iOS without a GoogleService-Info.plist), accessing
-  /// `FirebaseMessaging.instance` throws `[core/no-app]` — in that case we don't
-  /// block sign-in and treat notifications as authorised.
-  Future<AuthorizationStatus> _readNotificationStatus() async {
+  /// Case A / D: prompt fingerprint / Face ID, allowing up to 3 attempts before
+  /// falling back to the password form. A backend/state error stops retrying and
+  /// surfaces the reason (e.g. session expired, account inactive).
+  Future<void> _biometricLogin({required bool auto}) async {
+    if (_bioBusy) return;
+    setState(() => _bioBusy = true);
+    final ctrl = ref.read(biometricControllerProvider.notifier);
     try {
-      final s = await FirebaseMessaging.instance.getNotificationSettings();
-      return s.authorizationStatus;
-    } catch (_) {
-      return AuthorizationStatus.authorized;
-    }
-  }
-
-  Future<void> _refreshRequiredPermissions() async {
-    setState(() {
-      _checkingPermissions = true;
-      _permissionError = null;
-    });
-    try {
-      final locationServiceEnabled =
-          await Geolocator.isLocationServiceEnabled();
-      final locationPermission = await Geolocator.checkPermission();
-      final notificationStatus = await _readNotificationStatus();
-      if (!mounted) return;
-      setState(() {
-        _locationServiceEnabled = locationServiceEnabled;
-        _locationPermission = locationPermission;
-        _notificationStatus = notificationStatus;
-      });
-    } catch (e) {
-      if (mounted) setState(() => _permissionError = e.toString());
-    } finally {
-      if (mounted) setState(() => _checkingPermissions = false);
-    }
-  }
-
-  Future<bool> _ensureRequiredPermissions() async {
-    if (_requestingPermissions) return false;
-    // Affirmative consent must come BEFORE we request any OS permission
-    // (Google Play prominent-disclosure requirement).
-    if (!_consentAccepted) {
-      setState(() => _permissionError =
-          'Please tick the consent box to grant the permissions below.');
-      return false;
-    }
-    setState(() {
-      _requestingPermissions = true;
-      _permissionError = null;
-    });
-
-    try {
-      var locationServiceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!locationServiceEnabled) {
-        await Geolocator.openLocationSettings();
-        locationServiceEnabled = await Geolocator.isLocationServiceEnabled();
-      }
-
-      var locationPermission = await Geolocator.checkPermission();
-      if (locationPermission == LocationPermission.denied) {
-        locationPermission = await Geolocator.requestPermission();
-      }
-      if (locationPermission == LocationPermission.whileInUse) {
-        locationPermission = await Geolocator.requestPermission();
-      }
-      if (locationPermission != LocationPermission.always) {
-        await Geolocator.openAppSettings();
-        locationPermission = await Geolocator.checkPermission();
-      }
-
-      // Notification permission. If Firebase isn't configured (e.g. iOS without
-      // a GoogleService-Info.plist) these calls throw `[core/no-app]`; in that
-      // case don't block sign-in — treat notifications as authorised.
-      AuthorizationStatus notifStatus;
-      try {
-        var settings =
-            await FirebaseMessaging.instance.getNotificationSettings();
-        if (settings.authorizationStatus ==
-            AuthorizationStatus.notDetermined) {
-          settings = await FirebaseMessaging.instance
-              .requestPermission(alert: true, badge: true, sound: true);
+      for (var attempt = 1; attempt <= 3; attempt++) {
+        final err = await ctrl.loginWithBiometric();
+        if (err == null) {
+          if (mounted) setState(() => _justSignedIn = true); // router redirects
+          return;
         }
-        if (settings.authorizationStatus == AuthorizationStatus.denied) {
-          await Geolocator.openAppSettings();
-          settings = await FirebaseMessaging.instance.getNotificationSettings();
+        // Only a local verification miss is worth retrying; anything else
+        // (device wiped server-side, expired, inactive) should stop immediately.
+        final retriable = err.contains('failed');
+        if (!retriable) {
+          if (mounted) _flash(err);
+          return;
         }
-        notifStatus = settings.authorizationStatus;
-      } catch (_) {
-        notifStatus = AuthorizationStatus.authorized;
+        if (attempt == 3 && mounted && !auto) {
+          _flash('Biometric authentication failed. Please login using your password.');
+        }
       }
-
-      if (!mounted) return false;
-      setState(() {
-        _locationServiceEnabled = locationServiceEnabled;
-        _locationPermission = locationPermission;
-        _notificationStatus = notifStatus;
-      });
-
-      // Only the REQUIRED permissions (location + notifications) gate sign-in.
-      if (!_permissionsReady) {
-        setState(() {
-          _permissionError =
-              'Allow location all the time and notifications to continue.';
-        });
-        return false;
-      }
-
-      return true;
-    } catch (e) {
-      if (mounted) setState(() => _permissionError = e.toString());
-      return false;
     } finally {
-      if (mounted) setState(() => _requestingPermissions = false);
+      if (mounted) setState(() => _bioBusy = false);
     }
+  }
+
+  void _flash(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   void _goBackToWelcome() {
@@ -206,9 +102,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final state = ref.watch(authControllerProvider);
     final loading = state.isLoading;
     final error = state.hasError ? state.error.toString() : null;
-    // Fields/navigation are usable any time (so users can fill the form while
-    // reviewing the consent below); only the Sign-in CTA waits on consent +
-    // permissions via [_readyToSignIn].
+    final bio = ref.watch(biometricControllerProvider);
+
+    // Case A: if a biometric enrollment exists and the device can use it, prompt
+    // automatically the first time the login screen appears.
+    if (bio.canOfferLogin && !_autoBioTried && !loading && !_justSignedIn) {
+      _autoBioTried = true;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _biometricLogin(auto: true),
+      );
+    }
+    // Fields, navigation and the Sign-in CTA are usable whenever a login isn't
+    // already in flight. OS permissions are handled after sign-in by the
+    // app-level PermissionGate, so the login form doesn't request them here.
     final formEnabled = !loading;
     final mq = MediaQuery.of(context);
     final size = mq.size;
@@ -381,31 +287,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               const SizedBox(height: 16),
                               _FlashError(message: error),
                             ],
-                            const SizedBox(height: 16),
-                            // Consent + full permission disclosure, directly
-                            // above the Sign-in button. Sign-in stays disabled
-                            // until the box is ticked and access is granted.
-                            _ConsentPanel(
-                              checking: _checkingPermissions,
-                              requesting: _requestingPermissions,
-                              locationServiceEnabled: _locationServiceEnabled,
-                              locationPermission: _locationPermission,
-                              notificationStatus: _notificationStatus,
-                              accepted: _consentAccepted,
-                              error: _permissionError,
-                              onAcceptedChanged: (v) =>
-                                  setState(() => _consentAccepted = v),
-                              onGrant: _ensureRequiredPermissions,
-                              onRefresh: _refreshRequiredPermissions,
-                            ),
-                            const SizedBox(height: 14),
+                            const SizedBox(height: 20),
                             _GradientAuthButton(
                               label: 'Sign in',
                               loading: loading,
                               done: _justSignedIn,
-                              onPressed: (!_readyToSignIn || loading || _justSignedIn)
+                              onPressed: (loading || _justSignedIn)
                                   ? null
                                   : _submit,
+                            ),
+                            _BiometricLoginSection(
+                              state: bio,
+                              busy: _bioBusy,
+                              onTap: () => _biometricLogin(auto: false),
                             ),
                             const SizedBox(height: 16),
                             Center(
@@ -934,345 +828,6 @@ class _FlashError extends StatelessWidget {
   }
 }
 
-/// Consent + full permission disclosure shown directly above the Sign-in
-/// button. Lists every permission the app uses and why, lets the user grant
-/// them, and carries the affirmative consent checkbox. This is the prominent
-/// disclosure Google Play expects before accessing notifications/location.
-class _ConsentPanel extends StatelessWidget {
-  const _ConsentPanel({
-    required this.checking,
-    required this.requesting,
-    required this.locationServiceEnabled,
-    required this.locationPermission,
-    required this.notificationStatus,
-    required this.accepted,
-    required this.error,
-    required this.onAcceptedChanged,
-    required this.onGrant,
-    required this.onRefresh,
-  });
-
-  final bool checking;
-  final bool requesting;
-  final bool locationServiceEnabled;
-  final LocationPermission locationPermission;
-  final AuthorizationStatus notificationStatus;
-  final bool accepted;
-  final String? error;
-  final ValueChanged<bool> onAcceptedChanged;
-  final Future<bool> Function() onGrant;
-  final Future<void> Function() onRefresh;
-
-  bool get _notificationReady =>
-      notificationStatus == AuthorizationStatus.authorized ||
-      notificationStatus == AuthorizationStatus.provisional;
-
-  // The required permissions gate the Grant/Refresh buttons.
-  bool get _requiredGranted =>
-      locationServiceEnabled &&
-      locationPermission == LocationPermission.always &&
-      _notificationReady;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.primary.withOpacity(0.22)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.privacy_tip_outlined,
-                color: AppColors.primary,
-                size: 18,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  checking
-                      ? 'Checking permissions…'
-                      : 'Permissions & data consent',
-                  style: const TextStyle(
-                    color: AppColors.ink,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Nava360 needs the access below to work. Your data is used only for '
-            'the purposes described, and you can revoke it any time in Settings.',
-            style: TextStyle(
-              color: AppColors.inkSoft,
-              fontSize: 11.5,
-              height: 1.35,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _ConsentPermissionRow(
-            granted: locationServiceEnabled &&
-                locationPermission == LocationPermission.always,
-            label: 'Location (all the time)',
-            purpose:
-                'Records your attendance check-in/out, including in the background.',
-            detail: _locationLabel(locationPermission),
-          ),
-          const SizedBox(height: 10),
-          _ConsentPermissionRow(
-            granted: _notificationReady,
-            label: 'Notifications',
-            purpose: 'Approvals, reminders and important alerts.',
-            detail: _notificationLabel(notificationStatus),
-          ),
-          if (error != null) ...[
-            const SizedBox(height: 10),
-            Text(
-              error!,
-              style: const TextStyle(
-                color: AppColors.danger,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                height: 1.35,
-              ),
-            ),
-          ],
-          if (!_requiredGranted) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _PermissionButton(
-                    label: requesting ? 'Opening settings…' : 'Grant access',
-                    icon: Icons.lock_open_rounded,
-                    primary: true,
-                    enabled: !checking && !requesting,
-                    onTap: onGrant,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _PermissionButton(
-                  label: 'Refresh',
-                  icon: Icons.refresh_rounded,
-                  enabled: !checking && !requesting,
-                  onTap: () async {
-                    await onRefresh();
-                    return true;
-                  },
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 6),
-          // Affirmative consent checkbox — required to enable Sign in.
-          InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: () => onAcceptedChanged(!accepted),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: Checkbox(
-                      value: accepted,
-                      onChanged: (v) => onAcceptedChanged(v ?? false),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                      activeColor: AppColors.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'I have read and agree to the permissions and data use '
-                      'described above.',
-                      style: TextStyle(
-                        color: AppColors.ink,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        height: 1.35,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _locationLabel(LocationPermission permission) {
-    if (!locationServiceEnabled) return 'Service off';
-    switch (permission) {
-      case LocationPermission.always:
-        return 'Allow all the time';
-      case LocationPermission.whileInUse:
-        return 'Only while using';
-      case LocationPermission.deniedForever:
-        return 'Denied in settings';
-      case LocationPermission.denied:
-        return 'Not granted';
-      case LocationPermission.unableToDetermine:
-        return 'Unknown';
-    }
-  }
-
-  String _notificationLabel(AuthorizationStatus status) {
-    switch (status) {
-      case AuthorizationStatus.authorized:
-        return 'Allowed';
-      case AuthorizationStatus.provisional:
-        return 'Allowed quietly';
-      case AuthorizationStatus.denied:
-        return 'Denied';
-      case AuthorizationStatus.notDetermined:
-        return 'Not granted';
-    }
-  }
-}
-
-/// One permission row inside [_ConsentPanel]: status icon + label + a plain
-/// explanation of why the app needs it + the current grant status.
-class _ConsentPermissionRow extends StatelessWidget {
-  const _ConsentPermissionRow({
-    required this.granted,
-    required this.label,
-    required this.purpose,
-    required this.detail,
-  });
-
-  final bool granted;
-  final String label;
-  final String purpose;
-  final String detail;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = granted ? AppColors.success : AppColors.warning;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 1),
-          child: Icon(
-            granted ? Icons.check_circle_rounded : Icons.info_outline_rounded,
-            color: color,
-            size: 17,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      label,
-                      style: const TextStyle(
-                        color: AppColors.ink,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    detail,
-                    style: TextStyle(
-                      color: color,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 2),
-              Text(
-                purpose,
-                style: const TextStyle(
-                  color: AppColors.inkSoft,
-                  fontSize: 11,
-                  height: 1.3,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _PermissionButton extends StatelessWidget {
-  const _PermissionButton({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-    this.primary = false,
-    this.enabled = true,
-  });
-
-  final String label;
-  final IconData icon;
-  final Future<bool> Function() onTap;
-  final bool primary;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = primary ? AppColors.primary : Colors.white.withOpacity(0.55);
-    final fg = primary ? Colors.white : AppColors.primary;
-    return Material(
-      color: enabled ? bg : AppColors.muted.withOpacity(0.25),
-      borderRadius: BorderRadius.circular(10),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: enabled ? onTap : null,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-          child: Row(
-            mainAxisSize: primary ? MainAxisSize.max : MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, color: enabled ? fg : AppColors.muted, size: 16),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: enabled ? fg : AppColors.muted,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// Indigo → cyan gradient submit button with loading + "Done" success state.
 class _GradientAuthButton extends StatelessWidget {
   const _GradientAuthButton({
@@ -1373,6 +928,93 @@ class _GradientAuthButton extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Biometric login affordance on the login screen.
+/// - Case A (enrolled + usable): an "or" divider + "Login with Fingerprint/Face ID".
+/// - Case C (enrolled but nothing enrolled on device): a hint to add one.
+/// - Case B (no hardware) / not enrolled here: nothing.
+class _BiometricLoginSection extends StatelessWidget {
+  const _BiometricLoginSection({
+    required this.state,
+    required this.busy,
+    required this.onTap,
+  });
+
+  final BiometricState state;
+  final bool busy;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (state.canOfferLogin) {
+      final isFace = state.label == 'Face ID';
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(child: Divider(color: AppColors.muted.withOpacity(0.3))),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Text('or',
+                    style: TextStyle(color: AppColors.muted, fontSize: 12)),
+              ),
+              Expanded(child: Divider(color: AppColors.muted.withOpacity(0.3))),
+            ],
+          ),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: busy ? null : onTap,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              side: const BorderSide(color: AppColors.primary, width: 1.3),
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2.2),
+                  )
+                : Icon(isFace ? Icons.face_rounded : Icons.fingerprint_rounded,
+                    size: 20),
+            label: Text(
+              busy ? 'Verifying…' : 'Login with ${state.label}',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Case C — enrolled on the account but no fingerprint/Face ID on this device.
+    if (state.enabled &&
+        state.availability == BiometricAvailability.notEnrolled) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.info_outline_rounded,
+                size: 16, color: AppColors.muted),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'To use biometric login, please add a fingerprint or Face ID in your device settings.',
+                style: TextStyle(color: AppColors.muted, fontSize: 12.5),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 }
 

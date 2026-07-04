@@ -128,6 +128,8 @@ String _deriveBucket(DateTime d, AttendanceRecord? rec, String? holidayName,
       return (color: AppColors.pink, label: 'Holiday', type: holidayName ?? 'Holiday');
     case 'nonworking':
       return (color: AppColors.muted, label: 'Non-working', type: 'Non-working day');
+    case 'future':
+      return (color: AppColors.muted, label: 'Upcoming', type: 'Upcoming');
     default:
       return (color: AppColors.hairline, label: '—', type: '—');
   }
@@ -145,8 +147,9 @@ class _MonthData {
   final Map<String, String> holidays; // date → name
   final List<NonWorkingRule> nonworking;
   final Map<String, String> regs; // date → regularization status
+  final Set<String> pendingLeaves; // dates with a PENDING leave request
   const _MonthData(this.cycle, this.recordsByDate, this.holidays,
-      this.nonworking, this.regs);
+      this.nonworking, this.regs, this.pendingLeaves);
 }
 
 /// key = "year:month1:cycleStartDay" (month is 1-indexed)
@@ -159,7 +162,7 @@ final _monthDataProvider =
   final sd = int.parse(parts[2]);
   final cycle = _buildCycleDates(y, m, sd);
   if (user?.employeeId == null || cycle.isEmpty) {
-    return _MonthData(cycle, const {}, const {}, const [], const {});
+    return _MonthData(cycle, const {}, const {}, const [], const {}, const {});
   }
   final fmt = DateFormat('yyyy-MM-dd');
   final from = fmt.format(cycle.first);
@@ -169,13 +172,18 @@ final _monthDataProvider =
       await repo.listForEmployee(user!.employeeId!, from: from, to: to, size: 100);
   final holidays = await repo.listMyHolidays(from: from, to: to);
   final nonworking = await repo.listNonWorkingDays();
-  final regs = await repo.myRegularizationStatusByDate(from: from, to: to);
+  final regs =
+      await repo.myRegularizationStatusByDate(user.employeeId!, from: from, to: to);
+  final pendingLeaves = await ref
+      .watch(leaveRepositoryProvider)
+      .myPendingLeaveDates(user.employeeId!, from: from, to: to);
   return _MonthData(
     cycle,
     {for (final r in records) r.date: r},
     holidays,
     nonworking,
     regs,
+    pendingLeaves,
   );
 });
 
@@ -288,8 +296,14 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     double totalHours = 0;
     final fmt = DateFormat('yyyy-MM-dd');
     for (final date in data.cycle) {
-      if (date.isAfter(todayStart)) continue; // no future days
       final iso = fmt.format(date);
+      final isFuture = date.isAfter(todayStart);
+      final regStatus = data.regs[iso];
+      final leavePending = data.pendingLeaves.contains(iso);
+      // Past/today days always show. Future days are normally hidden, but a future
+      // day with a pending leave (leaves are usually future-dated) or pending
+      // regularization must still appear so the request shows on its exact day.
+      if (isFuture && !(leavePending || regStatus == 'PENDING')) continue;
       final holidayName = data.holidays[iso];
       final rec = data.recordsByDate[iso];
       final bucket = _deriveBucket(date, rec, holidayName, data.nonworking);
@@ -302,6 +316,8 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
         record: rec,
         holidayName: holidayName,
         hasReg: data.regs.containsKey(iso),
+        regStatus: regStatus,
+        leavePending: leavePending,
       ));
     }
     // Newest first.
@@ -360,10 +376,18 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
 
   void _openDayActions(_DayCellData c) {
     final meta = _bucketMeta(c.bucket, c.holidayName);
-    // Regularization only for real working days (not holiday/non-working).
-    final canRegularize = c.bucket != 'holiday' && c.bucket != 'nonworking';
-    // Leave only for days that aren't already present/leave/holiday/non-working.
-    final canLeave = c.bucket == 'absent' || c.bucket == 'halfday';
+    final regPending = c.regStatus == 'PENDING';
+    // Regularization only for real, past working days (not holiday/non-working,
+    // not future — the backend rejects regularizing a future date), and not when
+    // one is already awaiting approval for this day.
+    final canRegularize = c.bucket != 'holiday' &&
+        c.bucket != 'nonworking' &&
+        c.bucket != 'future' &&
+        !regPending;
+    // Leave only for days that aren't already present/leave/holiday/non-working,
+    // and not when a leave request is already pending for this day.
+    final canLeave =
+        (c.bucket == 'absent' || c.bucket == 'halfday') && !c.leavePending;
 
     showModalBottomSheet<void>(
       context: context,
@@ -418,16 +442,46 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
                   ),
                 ),
               ),
-            if (c.hasReg)
+            if (regPending)
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    'Regularization requested',
+                    'Regularization pending approval',
                     style: TextStyle(
                       fontSize: 11.5,
                       color: AppColors.warning,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              )
+            else if (c.hasReg)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Regularization ${(c.regStatus ?? '').toLowerCase()}',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.muted,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            if (c.leavePending)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Leave request submitted',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.info,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -520,6 +574,8 @@ class _DayCellData {
   final AttendanceRecord? record;
   final String? holidayName;
   final bool hasReg;
+  final String? regStatus; // PENDING | APPROVED | REJECTED (newest for the day)
+  final bool leavePending; // a PENDING leave request covers this day
   const _DayCellData({
     required this.date,
     required this.iso,
@@ -527,7 +583,21 @@ class _DayCellData {
     required this.record,
     required this.holidayName,
     required this.hasReg,
+    required this.regStatus,
+    required this.leavePending,
   });
+}
+
+/// A short status note shown on the attendance day when a request is awaiting
+/// approval: a pending regularization or a submitted leave request.
+({String label, Color color})? _pendingNote(_DayCellData c) {
+  if (c.regStatus == 'PENDING') {
+    return (label: 'Pending approval', color: AppColors.warning);
+  }
+  if (c.leavePending) {
+    return (label: 'Leave request submitted', color: AppColors.info);
+  }
+  return null;
 }
 
 String _attStatusLabel(String s) {
@@ -627,6 +697,7 @@ class _DayRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final meta = _bucketMeta(cell.bucket, cell.holidayName);
+    final note = _pendingNote(cell);
     final rec = cell.record;
     final String sub;
     if (rec != null && (rec.checkIn != null || rec.checkOut != null)) {
@@ -733,6 +804,27 @@ class _DayRow extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (note != null) ...[
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: note.color.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(AppRadii.pill),
+                          border:
+                              Border.all(color: note.color.withOpacity(0.25)),
+                        ),
+                        child: Text(
+                          note.label,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: note.color,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

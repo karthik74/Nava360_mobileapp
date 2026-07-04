@@ -154,6 +154,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       return;
     }
 
+    // Confirm the punch — same pattern for check-in and check-out.
+    final confirmed = await _confirmPunch(isCheckOut: hasCheckedIn);
+    if (!confirmed || !mounted) return;
+
     final employeeId = ref.read(authUserProvider)?.employeeId;
     if (employeeId == null) {
       _showSnack('Employee profile is missing. Please sign in again.');
@@ -187,11 +191,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         }
 
         final position = await _tryCurrentPosition();
+        if (position == null) {
+          await ref
+              .read(locationTrackerProvider.notifier)
+              .stop(flushBuffer: false);
+          _showSnack(
+            'Could not get your location. Move to an open area with a clear sky '
+            'view and try again.',
+          );
+          return;
+        }
         try {
           await ref.read(attendanceRepositoryProvider).checkIn(
                 employeeId,
-                latitude: position?.latitude,
-                longitude: position?.longitude,
+                latitude: position.latitude,
+                longitude: position.longitude,
               );
           _showSnack('Checked in successfully.');
           // Ask to lift battery restrictions so background tracking stays reliable.
@@ -236,11 +250,30 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     }
   }
 
+  /// Best-effort current position with fallbacks so a slow GPS fix doesn't
+  /// record a check-in without coordinates:
+  ///   1) a fresh high-accuracy fix (12s)
+  ///   2) the last known position (instant)
+  ///   3) a fresh medium-accuracy fix with a longer timeout (20s)
   Future<Position?> _tryCurrentPosition() async {
     try {
       return await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 10),
+        timeLimit: const Duration(seconds: 12),
+      );
+    } catch (_) {
+      // fall through
+    }
+    try {
+      final last = await Geolocator.getLastKnownPosition();
+      if (last != null) return last;
+    } catch (_) {
+      // fall through
+    }
+    try {
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+        timeLimit: const Duration(seconds: 20),
       );
     } catch (_) {
       return null;
@@ -283,6 +316,34 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     } catch (_) {
       // Best-effort — never block check-in on this.
     }
+  }
+
+  /// Confirmation dialog shown before a punch. The same pattern is used for both
+  /// check-in and check-out for a consistent attendance experience:
+  ///   • Check In  → "Do you want to check in?"  [Cancel] [Check In]
+  ///   • Check Out → "Do you want to check out?" [Cancel] [Check Out]
+  Future<bool> _confirmPunch({required bool isCheckOut}) async {
+    final label = isCheckOut ? 'Check Out' : 'Check In';
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(label),
+        content: Text(
+          isCheckOut ? 'Do you want to check out?' : 'Do you want to check in?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(label),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
   }
 
   void _showSnack(String message) {
@@ -373,7 +434,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final activeTasks = pendingTasks + inProgressTasks;
 
     final mq = MediaQuery.of(context);
-    return RefreshIndicator(
+    return Stack(
+      children: [
+        RefreshIndicator(
       color: AppColors.primary,
       backgroundColor: Colors.white.withOpacity(0.85),
       onRefresh: () async {
@@ -497,6 +560,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           ],
         ],
       ),
+        ),
+        Positioned(
+          right: 16,
+          bottom: mq.padding.bottom + AppChrome.bottomNavHeight + 14,
+          child: const _ReportConcernButton(),
+        ),
+      ],
     );
   }
 
@@ -588,6 +658,28 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       default:
         return s.toLowerCase();
     }
+  }
+}
+
+/// Bottom-left "Report a Concern" launcher → confidential whistleblower form.
+class _ReportConcernButton extends StatelessWidget {
+  const _ReportConcernButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.danger,
+      elevation: 4,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: () => context.push('/whistleblower'),
+        child: const Padding(
+          padding: EdgeInsets.all(15),
+          child: Icon(Icons.shield_outlined, color: Colors.white, size: 24),
+        ),
+      ),
+    );
   }
 }
 

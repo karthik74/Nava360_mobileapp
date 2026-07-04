@@ -35,6 +35,11 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   /// The current "@..." token being typed (without the @); null = not tagging.
   String? _mentionQuery;
 
+  /// Per-message keys so a reply-tap can scroll its original into view.
+  final Map<int, GlobalKey> _msgKeys = {};
+  /// Message to briefly flash-highlight after a reply-jump.
+  int? _highlightMsgId;
+
   @override
   void initState() {
     super.initState();
@@ -100,6 +105,31 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeOut,
         );
+      }
+    });
+  }
+
+  /// Scroll to (and briefly highlight) the original of a tapped reply. Works for
+  /// messages currently built in the list; if the original is far up and not yet
+  /// built, we nudge the user to scroll up so pagination can pull it in.
+  void _jumpToMessage(int id) {
+    final ctx = _msgKeys[id]?.currentContext;
+    if (ctx == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Scroll up to load the original message')),
+      );
+      return;
+    }
+    Scrollable.ensureVisible(
+      ctx,
+      alignment: 0.5,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+    setState(() => _highlightMsgId = id);
+    Future.delayed(const Duration(milliseconds: 1800), () {
+      if (mounted && _highlightMsgId == id) {
+        setState(() => _highlightMsgId = null);
       }
     });
   }
@@ -259,7 +289,14 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
 
   Future<void> _pickImage(ImageSource source) async {
     try {
-      final picked = await ImagePicker().pickImage(source: source, imageQuality: 80);
+      // Downscale to a 1920px max edge + re-encode (quality 82) so a multi-MB
+      // phone photo uploads small — parity with the web compressImage().
+      final picked = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 82,
+      );
       if (picked != null) {
         await _promptCaptionAndSend(picked.path, picked.name, isImage: true);
       }
@@ -617,22 +654,31 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                               !msg.createdAt.isAfter(conv.otherLastReadAt!);
                         }
 
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (separator != null) separator,
-                            if (msg.isSystem)
-                              _SystemBubble(msg: msg)
-                            else
-                              _MessageBubble(
-                                msg: msg,
-                                isMine: isMine,
-                                isRead: isRead,
-                                showSender: conv.isGroup && !isMine,
-                                onLongPress: () =>
-                                    _showDeleteSheet(msg, isMine),
-                              ),
-                          ],
+                        return Container(
+                          key: _msgKeys.putIfAbsent(msg.id, () => GlobalKey()),
+                          color: _highlightMsgId == msg.id
+                              ? const Color(0xFF008069).withOpacity(0.12)
+                              : Colors.transparent,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (separator != null) separator,
+                              if (msg.isSystem)
+                                _SystemBubble(msg: msg)
+                              else
+                                _MessageBubble(
+                                  msg: msg,
+                                  isMine: isMine,
+                                  isRead: isRead,
+                                  showSender: conv.isGroup && !isMine,
+                                  onLongPress: () =>
+                                      _showDeleteSheet(msg, isMine),
+                                  onTapReply: msg.replyToId != null
+                                      ? () => _jumpToMessage(msg.replyToId!)
+                                      : null,
+                                ),
+                            ],
+                          ),
                         );
                       },
                     );
@@ -664,7 +710,6 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                 onSend: _send,
                 onEmoji: _showEmojiPicker,
                 onAttach: _pickAttachment,
-                onMention: () => _insertText('@'),
               ),
             ],
           ),
@@ -765,12 +810,15 @@ class _MessageBubble extends StatelessWidget {
     required this.isRead,
     required this.showSender,
     required this.onLongPress,
+    this.onTapReply,
   });
   final ChatMessage msg;
   final bool isMine;
   final bool isRead;
   final bool showSender;
   final VoidCallback onLongPress;
+  /// Tapping the quoted reply jumps to the original message (null = no original).
+  final VoidCallback? onTapReply;
 
   /// Renders an inline image preview for image attachments, else a file chip.
   Widget _attachment(BuildContext context) {
@@ -849,22 +897,19 @@ class _MessageBubble extends StatelessWidget {
   }
 
   void _openImage(BuildContext context, String url) {
-    Navigator.of(context).push(MaterialPageRoute(
+    Navigator.of(context).push(PageRouteBuilder(
       fullscreenDialog: true,
-      builder: (_) => Scaffold(
-        backgroundColor: Colors.black,
-        appBar: AppBar(
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          title: Text(msg.attachmentName ?? 'Image',
-              style: const TextStyle(fontSize: 15)),
-        ),
-        body: Center(
-          child: InteractiveViewer(
-            minScale: 0.5,
-            maxScale: 4,
-            child: Image.network(url, fit: BoxFit.contain),
-          ),
+      opaque: false,
+      barrierColor: Colors.black,
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (_, __, ___) =>
+          _ImageViewerScreen(url: url, title: msg.attachmentName ?? 'Image'),
+      transitionsBuilder: (_, anim, __, child) => FadeTransition(
+        opacity: anim,
+        child: ScaleTransition(
+          scale: Tween(begin: 0.96, end: 1.0).animate(
+              CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+          child: child,
         ),
       ),
     ));
@@ -944,7 +989,7 @@ class _MessageBubble extends StatelessWidget {
                     )
                   else ...[
                     if (msg.replyToId != null)
-                      _QuotedReply(msg: msg, isMine: isMine),
+                      _QuotedReply(msg: msg, isMine: isMine, onTap: onTapReply),
                     if (msg.attachmentName != null) ...[
                       _attachment(context),
                     ],
@@ -1119,14 +1164,12 @@ class _InputBar extends StatelessWidget {
     required this.onSend,
     required this.onEmoji,
     required this.onAttach,
-    required this.onMention,
   });
   final TextEditingController controller;
   final bool sending;
   final VoidCallback onSend;
   final VoidCallback onEmoji;
   final VoidCallback onAttach;
-  final VoidCallback onMention;
 
   @override
   Widget build(BuildContext context) {
@@ -1194,12 +1237,6 @@ class _InputBar extends StatelessWidget {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.alternate_email_rounded,
-                        color: Color(0xFF8696A0), size: 21),
-                    tooltip: 'Mention someone',
-                    onPressed: onMention,
-                  ),
-                  IconButton(
                     icon: const Icon(Icons.attach_file_rounded,
                         color: Color(0xFF8696A0), size: 22),
                     onPressed: onAttach,
@@ -1260,16 +1297,19 @@ class _InputBar extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _QuotedReply extends StatelessWidget {
-  const _QuotedReply({required this.msg, required this.isMine});
+  const _QuotedReply({required this.msg, required this.isMine, this.onTap});
   final ChatMessage msg;
   final bool isMine;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final deleted = msg.replyToDeleted;
     final preview =
         deleted ? 'This message was deleted' : (msg.replyToPreview ?? '');
-    return Container(
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
       margin: const EdgeInsets.only(bottom: 5),
       decoration: BoxDecoration(
         color: const Color(0xFF008069).withOpacity(0.07),
@@ -1317,6 +1357,7 @@ class _QuotedReply extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -1657,6 +1698,143 @@ class _SheetAction extends StatelessWidget {
       onTap: onTap,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadii.md),
+      ),
+    );
+  }
+}
+
+/// Fullscreen image viewer: pinch-zoom + pan (InteractiveViewer), double-tap to
+/// zoom to the tapped point, 90° rotate, and tap-to-toggle chrome. Mirrors the
+/// web ImageViewer's interaction model, dependency-free.
+class _ImageViewerScreen extends StatefulWidget {
+  const _ImageViewerScreen({required this.url, required this.title});
+  final String url;
+  final String title;
+
+  @override
+  State<_ImageViewerScreen> createState() => _ImageViewerScreenState();
+}
+
+class _ImageViewerScreenState extends State<_ImageViewerScreen>
+    with SingleTickerProviderStateMixin {
+  final _controller = TransformationController();
+  late final AnimationController _anim =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+  Animation<Matrix4>? _zoomAnim;
+  TapDownDetails? _lastTap;
+  bool _chrome = true;
+  int _quarterTurns = 0;
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _animateTo(Matrix4 target) {
+    _zoomAnim = Matrix4Tween(begin: _controller.value, end: target).animate(
+      CurvedAnimation(parent: _anim, curve: Curves.easeOutCubic),
+    )..addListener(() => _controller.value = _zoomAnim!.value);
+    _anim.forward(from: 0);
+  }
+
+  void _handleDoubleTap() {
+    final zoomed = _controller.value.getMaxScaleOnAxis() > 1.05;
+    if (zoomed) {
+      _animateTo(Matrix4.identity());
+    } else {
+      final pos = _lastTap?.localPosition ?? Offset.zero;
+      const scale = 2.5;
+      // Zoom toward the tapped point.
+      final target = Matrix4.identity()
+        ..translate(-pos.dx * (scale - 1), -pos.dy * (scale - 1))
+        ..scale(scale);
+      _animateTo(target);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Stack(
+        children: [
+          // Zoom + pan + rotate surface.
+          GestureDetector(
+            onTap: () => setState(() => _chrome = !_chrome),
+            onDoubleTapDown: (d) => _lastTap = d,
+            onDoubleTap: _handleDoubleTap,
+            child: InteractiveViewer(
+              transformationController: _controller,
+              minScale: 1,
+              maxScale: 8,
+              child: Center(
+                child: RotatedBox(
+                  quarterTurns: _quarterTurns,
+                  child: Image.network(
+                    widget.url,
+                    fit: BoxFit.contain,
+                    loadingBuilder: (c, child, progress) => progress == null
+                        ? child
+                        : const SizedBox(
+                            width: 40,
+                            height: 40,
+                            child: Center(
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white70),
+                            ),
+                          ),
+                    errorBuilder: (c, e, s) => const Icon(Icons.broken_image_rounded,
+                        color: Colors.white38, size: 48),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Top chrome: back + title + rotate.
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            top: _chrome ? 0 : -120,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: EdgeInsets.only(
+                  top: MediaQuery.of(context).padding.top, left: 4, right: 4, bottom: 4),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.black54, Colors.transparent],
+                ),
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  Expanded(
+                    child: Text(
+                      widget.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white, fontSize: 15),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Rotate',
+                    icon: const Icon(Icons.rotate_right, color: Colors.white),
+                    onPressed: () =>
+                        setState(() => _quarterTurns = (_quarterTurns + 1) % 4),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

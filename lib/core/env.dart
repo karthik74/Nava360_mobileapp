@@ -8,7 +8,7 @@ class Env {
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'https://hrms.navachetanalivelihoods.com/',
-    //defaultValue: 'http://192.168.0.94:8443/',
+    //defaultValue: 'http://192.168.0.50:8443/',
   );
 
   /// Builds an absolute URL for a backend file path (e.g. "/api/files/12").
