@@ -710,7 +710,27 @@ class _QuestionCard extends StatelessWidget {
                 ),
               const SizedBox(width: 8),
               if (q.attachmentCount > 0)
-                _miniChip('${q.attachmentCount} file(s)', AppColors.success)
+                // Tapping the count opens the uploaded-file list with remove.
+                InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: q.questionId == null
+                      ? null
+                      : () => showModalBottomSheet<void>(
+                            context: context,
+                            isScrollControlled: true,
+                            shape: const RoundedRectangleBorder(
+                              borderRadius: BorderRadius.vertical(
+                                  top: Radius.circular(16)),
+                            ),
+                            builder: (_) => _QuestionAttachmentsSheet(
+                              questionId: q.questionId!,
+                              editable: editable,
+                              onChanged: onAttachmentChanged,
+                            ),
+                          ),
+                  child:
+                      _miniChip('${q.attachmentCount} file(s) ▾', AppColors.success),
+                )
               else if (_needsAttachment)
                 _miniChip('required', AppColors.danger),
             ],
@@ -731,6 +751,153 @@ class _QuestionCard extends StatelessWidget {
         decoration: BoxDecoration(color: c.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(6)),
         child: Text(t, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: c)),
       );
+}
+
+// ── Uploaded question files (view + remove) ─────────────────────────────────
+
+class _QuestionAttachmentsSheet extends ConsumerStatefulWidget {
+  const _QuestionAttachmentsSheet({
+    required this.questionId,
+    required this.editable,
+    required this.onChanged,
+  });
+  final int questionId;
+  final bool editable;
+  /// Invoked after each successful delete so the parent refreshes its counts.
+  final VoidCallback onChanged;
+
+  @override
+  ConsumerState<_QuestionAttachmentsSheet> createState() =>
+      _QuestionAttachmentsSheetState();
+}
+
+class _QuestionAttachmentsSheetState
+    extends ConsumerState<_QuestionAttachmentsSheet> {
+  List<AuditAttachment>? _items;
+  int? _busyId;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final list = await ref
+          .read(auditRepositoryProvider)
+          .attachments('QUESTION', widget.questionId);
+      if (mounted) setState(() => _items = list);
+    } catch (_) {
+      if (mounted) setState(() => _items = const []);
+    }
+  }
+
+  Future<void> _delete(AuditAttachment a) async {
+    final id = a.id;
+    if (id == null) return;
+    setState(() => _busyId = id);
+    try {
+      await ref.read(auditRepositoryProvider).deleteAttachment(id);
+      if (!mounted) return;
+      setState(() {
+        _items = _items?.where((x) => x.id != id).toList();
+        _busyId = null;
+      });
+      widget.onChanged();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busyId = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to remove: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = _items;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.muted.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('Uploaded files',
+                style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            if (items == null)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Center(
+                    child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2))),
+              )
+            else if (items.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Text('No files uploaded for this question.',
+                    style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+              )
+            else
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final a in items)
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.attach_file_rounded,
+                            size: 18, color: AppColors.muted),
+                        title: Text(
+                          a.fileName ?? 'File #${a.id}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12.5),
+                        ),
+                        subtitle: a.capturedAt != null
+                            ? Text(a.capturedAt!,
+                                style: const TextStyle(fontSize: 10.5))
+                            : null,
+                        trailing: widget.editable
+                            ? IconButton(
+                                icon: _busyId == a.id
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2))
+                                    : const Icon(Icons.delete_outline_rounded,
+                                        size: 20, color: AppColors.danger),
+                                onPressed:
+                                    _busyId == null ? () => _delete(a) : null,
+                                tooltip: 'Remove',
+                              )
+                            : null,
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // ── Annexure tab (list + add + delete) ──────────────────────────────────────
@@ -902,6 +1069,9 @@ class _AnnexureFormState extends State<_AnnexureForm> {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: TextField(
                   controller: _ctrl(f),
+                  keyboardType: _numField(f)
+                      ? const TextInputType.numberWithOptions(decimal: true)
+                      : TextInputType.text,
                   decoration: InputDecoration(labelText: _label(f), isDense: true, border: const OutlineInputBorder()),
                 ),
               ),
@@ -925,7 +1095,21 @@ class _AnnexureFormState extends State<_AnnexureForm> {
                       final body = <String, dynamic>{'sortOrder': 0};
                       for (final f in _fields) {
                         final t = _ctrl(f).text.trim();
-                        if (t.isNotEmpty) body[f] = _numField(f) ? num.tryParse(t) ?? t : t;
+                        if (t.isEmpty) continue;
+                        if (_numField(f)) {
+                          final n = num.tryParse(t);
+                          if (n == null) {
+                            // Never ship free text into a numeric DTO field —
+                            // the backend can't parse it and 500s the save.
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('${_label(f)} must be a number')),
+                            );
+                            return;
+                          }
+                          body[f] = n;
+                        } else {
+                          body[f] = t;
+                        }
                       }
                       if (widget.type == 'od' && _rootCause != null) body['rootCause'] = _rootCause;
                       if (widget.type == 'branch' && body['available'] == null) body['available'] = 'NO';

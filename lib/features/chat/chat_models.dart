@@ -143,6 +143,64 @@ class Conversation {
       );
 }
 
+// ── MessageReaction ──────────────────────────────────────────────────────────
+
+/// One employee's emoji reaction to a message (group by emoji for display).
+class MessageReaction {
+  final String emoji;
+  final int employeeId;
+  final String employeeName;
+
+  const MessageReaction({
+    required this.emoji,
+    required this.employeeId,
+    required this.employeeName,
+  });
+
+  factory MessageReaction.fromJson(Map<String, dynamic> j) => MessageReaction(
+        emoji: j['emoji'] as String? ?? '',
+        employeeId: (j['employeeId'] as num).toInt(),
+        employeeName: j['employeeName'] as String? ?? '',
+      );
+}
+
+// ── PinnedMessage ────────────────────────────────────────────────────────────
+
+/// The conversation's single pinned message (shown in the pinned banner).
+class PinnedMessage {
+  final int conversationId;
+  final int messageId;
+  final int senderId;
+  final String senderName;
+  /// Short preview; null once the message was deleted for everyone.
+  final String? preview;
+  final bool messageDeleted;
+  final int pinnedByEmployeeId;
+  final String pinnedByName;
+
+  const PinnedMessage({
+    required this.conversationId,
+    required this.messageId,
+    required this.senderId,
+    required this.senderName,
+    this.preview,
+    this.messageDeleted = false,
+    required this.pinnedByEmployeeId,
+    required this.pinnedByName,
+  });
+
+  factory PinnedMessage.fromJson(Map<String, dynamic> j) => PinnedMessage(
+        conversationId: (j['conversationId'] as num).toInt(),
+        messageId: (j['messageId'] as num).toInt(),
+        senderId: (j['senderId'] as num).toInt(),
+        senderName: j['senderName'] as String? ?? '',
+        preview: j['preview'] as String?,
+        messageDeleted: j['messageDeleted'] == true,
+        pinnedByEmployeeId: (j['pinnedByEmployeeId'] as num).toInt(),
+        pinnedByName: j['pinnedByName'] as String? ?? '',
+      );
+}
+
 // ── ChatMessage ──────────────────────────────────────────────────────────────
 
 class ChatMessage {
@@ -166,6 +224,9 @@ class ChatMessage {
   final String? replyToPreview;
   final bool replyToDeleted;
 
+  /// Per-employee emoji reactions (group by emoji for display).
+  final List<MessageReaction> reactions;
+
   const ChatMessage({
     required this.id,
     required this.conversationId,
@@ -184,9 +245,32 @@ class ChatMessage {
     this.replyToSenderName,
     this.replyToPreview,
     this.replyToDeleted = false,
+    this.reactions = const [],
   });
 
   bool get isSystem => type == ChatMessageType.SYSTEM;
+
+  /// Copy with a replaced reaction set (REST response / REACTION socket echo).
+  ChatMessage withReactions(List<MessageReaction> reactions) => ChatMessage(
+        id: id,
+        conversationId: conversationId,
+        senderId: senderId,
+        senderName: senderName,
+        type: type,
+        content: content,
+        attachmentFileId: attachmentFileId,
+        attachmentName: attachmentName,
+        attachmentContentType: attachmentContentType,
+        attachmentSizeBytes: attachmentSizeBytes,
+        attachmentUrl: attachmentUrl,
+        createdAt: createdAt,
+        deletedForEveryone: deletedForEveryone,
+        replyToId: replyToId,
+        replyToSenderName: replyToSenderName,
+        replyToPreview: replyToPreview,
+        replyToDeleted: replyToDeleted,
+        reactions: reactions,
+      );
 
   /// A short one-line preview of this message (for reply quotes / previews).
   String get previewText {
@@ -214,6 +298,10 @@ class ChatMessage {
         replyToSenderName: j['replyToSenderName'] as String?,
         replyToPreview: j['replyToPreview'] as String?,
         replyToDeleted: j['replyToDeleted'] == true,
+        reactions: (j['reactions'] as List<dynamic>?)
+                ?.map((e) => MessageReaction.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
       );
 }
 

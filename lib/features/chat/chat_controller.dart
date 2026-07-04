@@ -144,6 +144,17 @@ class ChatMessagesNotifier extends StateNotifier<AsyncValue<List<ChatMessage>>> 
     });
   }
 
+  /// Replace one message's reaction set (from a REST response or the REACTION
+  /// socket echo — both carry the full snapshot, so applying twice is harmless).
+  void applyReactions(int messageId, List<MessageReaction> reactions) {
+    state.whenData((list) {
+      state = AsyncValue.data([
+        for (final m in list)
+          m.id == messageId ? m.withReactions(reactions) : m,
+      ]);
+    });
+  }
+
   /// Load earlier messages (cursor pagination).
   Future<void> loadMore() async {
     if (!_hasMore) return;
@@ -174,6 +185,14 @@ class ChatMessagesNotifier extends StateNotifier<AsyncValue<List<ChatMessage>>> 
       });
       // Auto-mark read.
       _repo.markRead(_conversationId);
+    } else if (type == 'REACTION') {
+      final convId = (event['conversationId'] as num).toInt();
+      if (convId != _conversationId) return;
+      final msgId = (event['messageId'] as num).toInt();
+      final reactions = (event['reactions'] as List<dynamic>? ?? const [])
+          .map((e) => MessageReaction.fromJson(e as Map<String, dynamic>))
+          .toList();
+      applyReactions(msgId, reactions);
     } else if (type == 'DELETED') {
       final convId = (event['conversationId'] as num).toInt();
       if (convId != _conversationId) return;

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
@@ -8,17 +9,27 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/env.dart';
+import '../../core/secure_screen.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import 'chat_controller.dart';
 import 'chat_models.dart';
 import 'chat_repository.dart';
+import 'chat_socket_service.dart';
 import 'group_info_screen.dart';
 
 class ChatThreadScreen extends ConsumerStatefulWidget {
-  const ChatThreadScreen({super.key, required this.conversation});
+  const ChatThreadScreen({
+    super.key,
+    required this.conversation,
+    this.initialReplyTo,
+  });
   final Conversation conversation;
+
+  /// Pre-seeded reply quote — used by "Reply Privately", which opens the DM
+  /// with the sender and quotes their (possibly group) message there.
+  final ChatMessage? initialReplyTo;
 
   @override
   ConsumerState<ChatThreadScreen> createState() => _ChatThreadScreenState();
@@ -40,18 +51,55 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
   /// Message to briefly flash-highlight after a reply-jump.
   int? _highlightMsgId;
 
+  /// The conversation's single pinned message (null = nothing pinned).
+  PinnedMessage? _pinned;
+  StreamSubscription? _pinSub;
+
   @override
   void initState() {
     super.initState();
+    // Chat is confidential — block screenshots/recording while it's open
+    // (covers the thread, attachments and the fullscreen image viewer).
+    SecureScreen.acquire();
     _scrollCtrl.addListener(_onScroll);
     _msgCtrl.addListener(_onTextChanged);
+    _replyingTo = widget.initialReplyTo;
+    _loadPinned();
+    // REACTION events are applied by the messages notifier; the pin banner is
+    // screen state, so PIN events are handled here.
+    _pinSub = ref.read(chatSocketProvider).stream.listen(_onPinEvent);
   }
 
   @override
   void dispose() {
+    SecureScreen.release();
+    _pinSub?.cancel();
     _msgCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadPinned() async {
+    try {
+      final p = await ref
+          .read(chatRepositoryProvider)
+          .getPinnedMessage(widget.conversation.id);
+      if (mounted) setState(() => _pinned = p);
+    } catch (_) {
+      // Banner is best-effort; the thread still works without it.
+    }
+  }
+
+  void _onPinEvent(Map<String, dynamic> event) {
+    if (event['type'] != 'PIN') return;
+    if ((event['conversationId'] as num?)?.toInt() != widget.conversation.id) {
+      return;
+    }
+    final p = event['pinned'];
+    if (mounted) {
+      setState(() => _pinned =
+          p == null ? null : PinnedMessage.fromJson(p as Map<String, dynamic>));
+    }
   }
 
   void _onScroll() {
@@ -372,7 +420,152 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     }
   }
 
-  void _showDeleteSheet(ChatMessage msg, bool isMine) {
+  // ── Message options (long-press), reactions & pin — mirrors the web menu ───
+
+  /// WhatsApp's quick-reaction set (same as the web EmojiPicker).
+  static const _quickReactions = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+  String? _myReactionOf(ChatMessage msg) {
+    final myId = ref.read(authUserProvider)?.employeeId;
+    for (final r in msg.reactions) {
+      if (r.employeeId == myId) return r.emoji;
+    }
+    return null;
+  }
+
+  /// One reaction per person: same emoji removes it, a different one replaces it.
+  Future<void> _toggleReaction(ChatMessage msg, String emoji) async {
+    final repo = ref.read(chatRepositoryProvider);
+    try {
+      final updated = _myReactionOf(msg) == emoji
+          ? await repo.removeReaction(msg.id)
+          : await repo.addReaction(msg.id, emoji);
+      // The REACTION socket echo also lands; both apply the same full snapshot.
+      ref
+          .read(chatMessagesProvider(widget.conversation.id).notifier)
+          .applyReactions(msg.id, updated);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to react: $e')),
+        );
+      }
+    }
+  }
+
+  /// Long-pressing a reaction chip lists who reacted (hover tooltip on web).
+  void _showReactors(ChatMessage msg) {
+    final myId = ref.read(authUserProvider)?.employeeId;
+    final byEmoji = <String, List<String>>{};
+    for (final r in msg.reactions) {
+      byEmoji
+          .putIfAbsent(r.emoji, () => [])
+          .add(r.employeeId == myId ? 'You' : r.employeeName);
+    }
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          children: [
+            const Text(
+              'Reactions',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            for (final entry in byEmoji.entries)
+              for (final name in entry.value)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      Text(entry.key, style: const TextStyle(fontSize: 22)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          name,
+                          style: const TextStyle(fontSize: 14),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (name == 'You')
+                        const Text(
+                          'Tap your emoji to remove',
+                          style:
+                              TextStyle(fontSize: 11, color: Color(0xFF8696A0)),
+                        ),
+                    ],
+                  ),
+                ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Pin (or unpin, when it's already the pinned one) — one pin per conversation.
+  Future<void> _togglePin(ChatMessage msg) async {
+    final repo = ref.read(chatRepositoryProvider);
+    try {
+      if (_pinned?.messageId == msg.id) {
+        await repo.unpinMessage(widget.conversation.id);
+        if (mounted) setState(() => _pinned = null);
+      } else {
+        final p = await repo.pinMessage(widget.conversation.id, msg.id);
+        if (mounted) setState(() => _pinned = p);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to pin: $e')),
+        );
+      }
+    }
+  }
+
+  /// "Reply Privately" / "Message": open (or create) the DM with the sender.
+  /// A reply-privately quote of the original rides along when [replyPrivately].
+  Future<void> _openDirectWithSender(ChatMessage msg,
+      {required bool replyPrivately}) async {
+    final conv = widget.conversation;
+    // Already in the DM with this sender — replying here IS private.
+    if (conv.isDirect && conv.otherEmployeeId == msg.senderId) {
+      if (replyPrivately) setState(() => _replyingTo = msg);
+      return;
+    }
+    try {
+      final dm =
+          await ref.read(chatRepositoryProvider).getOrCreateDirect(msg.senderId);
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatThreadScreen(
+            conversation: dm,
+            initialReplyTo: replyPrivately ? msg : null,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to open chat: $e')),
+        );
+      }
+    }
+  }
+
+  /// Long-press options sheet — quick reactions on top, then the same actions
+  /// as the web context menu (Reply Privately / Message / React / Pin) plus the
+  /// existing delete actions.
+  void _showMessageOptions(ChatMessage msg, bool isMine) {
+    final myReaction = _myReactionOf(msg);
+    final isPinned = _pinned?.messageId == msg.id;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -386,19 +579,48 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
             borderRadius: BorderRadius.vertical(
                 top: Radius.circular(AppRadii.xl)),
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.muted.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(2),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.muted.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 18),
-              if (!msg.deletedForEveryone)
+                const SizedBox(height: 14),
+                // ── Quick reactions (React) ─────────────────────────────────
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    for (final emoji in _quickReactions)
+                      InkWell(
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _toggleReaction(msg, emoji);
+                        },
+                        borderRadius: BorderRadius.circular(24),
+                        child: Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: myReaction == emoji
+                              ? BoxDecoration(
+                                  color: const Color(0xFF008069)
+                                      .withOpacity(0.12),
+                                  shape: BoxShape.circle,
+                                )
+                              : null,
+                          child: Text(emoji,
+                              style: const TextStyle(fontSize: 26)),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                const Divider(height: 1),
+                const SizedBox(height: 8),
                 _SheetAction(
                   icon: Icons.reply_rounded,
                   label: 'Reply',
@@ -408,43 +630,76 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                     setState(() => _replyingTo = msg);
                   },
                 ),
-              _SheetAction(
-                icon: Icons.delete_outline_rounded,
-                label: 'Delete for me',
-                color: AppColors.danger,
-                onTap: () {
-                  Navigator.pop(ctx);
-                  ref.read(chatRepositoryProvider).deleteMessage(
-                        widget.conversation.id,
-                        msg.id,
-                      );
-                  // Remove locally.
-                  ref
-                      .read(chatMessagesProvider(widget.conversation.id).notifier)
-                      .loadMore(); // Quick refresh.
-                },
-              ),
-              if (isMine && !msg.deletedForEveryone)
+                if (!isMine) ...[
+                  _SheetAction(
+                    icon: Icons.person_outline_rounded,
+                    label: 'Reply Privately',
+                    color: AppColors.primary,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _openDirectWithSender(msg, replyPrivately: true);
+                    },
+                  ),
+                  _SheetAction(
+                    icon: Icons.chat_bubble_outline_rounded,
+                    label: 'Message ${msg.senderName}',
+                    color: AppColors.primary,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _openDirectWithSender(msg, replyPrivately: false);
+                    },
+                  ),
+                ],
                 _SheetAction(
-                  icon: Icons.delete_forever_rounded,
-                  label: 'Delete for everyone',
+                  icon: isPinned
+                      ? Icons.push_pin_outlined
+                      : Icons.push_pin_rounded,
+                  label: isPinned ? 'Unpin' : 'Pin',
+                  color: AppColors.primary,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _togglePin(msg);
+                  },
+                ),
+                _SheetAction(
+                  icon: Icons.delete_outline_rounded,
+                  label: 'Delete for me',
                   color: AppColors.danger,
                   onTap: () {
                     Navigator.pop(ctx);
                     ref.read(chatRepositoryProvider).deleteMessage(
                           widget.conversation.id,
                           msg.id,
-                          forEveryone: true,
                         );
+                    // Remove locally.
+                    ref
+                        .read(chatMessagesProvider(widget.conversation.id)
+                            .notifier)
+                        .loadMore(); // Quick refresh.
                   },
                 ),
-              _SheetAction(
-                icon: Icons.close_rounded,
-                label: 'Cancel',
-                color: AppColors.muted,
-                onTap: () => Navigator.pop(ctx),
-              ),
-            ],
+                if (isMine)
+                  _SheetAction(
+                    icon: Icons.delete_forever_rounded,
+                    label: 'Delete for everyone',
+                    color: AppColors.danger,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      ref.read(chatRepositoryProvider).deleteMessage(
+                            widget.conversation.id,
+                            msg.id,
+                            forEveryone: true,
+                          );
+                    },
+                  ),
+                _SheetAction(
+                  icon: Icons.close_rounded,
+                  label: 'Cancel',
+                  color: AppColors.muted,
+                  onTap: () => Navigator.pop(ctx),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -571,6 +826,26 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
           ),
           Column(
             children: [
+              // ── Pinned message banner (one pin per conversation) ──────────
+              if (_pinned != null)
+                _PinnedBanner(
+                  pinned: _pinned!,
+                  onTap: () => _jumpToMessage(_pinned!.messageId),
+                  onUnpin: () async {
+                    try {
+                      await ref
+                          .read(chatRepositoryProvider)
+                          .unpinMessage(conv.id);
+                      if (mounted) setState(() => _pinned = null);
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Failed to unpin: $e')),
+                        );
+                      }
+                    }
+                  },
+                ),
               Expanded(
                 child: msgs.when(
                   data: (messages) {
@@ -671,11 +946,15 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                                   isMine: isMine,
                                   isRead: isRead,
                                   showSender: conv.isGroup && !isMine,
+                                  myEmployeeId: myEmpId,
                                   onLongPress: () =>
-                                      _showDeleteSheet(msg, isMine),
+                                      _showMessageOptions(msg, isMine),
                                   onTapReply: msg.replyToId != null
                                       ? () => _jumpToMessage(msg.replyToId!)
                                       : null,
+                                  onToggleReaction: (emoji) =>
+                                      _toggleReaction(msg, emoji),
+                                  onShowReactors: () => _showReactors(msg),
                                 ),
                             ],
                           ),
@@ -701,6 +980,8 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
               if (_replyingTo != null)
                 _ReplyComposerBar(
                   message: _replyingTo!,
+                  // A quote from another conversation = "reply privately".
+                  privately: _replyingTo!.conversationId != conv.id,
                   onCancel: () => setState(() => _replyingTo = null),
                 ),
               // ── Input bar styled like WhatsApp ────────────────────────────
@@ -811,6 +1092,9 @@ class _MessageBubble extends StatelessWidget {
     required this.showSender,
     required this.onLongPress,
     this.onTapReply,
+    this.myEmployeeId,
+    this.onToggleReaction,
+    this.onShowReactors,
   });
   final ChatMessage msg;
   final bool isMine;
@@ -819,13 +1103,27 @@ class _MessageBubble extends StatelessWidget {
   final VoidCallback onLongPress;
   /// Tapping the quoted reply jumps to the original message (null = no original).
   final VoidCallback? onTapReply;
+  /// Current user's employee id — highlights their own reaction chip.
+  final int? myEmployeeId;
+  /// Tapping a reaction chip toggles the caller's reaction of that emoji.
+  final void Function(String emoji)? onToggleReaction;
+  /// Long-pressing a reaction chip lists who reacted.
+  final VoidCallback? onShowReactors;
+
+  /// Display width of inline images — the caption below wraps to this same
+  /// width so the bubble hugs the picture, WhatsApp-style.
+  static const double _imageWidth = 240;
+
+  /// Whether this message renders as an inline image (vs a file chip).
+  bool get _isInlineImage =>
+      _attachmentUrlOf(msg) != null &&
+      (msg.type == ChatMessageType.IMAGE ||
+          (msg.attachmentContentType?.startsWith('image/') ?? false));
 
   /// Renders an inline image preview for image attachments, else a file chip.
   Widget _attachment(BuildContext context) {
     final url = _attachmentUrlOf(msg);
-    final isImage = msg.type == ChatMessageType.IMAGE ||
-        (msg.attachmentContentType?.startsWith('image/') ?? false);
-    if (isImage && url != null) {
+    if (_isInlineImage && url != null) {
       return Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: GestureDetector(
@@ -833,7 +1131,12 @@ class _MessageBubble extends StatelessWidget {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 240, maxHeight: 260),
+              // Fixed width (not just a max) so image, caption and bubble all
+              // share one width; tall images crop via BoxFit.cover like WhatsApp.
+              constraints: const BoxConstraints(
+                  minWidth: _imageWidth,
+                  maxWidth: _imageWidth,
+                  maxHeight: 260),
               child: Image.network(
                 url,
                 fit: BoxFit.cover,
@@ -966,71 +1269,111 @@ class _MessageBubble extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (deleted)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.block_rounded,
-                            size: 13, color: Color(0xFF8696A0)),
-                        const SizedBox(width: 4),
-                        Text(
-                          'This message was deleted',
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontStyle: FontStyle.italic,
-                            color: const Color(0xFF8696A0).withOpacity(0.9),
+              // IntrinsicWidth sizes the bubble to its widest child, so the
+              // content can be START-aligned (reads left-to-right like
+              // WhatsApp) while only the time row floats bottom-right. The
+              // Column was previously end-aligned, which pushed the text to
+              // the right edge whenever a quote/image/wrapped line was wider.
+              child: IntrinsicWidth(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (deleted)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.block_rounded,
+                              size: 13, color: Color(0xFF8696A0)),
+                          const SizedBox(width: 4),
+                          Text(
+                            'This message was deleted',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontStyle: FontStyle.italic,
+                              color: const Color(0xFF8696A0).withOpacity(0.9),
+                            ),
+                          ),
+                        ],
+                      )
+                    else ...[
+                      if (msg.replyToId != null)
+                        // Full bubble width, WhatsApp-style quote block.
+                        SizedBox(
+                          width: double.infinity,
+                          child: _QuotedReply(
+                              msg: msg, isMine: isMine, onTap: onTapReply),
+                        ),
+                      if (msg.attachmentName != null) ...[
+                        _attachment(context),
+                      ],
+                      if (msg.content != null && msg.content!.isNotEmpty)
+                        // Under an inline image the caption wraps at the
+                        // image's width (bounding it here also caps the
+                        // IntrinsicWidth bubble), so the bubble hugs the
+                        // picture instead of growing wider than it.
+                        ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: msg.attachmentName != null &&
+                                    _isInlineImage
+                                ? _imageWidth
+                                : double.infinity,
+                          ),
+                          child: Text(
+                            msg.content!,
+                            style: const TextStyle(
+                              fontSize: 13.8,
+                              color: Color(0xFF111B21), // WhatsApp dark text color
+                              height: 1.3,
+                            ),
                           ),
                         ),
-                      ],
-                    )
-                  else ...[
-                    if (msg.replyToId != null)
-                      _QuotedReply(msg: msg, isMine: isMine, onTap: onTapReply),
-                    if (msg.attachmentName != null) ...[
-                      _attachment(context),
                     ],
-                    if (msg.content != null && msg.content!.isNotEmpty)
-                      Text(
-                        msg.content!,
-                        style: const TextStyle(
-                          fontSize: 13.8,
-                          color: Color(0xFF111B21), // WhatsApp dark text color
-                          height: 1.3,
-                        ),
+                    const SizedBox(height: 2),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            DateFormat('h:mm a').format(msg.createdAt),
+                            style: const TextStyle(
+                              fontSize: 9.5,
+                              color: Color(0xFF667781), // WhatsApp status grey
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          if (isMine && !deleted) ...[
+                            const SizedBox(width: 3),
+                            Icon(
+                              isRead
+                                  ? Icons.done_all_rounded
+                                  : Icons.done_rounded,
+                              size: 14,
+                              color: isRead
+                                  ? const Color(0xFF53BDEB) // WhatsApp Blue double check ticks
+                                  : const Color(0xFF8696A0), // Grey ticks
+                            ),
+                          ],
+                        ],
                       ),
+                    ),
                   ],
-                  const SizedBox(height: 2),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        DateFormat('h:mm a').format(msg.createdAt),
-                        style: const TextStyle(
-                          fontSize: 9.5,
-                          color: Color(0xFF667781), // WhatsApp status grey
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      if (isMine && !deleted) ...[
-                        const SizedBox(width: 3),
-                        Icon(
-                          isRead ? Icons.done_all_rounded : Icons.done_rounded,
-                          size: 14,
-                          color: isRead
-                              ? const Color(0xFF53BDEB) // WhatsApp Blue double check ticks
-                              : const Color(0xFF8696A0), // Grey ticks
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
+                ),
               ),
             ),
           ),
+          // ── Reactions under the bubble (WhatsApp-style chips) ─────────────
+          if (!deleted && msg.reactions.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: _ReactionChips(
+                reactions: msg.reactions,
+                myEmployeeId: myEmployeeId,
+                onToggle: onToggleReaction,
+                onShowReactors: onShowReactors,
+              ),
+            ),
         ],
       ),
     );
@@ -1048,6 +1391,169 @@ class _MessageBubble extends StatelessWidget {
       const Color(0xFFFF9800),
     ];
     return colors[name.hashCode.abs() % colors.length];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reaction chips — grouped by emoji with a count; own reaction highlighted
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ReactionChips extends StatelessWidget {
+  const _ReactionChips({
+    required this.reactions,
+    this.myEmployeeId,
+    this.onToggle,
+    this.onShowReactors,
+  });
+  final List<MessageReaction> reactions;
+  final int? myEmployeeId;
+  final void Function(String emoji)? onToggle;
+  final VoidCallback? onShowReactors;
+
+  @override
+  Widget build(BuildContext context) {
+    // Group by emoji, preserving first-seen order.
+    final counts = <String, int>{};
+    final mine = <String>{};
+    for (final r in reactions) {
+      counts[r.emoji] = (counts[r.emoji] ?? 0) + 1;
+      if (r.employeeId == myEmployeeId) mine.add(r.emoji);
+    }
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        for (final entry in counts.entries)
+          GestureDetector(
+            onTap: onToggle == null ? null : () => onToggle!(entry.key),
+            onLongPress: onShowReactors,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: mine.contains(entry.key)
+                      ? const Color(0xFF008069)
+                      : Colors.black12,
+                  width: mine.contains(entry.key) ? 1.4 : 1,
+                ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x12000000),
+                    blurRadius: 1.5,
+                    offset: Offset(0, 1),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(entry.key, style: const TextStyle(fontSize: 13.5)),
+                  if (entry.value > 1) ...[
+                    const SizedBox(width: 3),
+                    Text(
+                      '${entry.value}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF54656F),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pinned message banner — top of the thread; tap to jump, X to unpin
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PinnedBanner extends StatelessWidget {
+  const _PinnedBanner({
+    required this.pinned,
+    required this.onTap,
+    required this.onUnpin,
+  });
+  final PinnedMessage pinned;
+  final VoidCallback onTap;
+  final VoidCallback onUnpin;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+          decoration: const BoxDecoration(
+            border: Border(bottom: BorderSide(color: Color(0x14000000))),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF008069).withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.push_pin_rounded,
+                  size: 16,
+                  color: Color(0xFF008069),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      pinned.senderName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF008069),
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      pinned.messageDeleted
+                          ? 'This message was deleted'
+                          : (pinned.preview ?? ''),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontStyle: pinned.messageDeleted
+                            ? FontStyle.italic
+                            : FontStyle.normal,
+                        color: const Color(0xFF54656F),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded,
+                    size: 18, color: Color(0xFF8696A0)),
+                onPressed: onUnpin,
+                tooltip: 'Unpin',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1435,9 +1941,15 @@ class _MentionSuggestions extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ReplyComposerBar extends StatelessWidget {
-  const _ReplyComposerBar({required this.message, required this.onCancel});
+  const _ReplyComposerBar({
+    required this.message,
+    required this.onCancel,
+    this.privately = false,
+  });
   final ChatMessage message;
   final VoidCallback onCancel;
+  /// True when quoting a message from another conversation ("reply privately").
+  final bool privately;
 
   @override
   Widget build(BuildContext context) {
@@ -1470,7 +1982,7 @@ class _ReplyComposerBar extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Replying to ${message.senderName}',
+                        '${privately ? "Replying privately to" : "Replying to"} ${message.senderName}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
