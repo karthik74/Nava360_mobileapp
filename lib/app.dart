@@ -375,6 +375,8 @@ class HrmsApp extends ConsumerWidget {
         (id) => router.push('/policies/$id');
     // …and into the employee's assets (asset assignment / warranty pushes).
     ref.read(pushServiceProvider).onOpenAssets = () => router.push('/assets');
+    // …and to any explicit in-app route a push carries (announcement actions).
+    ref.read(pushServiceProvider).onOpenRoute = (route) => router.push(route);
     return MaterialApp.router(
       title: 'Nava360',
       debugShowCheckedModeBanner: false,
