@@ -85,10 +85,17 @@ class TaskRepository {
     );
   }
 
-  Future<List<Task>> listForEmployee(int employeeId, {String? status}) {
+  Future<List<Task>> listForEmployee(int employeeId, {String? status, String? q}) {
     return _api.get<List<Task>>(
       '/api/tasks/employee/$employeeId',
-      query: {if (status != null && status.isNotEmpty) 'status': status},
+      // The endpoint is paged (default 20) — request a large page so client-side
+      // date/priority filters see real history, and pass the title search to the
+      // SERVER so it matches ALL tasks, not just the loaded page.
+      query: {
+        if (status != null && status.isNotEmpty) 'status': status,
+        if (q != null && q.trim().isNotEmpty) 'q': q.trim(),
+        'size': '200',
+      },
       parse: (d) {
         if (d is List) {
           return d.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList();
