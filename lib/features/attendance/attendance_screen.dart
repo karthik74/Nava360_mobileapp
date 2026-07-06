@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -1013,6 +1014,8 @@ class _RegularizationSheetState extends ConsumerState<_RegularizationSheet> {
                 controller: _reason,
                 minLines: 2,
                 maxLines: 4,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
                 decoration: const InputDecoration(
                   labelText: 'Reason *',
                   alignLabelWithHint: true,
@@ -1198,6 +1201,8 @@ class _LeaveSheetState extends ConsumerState<_LeaveSheet> {
                 controller: _reason,
                 minLines: 2,
                 maxLines: 4,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
                 decoration: const InputDecoration(
                   labelText: 'Reason *',
                   alignLabelWithHint: true,

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'announcement_detail_screen.dart';
@@ -114,6 +115,8 @@ class _AnnouncementsScreenState extends ConsumerState<AnnouncementsScreen> {
               // Search
               TextField(
                 onChanged: (v) => setState(() => _query = v),
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
                 decoration: InputDecoration(
                   hintText: 'Search announcements…',
                   prefixIcon: const Icon(Icons.search_rounded, size: 20),

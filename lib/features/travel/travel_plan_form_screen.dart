@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/env.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../requisitions/requisition_models.dart';
@@ -173,7 +174,12 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             _label('Title *'),
-            TextField(controller: _title, maxLength: 150),
+            TextField(
+              controller: _title,
+              maxLength: 150,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
+            ),
             _label('From *'),
             _BranchField(controller: _from, hint: 'Type or pick a branch'),
             const SizedBox(height: 12),
@@ -221,7 +227,13 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
             ),
             const SizedBox(height: 12),
             _label('Purpose'),
-            TextField(controller: _purpose, minLines: 2, maxLines: 5),
+            TextField(
+              controller: _purpose,
+              minLines: 2,
+              maxLines: 5,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
+            ),
             const SizedBox(height: 18),
             if (_isEdit && widget.plan!.attachments.isNotEmpty) ...[
               // Legacy plan attachments stay viewable; new uploads happen on the
@@ -303,6 +315,8 @@ class _BranchFieldState extends ConsumerState<_BranchField> {
         fieldViewBuilder: (context, controller, focusNode, onSubmit) => TextField(
           controller: controller,
           focusNode: focusNode,
+          textCapitalization: TextCapitalization.words,
+          inputFormatters: const [TitleCaseTextFormatter()],
           decoration: InputDecoration(
             hintText: widget.hint,
             prefixIcon: const Icon(Icons.search_rounded, size: 20),

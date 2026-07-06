@@ -31,6 +31,7 @@ import 'features/notifications/notifications_screen.dart';
 import 'features/notifications/push_lifecycle.dart';
 import 'features/notifications/push_service.dart';
 import 'features/permissions/permission_gate.dart';
+import 'features/profile/my_documents_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/team/team_screen.dart';
 import 'features/chat/chat_list_screen.dart';
@@ -137,6 +138,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/profile',
         builder: (_, __) => const ProfileScreen(),
+      ),
+      GoRoute(
+        path: '/profile/documents',
+        builder: (_, __) => const MyDocumentsScreen(),
       ),
       GoRoute(
         path: '/change-password',

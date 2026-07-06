@@ -255,6 +255,8 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
             hint: 'e.g. EMP-0001',
             prefixIcon: Icons.badge_outlined,
             enabled: !_loading,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [UpperCaseTextFormatter()],
             textInputAction: TextInputAction.done,
             onSubmit: (_) => _sendOtp(),
           ),
@@ -368,6 +370,7 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
             prefixIcon: Icons.lock_outline_rounded,
             obscure: _o1,
             enabled: !_loading,
+            textCapitalization: TextCapitalization.sentences,
             textInputAction: TextInputAction.next,
             suffix: IconButton(
               splashRadius: 18,
@@ -388,6 +391,7 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
             prefixIcon: Icons.lock_outline_rounded,
             obscure: _o2,
             enabled: !_loading,
+            textCapitalization: TextCapitalization.sentences,
             textInputAction: TextInputAction.done,
             onSubmit: (_) => _setPassword(),
             suffix: IconButton(

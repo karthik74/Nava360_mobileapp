@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/env.dart';
 import '../../core/secure_screen.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'chat_controller.dart';
@@ -231,6 +232,8 @@ class _ChatSearchBar extends StatelessWidget {
                 child: TextField(
                   controller: controller,
                   onChanged: onChanged,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [TitleCaseTextFormatter()],
                   cursorColor: AppColors.primary,
                   cursorWidth: 1.5,
                   style: const TextStyle(

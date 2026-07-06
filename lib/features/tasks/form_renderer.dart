@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/env.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../files/file_repository.dart';
 import 'task_models.dart';
@@ -259,6 +260,12 @@ class _FieldInput extends StatelessWidget {
           keyboardType: field.type == FieldType.email
               ? TextInputType.emailAddress
               : TextInputType.text,
+          textCapitalization: field.type == FieldType.email
+              ? TextCapitalization.none
+              : TextCapitalization.words,
+          inputFormatters: field.type == FieldType.email
+              ? null
+              : const [TitleCaseTextFormatter()],
           decoration: InputDecoration(
             hintText: field.placeholder,
             border: const OutlineInputBorder(),
@@ -274,6 +281,8 @@ class _FieldInput extends StatelessWidget {
           readOnly: readOnly,
           minLines: 3,
           maxLines: 6,
+          textCapitalization: TextCapitalization.words,
+          inputFormatters: const [TitleCaseTextFormatter()],
           decoration: InputDecoration(
             hintText: field.placeholder,
             border: const OutlineInputBorder(),

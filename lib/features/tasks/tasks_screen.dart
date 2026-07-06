@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -314,6 +315,8 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
             TextField(
               controller: _titleCtrl,
               onChanged: (v) => setState(() => _titleQuery = v),
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 hintText: 'Search by task title…',
@@ -965,6 +968,8 @@ class _TaskTemplatePickerSheetState
               child: TextField(
                 controller: _searchCtrl,
                 onChanged: (v) => setState(() => _query = v),
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
                   hintText: 'Search task template',

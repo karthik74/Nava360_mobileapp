@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -217,6 +218,8 @@ class _MembersViewState extends ConsumerState<_MembersView> {
               // ── Search across the whole downline (name / code / role / branch) ──
               TextField(
                 controller: _searchCtrl,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
                 decoration: InputDecoration(
                   hintText: 'Search members by name, code, role or branch…',
                   prefixIcon: const Icon(Icons.search_rounded, size: 20),
@@ -725,6 +728,8 @@ class _RegularizationCardState extends ConsumerState<_RegularizationCard> {
         content: TextField(
           controller: c,
           maxLines: 2,
+          textCapitalization: TextCapitalization.words,
+          inputFormatters: const [TitleCaseTextFormatter()],
           decoration: const InputDecoration(hintText: 'Add a comment (optional)'),
         ),
         actions: [
@@ -1211,6 +1216,8 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
         title: Text(isApprove ? 'Approve request' : 'Reject request'),
         content: TextField(
           controller: c,
+          textCapitalization: TextCapitalization.words,
+          inputFormatters: const [TitleCaseTextFormatter()],
           decoration: const InputDecoration(
             hintText: 'Add a comment (optional)',
           ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'interview_models.dart';
@@ -136,6 +137,8 @@ class _InterviewCardState extends ConsumerState<_InterviewCard> {
               controller: controller,
               minLines: 2,
               maxLines: 4,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
               decoration: const InputDecoration(
                 labelText: 'Feedback (optional)',
                 alignLabelWithHint: true,

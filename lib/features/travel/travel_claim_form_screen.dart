@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'travel_models.dart';
@@ -204,9 +205,20 @@ class _TravelClaimFormScreenState extends ConsumerState<TravelClaimFormScreen> {
             ),
             const SizedBox(height: 14),
             _label('Title *'),
-            TextField(controller: _title, maxLength: 150),
+            TextField(
+              controller: _title,
+              maxLength: 150,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
+            ),
             _label('Purpose'),
-            TextField(controller: _purpose, minLines: 2, maxLines: 5),
+            TextField(
+              controller: _purpose,
+              minLines: 2,
+              maxLines: 5,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
+            ),
             const SizedBox(height: 14),
             Row(
               children: [

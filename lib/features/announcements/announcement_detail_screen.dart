@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/env.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'announcements_models.dart';
@@ -500,6 +501,8 @@ class _CommentsSectionState extends ConsumerState<_CommentsSection> {
             Expanded(
               child: TextField(
                 controller: _ctrl,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
                 decoration: InputDecoration(
                   hintText: 'Write a comment…',
                   filled: true,

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'requisition_models.dart';
@@ -153,6 +154,8 @@ class _CreateRequisitionScreenState
                         padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                         child: TextField(
                           autofocus: true,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: const [TitleCaseTextFormatter()],
                           onChanged: (v) => setSheet(() => query = v),
                           decoration: const InputDecoration(
                             hintText: 'Search branch, area, region…',
@@ -350,6 +353,8 @@ class _CreateRequisitionScreenState
       ),
       error: (_, __) => TextFormField(
         initialValue: value,
+        textCapitalization: TextCapitalization.words,
+        inputFormatters: const [TitleCaseTextFormatter()],
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon, size: 20),
@@ -408,6 +413,7 @@ class _CreateRequisitionScreenState
                         TextFormField(
                           controller: _title,
                           textCapitalization: TextCapitalization.words,
+                          inputFormatters: const [TitleCaseTextFormatter()],
                           decoration: const InputDecoration(
                             labelText: 'Job title *',
                             prefixIcon: Icon(Icons.work_outline_rounded,
@@ -528,6 +534,8 @@ class _CreateRequisitionScreenState
                           controller: _jobDescription,
                           minLines: 2,
                           maxLines: 5,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: const [TitleCaseTextFormatter()],
                           decoration: const InputDecoration(
                             labelText: 'Job description',
                             alignLabelWithHint: true,
@@ -538,6 +546,8 @@ class _CreateRequisitionScreenState
                           controller: _requiredSkills,
                           minLines: 1,
                           maxLines: 3,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: const [TitleCaseTextFormatter()],
                           decoration: const InputDecoration(
                             labelText: 'Required skills',
                             alignLabelWithHint: true,
@@ -548,6 +558,8 @@ class _CreateRequisitionScreenState
                           controller: _notes,
                           minLines: 1,
                           maxLines: 3,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: const [TitleCaseTextFormatter()],
                           decoration: const InputDecoration(
                             labelText: 'Notes',
                             alignLabelWithHint: true,

@@ -198,6 +198,16 @@ class ProfileScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 22),
 
+                  // Documents
+                  const AppSectionHeader(title: 'Documents'),
+                  const SizedBox(height: 8),
+                  _SettingTile(
+                    icon: Icons.folder_shared_outlined,
+                    label: 'My documents',
+                    onTap: () => context.push('/profile/documents'),
+                  ),
+                  const SizedBox(height: 22),
+
                   // Settings
                   const AppSectionHeader(title: 'Settings'),
                   const SizedBox(height: 8),

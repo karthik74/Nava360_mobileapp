@@ -7,6 +7,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'audit_models.dart';
@@ -560,6 +561,8 @@ class _RatingTabState extends ConsumerState<_RatingTab> {
           controller: _c[key],
           enabled: widget.editable,
           keyboardType: number ? TextInputType.number : TextInputType.text,
+          textCapitalization: number ? TextCapitalization.none : TextCapitalization.words,
+          inputFormatters: number ? null : const [TitleCaseTextFormatter()],
           decoration: InputDecoration(labelText: label, isDense: true, border: const OutlineInputBorder()),
         ),
       );
@@ -691,6 +694,8 @@ class _QuestionCard extends StatelessWidget {
           const SizedBox(height: 6),
           TextField(
             controller: obs, enabled: editable, minLines: 1, maxLines: 3,
+            textCapitalization: TextCapitalization.words,
+            inputFormatters: const [TitleCaseTextFormatter()],
             style: const TextStyle(fontSize: 12.5),
             decoration: InputDecoration(
               labelText: 'Auditor observation${_needsObservation ? ' *' : ''}',
@@ -1072,6 +1077,11 @@ class _AnnexureFormState extends State<_AnnexureForm> {
                   keyboardType: _numField(f)
                       ? const TextInputType.numberWithOptions(decimal: true)
                       : TextInputType.text,
+                  textCapitalization: _titleCaseField(f)
+                      ? TextCapitalization.words
+                      : TextCapitalization.none,
+                  inputFormatters:
+                      _titleCaseField(f) ? const [TitleCaseTextFormatter()] : null,
                   decoration: InputDecoration(labelText: _label(f), isDense: true, border: const OutlineInputBorder()),
                 ),
               ),
@@ -1127,6 +1137,9 @@ class _AnnexureFormState extends State<_AnnexureForm> {
   }
 
   bool _numField(String f) => f == 'overdueAmount' || f == 'loanAmount' || f == 'outstandingAmount' || f == 'attendance';
+  // Title-case free-text fields only — never numbers or loan/account codes.
+  bool _titleCaseField(String f) =>
+      !_numField(f) && f != 'customerLoanNumber' && f != 'loanAccountNumber' && f != 'dpdBucket';
   String _label(String f) => f
       .replaceAllMapped(RegExp('([A-Z])'), (m) => ' ${m[1]}')
       .replaceFirstMapped(RegExp('^.'), (m) => m[0]!.toUpperCase());
@@ -1196,9 +1209,13 @@ class _SummaryTabState extends ConsumerState<_SummaryTab> {
         const SizedBox(height: 12),
         AuditSectionCard(title: 'Auditor Inputs', icon: Icons.edit_note_rounded, children: [
           TextField(controller: _remark, enabled: widget.editable, minLines: 2, maxLines: 5,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
               decoration: const InputDecoration(labelText: 'Auditor final remark', border: OutlineInputBorder())),
           const SizedBox(height: 8),
           TextField(controller: _action, enabled: widget.editable, minLines: 2, maxLines: 5,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
               decoration: const InputDecoration(labelText: 'BM action requirement', border: OutlineInputBorder())),
           if (widget.editable) ...[
             const SizedBox(height: 10),

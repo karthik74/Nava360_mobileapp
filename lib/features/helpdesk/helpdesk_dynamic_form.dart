@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import 'helpdesk_models.dart';
 
@@ -99,6 +100,8 @@ class HelpdeskDynamicForm extends StatelessWidget {
           key: ValueKey('${f.key}_ta'),
           initialValue: str,
           minLines: 3, maxLines: 6,
+          textCapitalization: TextCapitalization.words,
+          inputFormatters: const [TitleCaseTextFormatter()],
           onChanged: (v) => onChanged(f.key, v),
         );
       case 'number':
@@ -174,14 +177,19 @@ class HelpdeskDynamicForm extends StatelessWidget {
               style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
         );
       default:
-        return _text(f, str);
+        return _text(f, str, titleCase: true);
     }
   }
 
-  Widget _text(HdFormField f, String str, {TextInputType? keyboard, String? hint}) => TextFormField(
+  Widget _text(HdFormField f, String str,
+          {TextInputType? keyboard, String? hint, bool titleCase = false}) =>
+      TextFormField(
         key: ValueKey('${f.key}_t'),
         initialValue: str,
         keyboardType: keyboard,
+        textCapitalization:
+            titleCase ? TextCapitalization.words : TextCapitalization.none,
+        inputFormatters: titleCase ? const [TitleCaseTextFormatter()] : null,
         decoration: InputDecoration(hintText: hint ?? f.placeholder),
         onChanged: (v) => onChanged(f.key, v),
       );
