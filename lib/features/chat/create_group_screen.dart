@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'chat_controller.dart';
@@ -190,6 +191,8 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
                     Expanded(
                       child: TextField(
                         controller: _nameCtrl,
+                        textCapitalization: TextCapitalization.words,
+                        inputFormatters: const [TitleCaseTextFormatter()],
                         cursorColor: AppColors.primary,
                         style: const TextStyle(
                           fontSize: 14,
@@ -269,6 +272,8 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
                           child: TextField(
                             controller: _searchCtrl,
                             onChanged: _onSearchChanged,
+                            textCapitalization: TextCapitalization.words,
+                            inputFormatters: const [TitleCaseTextFormatter()],
                             cursorColor: AppColors.primary,
                             cursorWidth: 1.5,
                             style: const TextStyle(

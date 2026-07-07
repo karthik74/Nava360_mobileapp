@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/env.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'chat_controller.dart';
@@ -153,6 +154,8 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
                             controller: _searchCtrl,
                             onChanged: _onSearchChanged,
                             autofocus: true,
+                            textCapitalization: TextCapitalization.words,
+                            inputFormatters: const [TitleCaseTextFormatter()],
                             cursorColor: AppColors.primary,
                             cursorWidth: 1.5,
                             style: const TextStyle(

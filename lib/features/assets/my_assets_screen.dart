@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'assets_models.dart';
@@ -520,7 +521,14 @@ Future<String?> _prompt(BuildContext context, String title, {bool required = tru
     context: context,
     builder: (ctx) => AlertDialog(
       title: Text(title),
-      content: TextField(controller: ctrl, autofocus: true, maxLines: 3, minLines: 1),
+      content: TextField(
+        controller: ctrl,
+        autofocus: true,
+        maxLines: 3,
+        minLines: 1,
+        textCapitalization: TextCapitalization.words,
+        inputFormatters: const [TitleCaseTextFormatter()],
+      ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
         FilledButton(

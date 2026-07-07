@@ -106,6 +106,18 @@ class TravelRepository {
     );
   }
 
+  /// Active travel-plan title options (Settings → Lookups → Travel plan titles).
+  Future<List<String>> planTitles() {
+    return _api.get<List<String>>(
+      '/api/lookups/travel-plan-titles',
+      query: {'activeOnly': true},
+      parse: (d) => (d as List)
+          .map((e) => (e as Map<String, dynamic>)['label'] as String? ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList(),
+    );
+  }
+
   Future<TravelPlan> updatePlan(
     int id, {
     required String title,

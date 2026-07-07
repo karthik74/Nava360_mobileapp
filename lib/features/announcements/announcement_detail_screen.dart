@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/env.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'announcements_models.dart';
@@ -46,6 +47,33 @@ class AnnouncementDetailScreen extends ConsumerWidget {
     }
   }
 
+  /// Fullscreen in-app viewer with pinch-zoom — announcement posters stay in
+  /// the app instead of bouncing to the browser.
+  void _viewImage(BuildContext context, AnnouncementAttachment att) {
+    final url = Env.fileUrl(att.url) ?? att.url;
+    Navigator.of(context).push(PageRouteBuilder(
+      fullscreenDialog: true,
+      opaque: false,
+      barrierColor: Colors.black,
+      transitionDuration: const Duration(milliseconds: 200),
+      pageBuilder: (_, __, ___) =>
+          _FullscreenImage(url: url, title: att.fileName ?? 'Image'),
+      transitionsBuilder: (_, anim, __, child) =>
+          FadeTransition(opacity: anim, child: child),
+    ));
+  }
+
+  /// Uploaded image files preview inline at the top (poster-style); everything
+  /// else stays in the attachment list below the body.
+  static bool _isImage(AnnouncementAttachment att) {
+    if (att.kind != 'FILE') return false;
+    final t = att.fileType?.toLowerCase() ?? '';
+    if (t.startsWith('image/')) return true;
+    final n = (att.fileName ?? '').toLowerCase();
+    return const ['.jpg', '.jpeg', '.jfif', '.png', '.gif', '.webp', '.bmp']
+        .any(n.endsWith);
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(announcementDetailProvider(announcementId));
@@ -68,7 +96,11 @@ class AnnouncementDetailScreen extends ConsumerWidget {
               onRetry: () => ref.invalidate(announcementDetailProvider(announcementId)),
             ),
           ),
-          data: (a) => ListView(
+          data: (a) {
+            final images = a.attachments.where(_isImage).toList();
+            final otherAttachments =
+                a.attachments.where((t) => !_isImage(t)).toList();
+            return ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
             children: [
               Wrap(
@@ -89,6 +121,20 @@ class AnnouncementDetailScreen extends ConsumerWidget {
               const SizedBox(height: 6),
               Text('Published ${_fmt(a.publishedAt)}',
                   style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+              // ── Image attachments preview FIRST (poster before the body) ──
+              if (images.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                for (final att in images)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _ImageAttachment(
+                      att: att,
+                      // Opens the in-app fullscreen viewer (no browser redirect).
+                      onView: () => _viewImage(context, att),
+                      onOpenExternally: () => _open(context, att),
+                    ),
+                  ),
+              ],
               const SizedBox(height: 16),
               if (a.description != null && a.description!.trim().isNotEmpty)
                 GlassCard(
@@ -103,11 +149,11 @@ class AnnouncementDetailScreen extends ConsumerWidget {
                         launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
                   ),
                 ),
-              if (a.attachments.isNotEmpty) ...[
+              if (otherAttachments.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 const AppSectionHeader(title: 'Attachments'),
                 const SizedBox(height: 8),
-                for (final att in a.attachments)
+                for (final att in otherAttachments)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: GlassCard(
@@ -173,6 +219,153 @@ class AnnouncementDetailScreen extends ConsumerWidget {
                 _CommentsSection(announcementId: announcementId),
               ],
             ],
+          );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// Inline preview of an uploaded image attachment: full width but capped in
+/// height, whole poster visible (contain, no cropping). Tap → in-app viewer.
+class _ImageAttachment extends StatelessWidget {
+  const _ImageAttachment({
+    required this.att,
+    required this.onView,
+    required this.onOpenExternally,
+  });
+  final AnnouncementAttachment att;
+  final VoidCallback onView;
+  /// Fallback for files the app can't render inline (opens the browser).
+  final VoidCallback onOpenExternally;
+
+  static const double _maxHeight = 320;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = Env.fileUrl(att.url) ?? att.url;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: onView,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            child: Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(maxHeight: _maxHeight),
+              color: AppColors.surface,
+              child: Image.network(
+                url,
+                width: double.infinity,
+                // Whole poster stays visible (announcements are usually A4/portrait
+                // artwork — cover-cropping them hides the content).
+                fit: BoxFit.contain,
+                loadingBuilder: (c, child, progress) => progress == null
+                    ? child
+                    : const SizedBox(
+                        height: 200,
+                        child: Center(
+                          child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      ),
+                // Unrenderable image (or fetch error) → compact open-in-browser row.
+                errorBuilder: (c, e, s) => InkWell(
+                  onTap: onOpenExternally,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.image_rounded, color: AppColors.muted),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            att.fileName ?? 'Image',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600, color: AppColors.ink),
+                          ),
+                        ),
+                        const Icon(Icons.open_in_new_rounded,
+                            size: 16, color: AppColors.muted),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (att.caption != null && att.caption!.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, left: 2),
+            child: Text(att.caption!,
+                style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          ),
+      ],
+    );
+  }
+}
+
+/// Black fullscreen image view with pinch-zoom and double-tap reset.
+class _FullscreenImage extends StatefulWidget {
+  const _FullscreenImage({required this.url, required this.title});
+  final String url;
+  final String title;
+
+  @override
+  State<_FullscreenImage> createState() => _FullscreenImageState();
+}
+
+class _FullscreenImageState extends State<_FullscreenImage> {
+  final _controller = TransformationController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: Text(widget.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 14)),
+      ),
+      body: GestureDetector(
+        onDoubleTap: () => _controller.value = Matrix4.identity(),
+        child: InteractiveViewer(
+          transformationController: _controller,
+          minScale: 1,
+          maxScale: 5,
+          child: Center(
+            child: Image.network(
+              widget.url,
+              fit: BoxFit.contain,
+              loadingBuilder: (c, child, progress) => progress == null
+                  ? child
+                  : const Center(
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white54),
+                    ),
+              errorBuilder: (c, e, s) => const Center(
+                child: Text('Could not load image',
+                    style: TextStyle(color: Colors.white70)),
+              ),
+            ),
           ),
         ),
       ),
@@ -308,6 +501,8 @@ class _CommentsSectionState extends ConsumerState<_CommentsSection> {
             Expanded(
               child: TextField(
                 controller: _ctrl,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
                 decoration: InputDecoration(
                   hintText: 'Write a comment…',
                   filled: true,

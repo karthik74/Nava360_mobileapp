@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/employee_lookup.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'whistleblower_evidence.dart';
@@ -158,9 +159,20 @@ class _WhistleblowerFormScreenState extends ConsumerState<WhistleblowerFormScree
           ),
           const SizedBox(height: 12),
           _label('Subject *'),
-          TextField(controller: _subject, maxLength: 200),
+          TextField(
+            controller: _subject,
+            maxLength: 200,
+            textCapitalization: TextCapitalization.words,
+            inputFormatters: const [TitleCaseTextFormatter()],
+          ),
           _label('Description *'),
-          TextField(controller: _description, minLines: 4, maxLines: 8),
+          TextField(
+            controller: _description,
+            minLines: 4,
+            maxLines: 8,
+            textCapitalization: TextCapitalization.words,
+            inputFormatters: const [TitleCaseTextFormatter()],
+          ),
           const SizedBox(height: 12),
           _label('Incident Date'),
           InkWell(
@@ -183,7 +195,11 @@ class _WhistleblowerFormScreenState extends ConsumerState<WhistleblowerFormScree
           ),
           const SizedBox(height: 12),
           _label('Branch / Department involved'),
-          TextField(controller: _department),
+          TextField(
+            controller: _department,
+            textCapitalization: TextCapitalization.words,
+            inputFormatters: const [TitleCaseTextFormatter()],
+          ),
           const SizedBox(height: 12),
           _label('Person(s) involved'),
           _PersonSelector(
@@ -196,6 +212,8 @@ class _WhistleblowerFormScreenState extends ConsumerState<WhistleblowerFormScree
           const SizedBox(height: 8),
           TextField(
             controller: _persons,
+            textCapitalization: TextCapitalization.words,
+            inputFormatters: const [TitleCaseTextFormatter()],
             decoration: const InputDecoration(
               hintText: 'Add others not in the directory (optional)',
               prefixIcon: Icon(Icons.person_add_alt_1_outlined, size: 20),
@@ -320,6 +338,8 @@ class _PersonSelectorState extends ConsumerState<_PersonSelector> {
         TextField(
           controller: _searchCtrl,
           onChanged: (v) => setState(() => _query = v),
+          textCapitalization: TextCapitalization.words,
+          inputFormatters: const [TitleCaseTextFormatter()],
           decoration: const InputDecoration(
             hintText: 'Search employees by name or code',
             prefixIcon: Icon(Icons.search_rounded, size: 20),

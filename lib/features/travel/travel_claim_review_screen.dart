@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/download_saver.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -492,6 +493,8 @@ Future<String?> _promptRemarks(
               autofocus: true,
               maxLines: 4,
               minLines: 2,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
               onChanged: (_) => setLocal(() {}),
               decoration: InputDecoration(hintText: hint),
             ),
@@ -589,6 +592,8 @@ Future<_SettlementResult?> _promptSettlement(
                     controller: remarksCtrl,
                     maxLines: 3,
                     minLines: 1,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [TitleCaseTextFormatter()],
                     decoration: const InputDecoration(
                         labelText: 'Remarks (optional)'),
                   ),

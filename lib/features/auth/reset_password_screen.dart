@@ -170,6 +170,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
             prefixIcon: Icons.lock_outline_rounded,
             obscure: _o1,
             enabled: !_loading,
+            textCapitalization: TextCapitalization.sentences,
             textInputAction: TextInputAction.next,
             suffix: IconButton(
               splashRadius: 18,
@@ -192,6 +193,7 @@ class _ResetPasswordScreenState extends ConsumerState<ResetPasswordScreen> {
             prefixIcon: Icons.lock_outline_rounded,
             obscure: _o2,
             enabled: !_loading,
+            textCapitalization: TextCapitalization.sentences,
             textInputAction: TextInputAction.done,
             onSubmit: (_) => _submit(),
             suffix: IconButton(

@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -72,6 +73,8 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
           controller: ctrl,
           autofocus: true,
           maxLines: 3,
+          textCapitalization: TextCapitalization.words,
+          inputFormatters: const [TitleCaseTextFormatter()],
           decoration: const InputDecoration(hintText: 'Enter a reason'),
         ),
         actions: [

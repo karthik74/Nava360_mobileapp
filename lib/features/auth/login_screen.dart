@@ -1,11 +1,17 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+// The shared input formatters are re-exported so the other auth screens get
+// them together with the AuthTextField/AuthShell widgets this file provides.
+export '../../core/text_formatters.dart';
+
 import '../../core/env.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import 'auth_controller.dart';
 import 'biometric/biometric_controller.dart';
@@ -224,6 +230,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               hint: 'Enter your username',
                               prefixIcon: Icons.person_outline_rounded,
                               enabled: formEnabled,
+                              textCapitalization:
+                                  TextCapitalization.characters,
+                              inputFormatters: const [UpperCaseTextFormatter()],
                               textInputAction: TextInputAction.next,
                               validator: (v) => (v == null || v.trim().isEmpty)
                                   ? 'Required'
@@ -238,6 +247,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               prefixIcon: Icons.lock_outline_rounded,
                               obscure: _obscure,
                               enabled: formEnabled,
+                              // Keyboard opens with Shift on for the first
+                              // letter only — never rewrites what is typed
+                              // (passwords are case-sensitive).
+                              textCapitalization:
+                                  TextCapitalization.sentences,
                               textInputAction: TextInputAction.done,
                               onSubmit: (_) => _submit(),
                               validator: (v) =>
@@ -643,6 +657,8 @@ class _AuthTextField extends StatefulWidget {
     this.textInputAction,
     this.onSubmit,
     this.validator,
+    this.textCapitalization = TextCapitalization.none,
+    this.inputFormatters,
   });
 
   final TextEditingController controller;
@@ -654,6 +670,8 @@ class _AuthTextField extends StatefulWidget {
   final TextInputAction? textInputAction;
   final ValueChanged<String>? onSubmit;
   final FormFieldValidator<String>? validator;
+  final TextCapitalization textCapitalization;
+  final List<TextInputFormatter>? inputFormatters;
 
   @override
   State<_AuthTextField> createState() => _AuthTextFieldState();
@@ -706,6 +724,8 @@ class _AuthTextFieldState extends State<_AuthTextField> {
         focusNode: _focusNode,
         obscureText: widget.obscure,
         enabled: widget.enabled,
+        textCapitalization: widget.textCapitalization,
+        inputFormatters: widget.inputFormatters,
         textInputAction: widget.textInputAction,
         onFieldSubmitted: widget.onSubmit,
         validator: widget.validator,

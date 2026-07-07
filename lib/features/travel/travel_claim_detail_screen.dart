@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/env.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -525,6 +526,8 @@ class TravelClaimDetailScreen extends ConsumerWidget {
               controller: ctrl,
               minLines: 2,
               maxLines: 4,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
               decoration: InputDecoration(
                 hintText: needsRemark ? 'Justification (required)' : 'Remarks (optional)',
               ),
@@ -1071,6 +1074,8 @@ class _ExpenseSheetState extends ConsumerState<_ExpenseSheet> {
               controller: _desc,
               minLines: 2,
               maxLines: 4,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
               decoration: const InputDecoration(hintText: 'Description (optional)'),
             ),
             if (_error != null) ...[

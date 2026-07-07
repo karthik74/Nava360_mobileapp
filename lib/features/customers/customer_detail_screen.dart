@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../tasks/task_detail_screen.dart';
@@ -703,6 +704,8 @@ class _TemplatePickerSheetState extends ConsumerState<_TemplatePickerSheet> {
               child: TextField(
                 controller: _searchCtrl,
                 onChanged: (v) => setState(() => _query = v),
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
                   hintText: 'Search task template',

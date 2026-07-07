@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'helpdesk_dynamic_form.dart';
@@ -142,7 +143,13 @@ class _HelpdeskRaiseScreenState extends ConsumerState<HelpdeskRaiseScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             _label('Title *'),
-            TextField(controller: _title, maxLength: 200, onChanged: _onTitleChanged),
+            TextField(
+              controller: _title,
+              maxLength: 200,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
+              onChanged: _onTitleChanged,
+            ),
             if (_suggestions.isNotEmpty)
               Container(
                 margin: const EdgeInsets.only(top: 4),
@@ -187,6 +194,8 @@ class _HelpdeskRaiseScreenState extends ConsumerState<HelpdeskRaiseScreen> {
               )
             else
               TextField(controller: _category,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [TitleCaseTextFormatter()],
                   decoration: const InputDecoration(hintText: 'e.g. IT, Payroll, Attendance')),
             if (_types.isNotEmpty) ...[
               const SizedBox(height: 12),
@@ -223,7 +232,13 @@ class _HelpdeskRaiseScreenState extends ConsumerState<HelpdeskRaiseScreen> {
             ),
             const SizedBox(height: 12),
             _label('Description'),
-            TextField(controller: _description, minLines: 4, maxLines: 8),
+            TextField(
+              controller: _description,
+              minLines: 4,
+              maxLines: 8,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
+            ),
             const SizedBox(height: 8),
             const Text('Your branch, department, region and reporting manager are attached automatically.',
                 style: TextStyle(fontSize: 11.5, color: AppColors.muted)),

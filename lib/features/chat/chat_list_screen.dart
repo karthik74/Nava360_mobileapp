@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/env.dart';
+import '../../core/secure_screen.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'chat_controller.dart';
@@ -25,7 +27,15 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
   String _query = '';
 
   @override
+  void initState() {
+    super.initState();
+    // Conversation previews are confidential too — no screenshots here either.
+    SecureScreen.acquire();
+  }
+
+  @override
   void dispose() {
+    SecureScreen.release();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -222,6 +232,8 @@ class _ChatSearchBar extends StatelessWidget {
                 child: TextField(
                   controller: controller,
                   onChanged: onChanged,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [TitleCaseTextFormatter()],
                   cursorColor: AppColors.primary,
                   cursorWidth: 1.5,
                   style: const TextStyle(

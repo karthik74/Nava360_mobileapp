@@ -4,11 +4,27 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/env.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
-import 'travel_attachments.dart';
+import '../requisitions/requisition_models.dart';
+import '../requisitions/requisition_repository.dart';
 import 'travel_models.dart';
 import 'travel_repository.dart';
+
+/// All active branches for the From/Destination pickers — unscoped (you can
+/// travel to any branch), sorted by name.
+final travelBranchesProvider =
+    FutureProvider.autoDispose<List<BranchOption>>((ref) async {
+  final all = await ref.watch(requisitionRepositoryProvider).listBranches();
+  final active = all.where((b) => b.active).toList()
+    ..sort((a, b) => a.label.compareTo(b.label));
+  return active;
+});
+
+/// Configurable Title/purpose options (Settings → Lookups → Travel plan titles).
+final travelPlanTitlesProvider = FutureProvider.autoDispose<List<String>>(
+    (ref) => ref.watch(travelRepositoryProvider).planTitles());
 
 /// Create or edit a self travel plan (no approval). Pass an existing [plan] to
 /// edit; omit it to create. Pops `true` on success so the list refreshes.
@@ -29,10 +45,8 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
   String? _mode;
   DateTime? _startDate;
   DateTime? _endDate;
-  final List<TravelUploadFile> _files = [];
 
   bool _saving = false;
-  double _progress = 0;
   String? _error;
 
   bool get _isEdit => widget.plan != null;
@@ -111,16 +125,12 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
       setState(() => _error = "End date can't be before the start date.");
       return;
     }
-    setState(() {
-      _saving = true;
-      _progress = 0;
-    });
+    setState(() => _saving = true);
     final repo = ref.read(travelRepositoryProvider);
     final cost = double.tryParse(_cost.text.trim());
     try {
-      final TravelPlan saved;
       if (_isEdit) {
-        saved = await repo.updatePlan(
+        await repo.updatePlan(
           widget.plan!.id,
           title: _title.text.trim(),
           destination: _destination.text.trim(),
@@ -132,7 +142,7 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
           estimatedCost: cost,
         );
       } else {
-        saved = await repo.createPlan(
+        await repo.createPlan(
           title: _title.text.trim(),
           destination: _destination.text.trim(),
           fromLocation: _from.text.trim(),
@@ -143,15 +153,7 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
           estimatedCost: cost,
         );
       }
-      if (_files.isNotEmpty) {
-        await repo.uploadPlanAttachments(
-          saved.id,
-          _files,
-          onProgress: (s, t) {
-            if (mounted && t > 0) setState(() => _progress = s / t);
-          },
-        );
-      }
+      // Plans take no documents (policy 2026-07-04) — bills go on the claim.
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -176,12 +178,45 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             _label('Title *'),
-            TextField(controller: _title, maxLength: 150),
+            ref.watch(travelPlanTitlesProvider).when(
+              data: (options) {
+                final current = _title.text.trim();
+                // Keep a legacy free-text title selectable when editing.
+                final items = [
+                  ...options,
+                  if (current.isNotEmpty && !options.contains(current)) current,
+                ];
+                return DropdownButtonFormField<String>(
+                  value: current.isEmpty ? null : current,
+                  isExpanded: true,
+                  hint: const Text('Select a purpose'),
+                  decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.flag_rounded, size: 20)),
+                  items: [
+                    for (final t in items)
+                      DropdownMenuItem(value: t, child: Text(t)),
+                  ],
+                  onChanged: (v) => setState(() => _title.text = v ?? ''),
+                );
+              },
+              loading: () => const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: LinearProgressIndicator(minHeight: 2),
+              ),
+              // Lookup unavailable → fall back to free text so saving still works.
+              error: (_, __) => TextField(
+                controller: _title,
+                maxLength: 150,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
+              ),
+            ),
+            const SizedBox(height: 12),
             _label('From *'),
-            TextField(controller: _from),
+            _BranchField(controller: _from, hint: 'Type or pick a branch'),
             const SizedBox(height: 12),
             _label('Destination *'),
-            TextField(controller: _destination),
+            _BranchField(controller: _destination, hint: 'Type or pick a branch'),
             const SizedBox(height: 12),
             _label('Travel mode *'),
             DropdownButtonFormField<String>(
@@ -224,9 +259,17 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
             ),
             const SizedBox(height: 12),
             _label('Purpose'),
-            TextField(controller: _purpose, minLines: 2, maxLines: 5),
+            TextField(
+              controller: _purpose,
+              minLines: 2,
+              maxLines: 5,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
+            ),
             const SizedBox(height: 18),
             if (_isEdit && widget.plan!.attachments.isNotEmpty) ...[
+              // Legacy plan attachments stay viewable; new uploads happen on the
+              // CLAIM raised for this plan (policy 2026-07-04).
               const AppSectionHeader(title: 'Existing attachments'),
               const SizedBox(height: 8),
               for (final att in widget.plan!.attachments)
@@ -236,21 +279,11 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
                 ),
               const SizedBox(height: 12),
             ],
-            TravelFilePicker(
-              files: _files,
-              onChanged: () => setState(() {}),
-              title: 'Add attachments',
-              subtitle: 'Optional — tickets, itinerary, approvals',
-            ),
             if (_error != null) ...[
               const SizedBox(height: 12),
               AppErrorPanel(message: _error!),
             ],
             const SizedBox(height: 18),
-            if (_saving && _progress > 0 && _progress < 1) ...[
-              LinearProgressIndicator(value: _progress),
-              const SizedBox(height: 10),
-            ],
             SizedBox(
               height: 50,
               child: FilledButton(
@@ -273,6 +306,88 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
             style: const TextStyle(
                 fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
       );
+}
+
+/// Location field backed by the branch directory: type to search, matching
+/// branches drop down inline under the field, tap one to select — a simple
+/// autocomplete (no popup sheet). Free text stays allowed for non-branch
+/// places and values saved before this picker existed.
+class _BranchField extends ConsumerStatefulWidget {
+  const _BranchField({required this.controller, required this.hint});
+  final TextEditingController controller;
+  final String hint;
+
+  @override
+  ConsumerState<_BranchField> createState() => _BranchFieldState();
+}
+
+class _BranchFieldState extends ConsumerState<_BranchField> {
+  final _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final branches =
+        ref.watch(travelBranchesProvider).asData?.value ?? const <BranchOption>[];
+    return LayoutBuilder(
+      builder: (context, constraints) => RawAutocomplete<String>(
+        textEditingController: widget.controller,
+        focusNode: _focus,
+        optionsBuilder: (TextEditingValue v) {
+          final q = v.text.trim().toLowerCase();
+          final labels = branches.map((b) => b.label);
+          if (q.isEmpty) return labels;
+          return labels.where((l) => l.toLowerCase().contains(q));
+        },
+        fieldViewBuilder: (context, controller, focusNode, onSubmit) => TextField(
+          controller: controller,
+          focusNode: focusNode,
+          textCapitalization: TextCapitalization.words,
+          inputFormatters: const [TitleCaseTextFormatter()],
+          decoration: InputDecoration(
+            hintText: widget.hint,
+            prefixIcon: const Icon(Icons.search_rounded, size: 20),
+          ),
+        ),
+        optionsViewBuilder: (context, onSelected, options) => Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            clipBehavior: Clip.antiAlias,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: 240,
+                maxWidth: constraints.maxWidth,
+              ),
+              child: ListView.builder(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: options.length,
+                itemBuilder: (_, i) {
+                  final label = options.elementAt(i);
+                  return ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.store_mall_directory_rounded,
+                        size: 18, color: AppColors.primary),
+                    title: Text(label,
+                        style: const TextStyle(
+                            fontSize: 13.5, fontWeight: FontWeight.w600)),
+                    onTap: () => onSelected(label),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _DateField extends StatelessWidget {

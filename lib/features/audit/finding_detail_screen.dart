@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -415,6 +416,8 @@ class _CapaFormState extends ConsumerState<_CapaForm> {
       child: TextField(
         controller: c,
         maxLines: maxLines,
+        textCapitalization: TextCapitalization.words,
+        inputFormatters: const [TitleCaseTextFormatter()],
         decoration: InputDecoration(labelText: label),
       ),
     );
@@ -497,6 +500,8 @@ class _VerifyFormState extends ConsumerState<_VerifyForm> {
           child: TextField(
             controller: _remarks,
             maxLines: 2,
+            textCapitalization: TextCapitalization.words,
+            inputFormatters: const [TitleCaseTextFormatter()],
             decoration: const InputDecoration(labelText: 'Remarks'),
           ),
         ),

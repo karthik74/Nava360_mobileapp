@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../auth/auth_controller.dart';
 import 'form_renderer.dart';
@@ -751,6 +752,8 @@ class _CommentsSectionState extends ConsumerState<_CommentsSection> {
                 controller: _controller,
                 minLines: 1,
                 maxLines: 4,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => _send(),
                 decoration: InputDecoration(

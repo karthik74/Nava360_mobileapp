@@ -379,22 +379,8 @@ class _OverviewTab extends ConsumerWidget {
                 _InfoRow(Icons.place_outlined, 'Address', e.address),
               ],
             ),
-            if (canViewSensitive) ...[
-              const SizedBox(height: 12),
-              _SectionCard(
-                title: 'Bank & statutory',
-                icon: Icons.account_balance_rounded,
-                children: [
-                  _InfoRow(Icons.account_balance_rounded, 'Bank', e.bankName),
-                  _InfoRow(Icons.numbers_rounded, 'Account no.',
-                      e.bankAccountNumber),
-                  _InfoRow(Icons.code_rounded, 'IFSC', e.bankIfsc),
-                  _InfoRow(Icons.savings_rounded, 'PF account', e.pfAccountNumber),
-                  _InfoRow(Icons.confirmation_number_rounded, 'UAN', e.uanNumber),
-                  _InfoRow(Icons.health_and_safety_rounded, 'ESI', e.esiNumber),
-                ],
-              ),
-            ],
+            // Bank & statutory section removed (2026-07-04): account/PF/UAN/ESI
+            // details stay web-only and are not shown in the mobile team view.
           ],
         ),
       ),

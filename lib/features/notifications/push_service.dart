@@ -111,6 +111,21 @@ class PushService {
     }
   }
 
+  /// Opens an arbitrary in-app route carried in the push payload ("route"),
+  /// e.g. an announcement whose action is "/profile/documents". Buffered like
+  /// [onOpenChat] for cold-start taps.
+  void Function(String route)? _onOpenRoute;
+  String? _pendingRoute;
+
+  set onOpenRoute(void Function(String route)? cb) {
+    _onOpenRoute = cb;
+    final pending = _pendingRoute;
+    if (cb != null && pending != null) {
+      _pendingRoute = null;
+      cb(pending);
+    }
+  }
+
   /// Opens the employee's assets list when an asset notification is tapped.
   void Function()? _onOpenAssets;
   bool _pendingAssets = false;
@@ -270,6 +285,18 @@ class PushService {
 
   void _handleTapData(Map<String, dynamic> data) {
     final type = data['type']?.toString();
+    // A push carrying an explicit in-app route wins over the per-type default
+    // (e.g. an announcement that should open My documents instead of itself).
+    final route = data['route']?.toString();
+    if (route != null && route.startsWith('/')) {
+      final cb = _onOpenRoute;
+      if (cb != null) {
+        cb(route);
+      } else {
+        _pendingRoute = route;
+      }
+      return;
+    }
     if (type == 'CHAT') {
       final id = int.tryParse('${data['conversationId']}');
       if (id == null) return;

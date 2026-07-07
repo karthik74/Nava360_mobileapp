@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -11,13 +14,13 @@ import 'task_repository.dart';
 import 'task_status_ui.dart';
 import 'task_template_models.dart';
 
-final _myTasksProvider =
-    FutureProvider.autoDispose.family<List<Task>, String?>((ref, status) {
+final _myTasksProvider = FutureProvider.autoDispose
+    .family<List<Task>, ({String? status, String? q})>((ref, key) {
   final user = ref.watch(authUserProvider);
   if (user?.employeeId == null) return Future.value([]);
   return ref
       .watch(taskRepositoryProvider)
-      .listForEmployee(user!.employeeId!, status: status);
+      .listForEmployee(user!.employeeId!, status: key.status, q: key.q);
 });
 
 /// Active INTERNAL templates an employee can raise a self-task from.
@@ -84,10 +87,29 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
 
   final TextEditingController _titleCtrl = TextEditingController();
   String _titleQuery = '';
+  // Debounced copy of the search text sent to the SERVER (searches ALL tasks,
+  // not just the loaded page). _titleQuery still filters instantly client-side.
+  String _serverQuery = '';
+  Timer? _searchDebounce;
   String? _priorityFilter; // null = all; else URGENT / HIGH / MEDIUM / LOW
+
+  /// Current provider key: status chip + debounced server-side title search.
+  ({String? status, String? q}) get _tasksKey => (
+        status: _selectedFilter.queryValue,
+        q: _serverQuery.trim().isEmpty ? null : _serverQuery.trim(),
+      );
+
+  void _onSearchChanged(String v) {
+    setState(() => _titleQuery = v);
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 400), () {
+      if (mounted) setState(() => _serverQuery = v);
+    });
+  }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _titleCtrl.dispose();
     super.dispose();
   }
@@ -239,13 +261,13 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
   }
 
   void _refresh() {
-    ref.invalidate(_myTasksProvider(_selectedFilter.queryValue));
+    ref.invalidate(_myTasksProvider(_tasksKey));
     ref.invalidate(_taskDashboardProvider);
   }
 
   @override
   Widget build(BuildContext context) {
-    final tasks = ref.watch(_myTasksProvider(_selectedFilter.queryValue));
+    final tasks = ref.watch(_myTasksProvider(_tasksKey));
     final dashboard = ref.watch(_taskDashboardProvider);
     final user = ref.watch(authUserProvider);
 
@@ -313,7 +335,9 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
             // Search by task title.
             TextField(
               controller: _titleCtrl,
-              onChanged: (v) => setState(() => _titleQuery = v),
+              onChanged: _onSearchChanged,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
                 hintText: 'Search by task title…',
@@ -324,7 +348,11 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                         tooltip: 'Clear',
                         onPressed: () {
                           _titleCtrl.clear();
-                          setState(() => _titleQuery = '');
+                          _searchDebounce?.cancel();
+                          setState(() {
+                            _titleQuery = '';
+                            _serverQuery = '';
+                          });
                         },
                       )
                     : null,
@@ -428,7 +456,7 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
               error: (err, _) => AppErrorPanel(
                 message: err.toString(),
                 onRetry: () =>
-                    ref.invalidate(_myTasksProvider(_selectedFilter.queryValue)),
+                    ref.invalidate(_myTasksProvider(_tasksKey)),
               ),
             ),
           ],
@@ -965,6 +993,8 @@ class _TaskTemplatePickerSheetState
               child: TextField(
                 controller: _searchCtrl,
                 onChanged: (v) => setState(() => _query = v),
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
                   hintText: 'Search task template',

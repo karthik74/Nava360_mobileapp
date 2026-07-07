@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'resignation_models.dart';
@@ -638,6 +639,8 @@ class _ApplySheetState extends State<_ApplySheet> {
                 controller: _reasonCtrl,
                 minLines: 2,
                 maxLines: 4,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
                 decoration: InputDecoration(
                   hintText: 'Share a brief reason…',
                   filled: true,

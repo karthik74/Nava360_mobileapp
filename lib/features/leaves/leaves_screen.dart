@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -681,6 +682,8 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
           TextField(
             controller: _reason,
             maxLines: 3,
+            textCapitalization: TextCapitalization.words,
+            inputFormatters: const [TitleCaseTextFormatter()],
             decoration: const InputDecoration(
               hintText: 'Why are you taking these days?',
             ),

@@ -145,6 +145,52 @@ class ChatRepository {
     );
   }
 
+  // ── Reactions (one per person; same emoji removes, different replaces) ────
+
+  /// Add or switch your reaction; resolves to the message's full reaction set.
+  Future<List<MessageReaction>> addReaction(int messageId, String emoji) {
+    return _api.post<List<MessageReaction>>(
+      '/api/chat/messages/$messageId/reactions',
+      body: {'emoji': emoji},
+      parse: _parseReactions,
+    );
+  }
+
+  /// Remove your own reaction; resolves to the message's remaining reactions.
+  Future<List<MessageReaction>> removeReaction(int messageId) async {
+    final res = await _api.raw.delete<Map<String, dynamic>>(
+      '/api/chat/messages/$messageId/reactions',
+    );
+    return _parseReactions(res.data?['data']);
+  }
+
+  static List<MessageReaction> _parseReactions(dynamic d) =>
+      (d as List<dynamic>? ?? const [])
+          .map((e) => MessageReaction.fromJson(e as Map<String, dynamic>))
+          .toList();
+
+  // ── Pinned message (one per conversation, pinning another replaces it) ────
+
+  Future<PinnedMessage?> getPinnedMessage(int conversationId) {
+    return _api.get<PinnedMessage?>(
+      '/api/chat/conversations/$conversationId/pin',
+      parse: (d) =>
+          d == null ? null : PinnedMessage.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
+  Future<PinnedMessage> pinMessage(int conversationId, int messageId) {
+    return _api.post<PinnedMessage>(
+      '/api/chat/conversations/$conversationId/pin',
+      body: {'messageId': messageId},
+      parse: (d) => PinnedMessage.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
+  Future<void> unpinMessage(int conversationId) async {
+    await _api.raw.delete('/api/chat/conversations/$conversationId/pin');
+  }
+
   Future<void> markRead(int conversationId) async {
     await _api.post<void>(
       '/api/chat/conversations/$conversationId/read',

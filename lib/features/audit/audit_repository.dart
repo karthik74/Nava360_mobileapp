@@ -339,6 +339,15 @@ class AuditRepository {
     );
   }
 
+  /// Removes an uploaded proof attachment (e.g. a wrong file on a question).
+  Future<void> deleteAttachment(int id) async {
+    try {
+      await _api.raw.delete('/api/audit/attachments/$id');
+    } on DioException catch (e) {
+      throw _mapDeleteError(e);
+    }
+  }
+
   ApiException _mapDeleteError(DioException e) {
     final data = e.response?.data;
     if (data is Map && data['message'] is String) {

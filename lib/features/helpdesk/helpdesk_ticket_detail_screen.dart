@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'helpdesk_models.dart';
@@ -86,6 +87,8 @@ class _HelpdeskTicketDetailScreenState extends ConsumerState<HelpdeskTicketDetai
         builder: (ctx) => AlertDialog(
           title: Text(_actionLabels[action] ?? action),
           content: TextField(controller: ctrl, minLines: 1, maxLines: 4,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
               decoration: const InputDecoration(hintText: 'Add a note (optional)')),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
@@ -277,6 +280,8 @@ class _HelpdeskTicketDetailScreenState extends ConsumerState<HelpdeskTicketDetai
                   controller: _comment,
                   minLines: 1,
                   maxLines: 4,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [TitleCaseTextFormatter()],
                   decoration: const InputDecoration(hintText: 'Write a reply…', isDense: true),
                 ),
               ),

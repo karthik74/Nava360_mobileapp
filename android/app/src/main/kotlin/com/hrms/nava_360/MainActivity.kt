@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.WindowManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
@@ -24,6 +25,7 @@ import java.io.FileOutputStream
 class MainActivity : FlutterFragmentActivity() {
     private val channelName = "app/downloads"
     private val batteryChannelName = "app/battery"
+    private val secureChannelName = "app/secure_screen"
     private val storageReqCode = 9911
 
     // Held while we wait for the runtime storage-permission dialog (API < 29).
@@ -59,6 +61,24 @@ class MainActivity : FlutterFragmentActivity() {
                                 result.error("OPEN_FAILED", e.message, null)
                             }
                         }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // Toggles FLAG_SECURE: while enabled, Android blocks screenshots and
+        // screen recording of this window, and blanks the app-switcher preview.
+        // Used by confidential screens (chat messages/attachments).
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, secureChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "enable" -> {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        result.success(true)
+                    }
+                    "disable" -> {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        result.success(true)
                     }
                     else -> result.notImplemented()
                 }

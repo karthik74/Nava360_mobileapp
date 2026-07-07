@@ -72,6 +72,8 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             hint: 'Enter your username',
             prefixIcon: Icons.person_outline_rounded,
             enabled: !_loading,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [UpperCaseTextFormatter()],
             textInputAction: TextInputAction.done,
             onSubmit: (_) => _send(),
           ),
