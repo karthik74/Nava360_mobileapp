@@ -425,6 +425,8 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
           return AppColors.success;
         case MobileModule.team:
           return AppColors.pink;
+        case MobileModule.mis:
+          return AppColors.warning;
         case MobileModule.more:
           return AppColors.info;
         case MobileModule.home:

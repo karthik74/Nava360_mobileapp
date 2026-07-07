@@ -53,6 +53,13 @@ dependencies:
   # Formatting
   intl: ^0.19.0
 
+  # MIS (Grow With Me) analytics charts — bar / line trend
+  fl_chart: ^0.68.0
+
+  # MIS branch locator map (OpenStreetMap tiles — no API key required)
+  flutter_map: ^6.2.1
+  latlong2: ^0.9.1
+
   # URL Launcher
   url_launcher: ^6.3.0
 

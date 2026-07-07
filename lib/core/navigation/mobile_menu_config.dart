@@ -15,7 +15,7 @@ import '../../features/auth/auth_models.dart';
 ///  hardcode menu tiles in the UI. GoRouter route definitions stay in app.dart.
 /// ───────────────────────────────────────────────────────────────────────────
 
-enum MobileModule { home, hrms, payroll, team, more }
+enum MobileModule { home, hrms, payroll, team, mis, more }
 
 class MobileMenuItem {
   final String key;
@@ -95,6 +95,23 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'hrms.audit', label: 'Internal Audit', route: '/audit', icon: Icons.fact_check_rounded, module: MobileModule.hrms, order: 18, requiredPermissions: ['AUDIT_PERFORM', 'AUDIT_VIEW_BRANCH', 'AUDIT_VIEW_HIERARCHY', 'AUDIT_VIEW_ALL', 'AUDIT_BM_COMPLIANCE', 'AUDIT_VERIFY']),
   // Whistleblower is intentionally NOT in the menu — reached via the dashboard's
   // "Report a concern" button (keeps the reporting entry low-profile).
+
+  // ── MIS · Grow With Me module (its OWN module, not under HRMS) ──
+  // A separate backend + auto-login (derived from the nava360 identity). Ungated
+  // for now — mirrors the web sidebar, where every logged-in user gets a MIS
+  // session; add requiredPermissions here to limit MIS to specific roles.
+  // Order mirrors the website's MIS menu.
+  MobileMenuItem(key: 'mis.dashboard', label: 'Dashboard', route: '/mis', icon: Icons.dashboard_rounded, module: MobileModule.mis, order: 1),
+  MobileMenuItem(key: 'mis.portfolio', label: 'Portfolio', route: '/mis/portfolio', icon: Icons.pie_chart_rounded, module: MobileModule.mis, order: 2),
+  MobileMenuItem(key: 'mis.collection', label: 'Collection', route: '/mis/collection', icon: Icons.payments_rounded, module: MobileModule.mis, order: 3),
+  MobileMenuItem(key: 'mis.disbursement', label: 'Disbursement', route: '/mis/disbursement', icon: Icons.account_balance_rounded, module: MobileModule.mis, order: 4),
+  MobileMenuItem(key: 'mis.hourly', label: 'Hourly', route: '/mis/hourly', icon: Icons.schedule_rounded, module: MobileModule.mis, order: 5),
+  MobileMenuItem(key: 'mis.comparison', label: 'Comparison', route: '/mis/comparison', icon: Icons.compare_arrows_rounded, module: MobileModule.mis, order: 6),
+  MobileMenuItem(key: 'mis.analytical', label: 'Analytical', route: '/mis/analytical', icon: Icons.query_stats_rounded, module: MobileModule.mis, order: 7),
+  MobileMenuItem(key: 'mis.dailyPlan', label: 'Daily Plan', route: '/mis/daily-plan', icon: Icons.edit_note_rounded, module: MobileModule.mis, order: 8),
+  MobileMenuItem(key: 'mis.feedback', label: 'Feedback', route: '/mis/feedback', icon: Icons.forum_rounded, module: MobileModule.mis, order: 9),
+  MobileMenuItem(key: 'mis.employees', label: 'Directory', route: '/mis/employees', icon: Icons.contacts_rounded, module: MobileModule.mis, order: 10),
+  MobileMenuItem(key: 'mis.locations', label: 'Locations', route: '/mis/locations', icon: Icons.map_rounded, module: MobileModule.mis, order: 11),
 
   // ── Payroll module cards (self-service only) ──
   MobileMenuItem(key: 'pay.payslips', label: 'My Payslips', route: '/my-payslips', icon: Icons.receipt_long_rounded, module: MobileModule.payroll, order: 1),
@@ -192,6 +209,7 @@ const List<MobileModuleInfo> kMobileModules = [
   MobileModuleInfo(module: MobileModule.home, label: 'Home', route: '/home', icon: Icons.home_rounded),
   MobileModuleInfo(module: MobileModule.hrms, label: 'HRMS', route: '/hrms', icon: Icons.groups_rounded),
   MobileModuleInfo(module: MobileModule.payroll, label: 'Payroll', route: '/payroll', icon: Icons.payments_rounded),
+  MobileModuleInfo(module: MobileModule.mis, label: 'MIS', route: '/mis', icon: Icons.query_stats_rounded),
   MobileModuleInfo(module: MobileModule.team, label: 'My Team', route: '/team', icon: Icons.supervisor_account_rounded, managerOnly: true),
   MobileModuleInfo(module: MobileModule.more, label: 'More', route: '/more', icon: Icons.more_horiz_rounded),
 ];

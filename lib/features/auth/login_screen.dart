@@ -270,33 +270,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     : null,
                               ),
                             ),
-                            const SizedBox(height: 10),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(6),
-                                onTap: !formEnabled
-                                    ? null
-                                    : () => context.push(
-                                          '/forgot-password',
-                                          extra: _username.text,
-                                        ),
-                                child: const Padding(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                    vertical: 4,
-                                  ),
-                                  child: Text(
-                                    'Forgot password?',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.primary,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
                             if (error != null) ...[
                               const SizedBox(height: 16),
                               _FlashError(message: error),
@@ -409,8 +382,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
 // ──────────────────────────────────────────────────────────────────────
 // Shared auth screen pieces (mesh + gradient band + back button +
-// glass card + fields + flash + gradient CTA). Re-used by ForgotPassword
-// and ResetPassword screens so they share the same chrome.
+// glass card + fields + flash + gradient CTA). Re-used by the first-login
+// screen so it shares the same chrome.
 // ──────────────────────────────────────────────────────────────────────
 
 /// Subtle mesh wallpaper behind the auth screens. Mirrors GlassBackdrop but
@@ -1039,10 +1012,10 @@ class _BiometricLoginSection extends StatelessWidget {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Shared bits exported for the forgot/reset screens.
+// Shared bits exported for the first-login screen.
 // ──────────────────────────────────────────────────────────────────────
 
-/// Shell used by ForgotPasswordScreen / ResetPasswordScreen — same gradient
+/// Shell used by FirstLoginScreen — same gradient
 /// band + back button + small logo chip + title/subtitle + glass card.
 class AuthShell extends StatelessWidget {
   const AuthShell({
@@ -1145,7 +1118,7 @@ class AuthShell extends StatelessWidget {
   }
 }
 
-// Re-export the field, label, flash, and button so the forgot/reset screens
+// Re-export the field, label, flash, and button so the first-login screen
 // can use them without duplicating the styling.
 typedef AuthTextField = _AuthTextField;
 typedef AuthFieldLabel = _FieldLabel;

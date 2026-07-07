@@ -200,11 +200,6 @@ class _FaqCard extends StatelessWidget {
           'service is on. You can grant this from your phone Settings.',
     ),
     (
-      'I forgot my password',
-      'On the sign-in screen tap "Forgot password?" to receive an OTP on your '
-          'registered mobile number and set a new one.',
-    ),
-    (
       'I am not receiving notifications',
       'Check that notifications are enabled in Profile → Settings, and that the '
           'app has notification permission in your phone Settings.',

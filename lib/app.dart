@@ -14,9 +14,7 @@ import 'features/auth/biometric/registered_devices_screen.dart';
 import 'features/auth/welcome_seen_controller.dart';
 import 'features/auth/change_password_screen.dart';
 import 'features/auth/first_login_screen.dart';
-import 'features/auth/forgot_password_screen.dart';
 import 'features/auth/login_screen.dart';
-import 'features/auth/reset_password_screen.dart';
 import 'features/auth/welcome_screen.dart';
 import 'features/interviews/interviews_screen.dart';
 import 'features/requisitions/create_requisition_screen.dart';
@@ -48,6 +46,20 @@ import 'features/assets/asset_scan_screen.dart';
 import 'features/payslips/payslips_screen.dart';
 import 'features/performance/my_performance_screen.dart';
 import 'features/performance/team_performance_screen.dart';
+import 'features/mis/mis_dashboard_screen.dart';
+import 'features/mis/mis_collection_screen.dart';
+import 'features/mis/mis_portfolio_screen.dart';
+import 'features/mis/mis_disbursement_screen.dart';
+import 'features/mis/mis_hourly_screen.dart';
+import 'features/mis/mis_comparison_screen.dart';
+import 'features/mis/mis_analytical_screen.dart';
+import 'features/mis/mis_dailyplan_screen.dart';
+import 'features/mis/mis_feedback_screen.dart';
+import 'features/mis/mis_employees_screen.dart';
+import 'features/mis/mis_employee_detail_screen.dart';
+import 'features/mis/mis_locations_screen.dart';
+import 'features/mis/mis_api_client.dart';
+import 'features/mis/mis_auth.dart';
 import 'features/audit/my_audits_screen.dart';
 import 'features/helpdesk/helpdesk_tickets_screen.dart';
 import 'features/helpdesk/helpdesk_raise_screen.dart';
@@ -89,8 +101,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       const authRoutes = {
         '/welcome',
         '/login',
-        '/forgot-password',
-        '/reset-password',
         '/first-login',
       };
 
@@ -120,20 +130,6 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/first-login',
         builder: (_, __) => const FirstLoginScreen(),
-      ),
-      GoRoute(
-        path: '/forgot-password',
-        builder: (_, state) {
-          final user = state.extra is String ? state.extra as String : null;
-          return ForgotPasswordScreen(initialUsername: user);
-        },
-      ),
-      GoRoute(
-        path: '/reset-password',
-        builder: (_, state) {
-          final user = state.extra is String ? state.extra as String : null;
-          return ResetPasswordScreen(username: user);
-        },
       ),
       GoRoute(
         path: '/profile',
@@ -232,6 +228,58 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/my-performance',
         builder: (_, __) => const MyPerformanceScreen(),
+      ),
+      // ── MIS · Grow With Me analytics (own login gate + backend) ──
+      GoRoute(
+        path: '/mis',
+        builder: (_, __) => const MisScreen(),
+      ),
+      GoRoute(
+        path: '/mis/collection',
+        builder: (_, __) => const MisCollectionScreen(),
+      ),
+      GoRoute(
+        path: '/mis/portfolio',
+        builder: (_, __) => const MisPortfolioScreen(),
+      ),
+      GoRoute(
+        path: '/mis/disbursement',
+        builder: (_, __) => const MisDisbursementScreen(),
+      ),
+      GoRoute(
+        path: '/mis/hourly',
+        builder: (_, __) => const MisHourlyScreen(),
+      ),
+      GoRoute(
+        path: '/mis/comparison',
+        builder: (_, __) => const MisComparisonScreen(),
+      ),
+      GoRoute(
+        path: '/mis/analytical',
+        builder: (_, __) => const MisAnalyticalScreen(),
+      ),
+      GoRoute(
+        path: '/mis/daily-plan',
+        builder: (_, __) => const MisDailyPlanScreen(),
+      ),
+      GoRoute(
+        path: '/mis/feedback',
+        builder: (_, __) => const MisFeedbackScreen(),
+      ),
+      GoRoute(
+        path: '/mis/locations',
+        builder: (_, __) => const MisLocationsScreen(),
+      ),
+      // Static /mis/employees before the ':id' param route.
+      GoRoute(
+        path: '/mis/employees',
+        builder: (_, __) => const MisEmployeesScreen(),
+      ),
+      GoRoute(
+        path: '/mis/employees/:id',
+        builder: (_, state) => MisEmployeeDetailScreen(
+          empId: Uri.decodeComponent(state.pathParameters['id']!),
+        ),
       ),
       GoRoute(
         path: '/audit',
@@ -365,6 +413,25 @@ class HrmsApp extends ConsumerWidget {
     api.onUnauthorized ??= () {
       ref.read(authControllerProvider.notifier).sessionExpired();
     };
+    // On a MIS 401, drop just the MIS session (its own backend/token) so the MIS
+    // gate re-authenticates without signing the user out of the whole app.
+    final misApi = ref.read(misApiClientProvider);
+    misApi.onUnauthorized ??= () {
+      ref.read(misAuthControllerProvider.notifier).sessionExpired();
+    };
+    // Eagerly mirror the nava360 login into the MIS (Grow With Me) session so any
+    // MIS screen works from anywhere in the app's nav — not just the MIS
+    // dashboard gate. No-ops when already signed in as the same user.
+    ref.listen(authUserProvider, (_, next) {
+      final u = next?.username;
+      if (u != null && u.isNotEmpty) {
+        ref.read(misAuthControllerProvider.notifier).ensureAutoLogin(u);
+      }
+    });
+    final misUser = ref.read(authUserProvider)?.username;
+    if (misUser != null && misUser.isNotEmpty) {
+      ref.read(misAuthControllerProvider.notifier).ensureAutoLogin(misUser);
+    }
     // Let push-notification taps deep-link into a chat thread.
     ref.read(pushServiceProvider).onOpenChat = (id) => router.push('/chats/$id');
     // …and into an announcement.

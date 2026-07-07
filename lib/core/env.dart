@@ -11,6 +11,14 @@ class Env {
     //defaultValue: 'http://192.168.0.50:8443/',
   );
 
+  /// MIS (Grow With Me) backend base URL — a SEPARATE origin from [apiBaseUrl],
+  /// with its own `Token` auth. Endpoints are relative to this (e.g. `/overview`,
+  /// `/auth/login`). Override via `--dart-define=MIS_API_BASE_URL=...`.
+  static const String misApiBaseUrl = String.fromEnvironment(
+    'MIS_API_BASE_URL',
+    defaultValue: 'https://growwithme.navachetanalivelihoods.com/gwm-api/api',
+  );
+
   /// Builds an absolute URL for a backend file path (e.g. "/api/files/12").
   /// Returns null for empty input; passes absolute URLs through unchanged.
   static String? fileUrl(String? path) {

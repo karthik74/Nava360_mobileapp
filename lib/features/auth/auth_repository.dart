@@ -36,30 +36,6 @@ class AuthRepository {
     );
   }
 
-  Future<void> forgotPassword(String username) async {
-    await _api.post<void>(
-      '/api/auth/forgot-password',
-      body: {'username': username},
-      parse: (_) {},
-    );
-  }
-
-  Future<void> resetPassword({
-    required String username,
-    required String otp,
-    required String newPassword,
-  }) async {
-    await _api.post<void>(
-      '/api/auth/reset-password',
-      body: {
-        'username': username,
-        'otp': otp,
-        'newPassword': newPassword,
-      },
-      parse: (_) {},
-    );
-  }
-
   // ── First-time login (account activation) ─────────────────────────────────
 
   /// Step 1 — locate the account by employee code and send an OTP to the
