@@ -81,8 +81,10 @@ const List<MobileMenuItem> kMobileMenu = [
   // Helpdesk Dashboard intentionally removed from the mobile drawer (2026-07-04)
   // — it stays a web-only view; the /helpdesk/dashboard route still exists for
   // deep links if ever needed.
-  MobileMenuItem(key: 'hrms.travelClaims', label: 'Travel Claims', route: '/travel/claims', icon: Icons.flight_takeoff_rounded, module: MobileModule.hrms, order: 9),
-  MobileMenuItem(key: 'hrms.travelPlans', label: 'Travel Plans', route: '/travel/plans', icon: Icons.luggage_rounded, module: MobileModule.hrms, order: 10),
+  // Travel entries are role-gated: hidden unless the user's roles grant a
+  // travel-claim / travel-plan permission (any of create/view).
+  MobileMenuItem(key: 'hrms.travelClaims', label: 'Travel Claims', route: '/travel/claims', icon: Icons.flight_takeoff_rounded, module: MobileModule.hrms, order: 9, requiredPermissions: ['TRAVEL_CLAIM_CREATE', 'TRAVEL_CLAIM_VIEW']),
+  MobileMenuItem(key: 'hrms.travelPlans', label: 'Travel Plans', route: '/travel/plans', icon: Icons.luggage_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['TRAVEL_PLAN_CREATE', 'TRAVEL_PLAN_VIEW']),
   MobileMenuItem(key: 'hrms.announcements', label: 'Announcements', route: '/announcements', icon: Icons.campaign_rounded, module: MobileModule.hrms, order: 11),
   MobileMenuItem(key: 'hrms.policies', label: 'Policies', route: '/policies', icon: Icons.description_rounded, module: MobileModule.hrms, order: 12),
   MobileMenuItem(key: 'hrms.meetings', label: 'My Meetings', route: '/my-meetings', icon: Icons.event_rounded, module: MobileModule.hrms, order: 13),

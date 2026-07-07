@@ -22,6 +22,10 @@ final travelBranchesProvider =
   return active;
 });
 
+/// Configurable Title/purpose options (Settings → Lookups → Travel plan titles).
+final travelPlanTitlesProvider = FutureProvider.autoDispose<List<String>>(
+    (ref) => ref.watch(travelRepositoryProvider).planTitles());
+
 /// Create or edit a self travel plan (no approval). Pass an existing [plan] to
 /// edit; omit it to create. Pops `true` on success so the list refreshes.
 class TravelPlanFormScreen extends ConsumerStatefulWidget {
@@ -174,12 +178,40 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             _label('Title *'),
-            TextField(
-              controller: _title,
-              maxLength: 150,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
+            ref.watch(travelPlanTitlesProvider).when(
+              data: (options) {
+                final current = _title.text.trim();
+                // Keep a legacy free-text title selectable when editing.
+                final items = [
+                  ...options,
+                  if (current.isNotEmpty && !options.contains(current)) current,
+                ];
+                return DropdownButtonFormField<String>(
+                  value: current.isEmpty ? null : current,
+                  isExpanded: true,
+                  hint: const Text('Select a purpose'),
+                  decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.flag_rounded, size: 20)),
+                  items: [
+                    for (final t in items)
+                      DropdownMenuItem(value: t, child: Text(t)),
+                  ],
+                  onChanged: (v) => setState(() => _title.text = v ?? ''),
+                );
+              },
+              loading: () => const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: LinearProgressIndicator(minHeight: 2),
+              ),
+              // Lookup unavailable → fall back to free text so saving still works.
+              error: (_, __) => TextField(
+                controller: _title,
+                maxLength: 150,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [TitleCaseTextFormatter()],
+              ),
             ),
+            const SizedBox(height: 12),
             _label('From *'),
             _BranchField(controller: _from, hint: 'Type or pick a branch'),
             const SizedBox(height: 12),
