@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -118,7 +119,7 @@ class ProfileScreen extends ConsumerWidget {
                           ),
                           child: Text(
                             user.role,
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: AppColors.primary,
                               fontSize: 10.5,
                               fontWeight: FontWeight.w800,
@@ -150,14 +151,14 @@ class ProfileScreen extends ConsumerWidget {
                   const SizedBox(height: 8),
                   _InfoCard(
                     icon: Icons.apartment_rounded,
-                    label: 'Department',
+                    label: Branding.current.term('department'),
                     value: field('department') ?? '—',
                     color: AppColors.info,
                   ),
                   const SizedBox(height: 8),
                   _InfoCard(
                     icon: Icons.work_outline_rounded,
-                    label: 'Designation',
+                    label: Branding.current.term('designation'),
                     value: field('designation') ?? '—',
                     color: AppColors.pink,
                   ),
@@ -205,6 +206,12 @@ class ProfileScreen extends ConsumerWidget {
                     icon: Icons.folder_shared_outlined,
                     label: 'My documents',
                     onTap: () => context.push('/profile/documents'),
+                  ),
+                  const SizedBox(height: 8),
+                  _SettingTile(
+                    icon: Icons.badge_outlined,
+                    label: 'My Business Card',
+                    onTap: () => context.push('/business-card'),
                   ),
                   const SizedBox(height: 22),
 
@@ -281,7 +288,7 @@ class ProfileScreen extends ConsumerWidget {
                   const SizedBox(height: 24),
                   Center(
                     child: Text(
-                      'Nava360 Mobile v1.0',
+                      '${Branding.current.productName} Mobile v1.0',
                       style: TextStyle(
                         color: AppColors.muted.withOpacity(0.7),
                         fontSize: 12,
@@ -587,7 +594,7 @@ class _ProfileAvatarState extends ConsumerState<_ProfileAvatar> {
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_camera_outlined,
+              leading: Icon(Icons.photo_camera_outlined,
                   color: AppColors.primary),
               title: const Text('Take photo'),
               onTap: () {
@@ -596,7 +603,7 @@ class _ProfileAvatarState extends ConsumerState<_ProfileAvatar> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined,
+              leading: Icon(Icons.photo_library_outlined,
                   color: AppColors.primary),
               title: const Text('Choose from gallery'),
               onTap: () {
