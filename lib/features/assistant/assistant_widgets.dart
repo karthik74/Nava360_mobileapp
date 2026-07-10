@@ -146,10 +146,10 @@ class AssistantChatBubble extends StatelessWidget {
     return MarkdownStyleSheet(
       p: body,
       listBullet: body,
-      a: const TextStyle(
+      a: TextStyle(
           fontSize: 13.5,
           fontWeight: FontWeight.w600,
-          color: AppColors.primary,
+          color: AppColors.primary, // runtime branding — not a const
           decoration: TextDecoration.underline),
       strong: const TextStyle(
           fontSize: 13.5, fontWeight: FontWeight.w700, color: AppColors.ink),
