@@ -64,8 +64,10 @@ dependencies:
 
   # URL Launcher
   url_launcher: ^6.3.0
-  # System share sheet (digital business card link)
+  # System share sheet (digital business card PNG)
   share_plus: ^10.1.0
+  # QR of the business-card vCard (scan → save contact)
+  qr_flutter: ^4.1.0
 
   #Chart
 
@@ -115,3 +117,10 @@ flutter:
     # transparent ring-only and centre-only PNGs for the ring-spin effect.
     - assets/nava360_ring.png
     - assets/nava360_center.png
+
+  fonts:
+    # Business-card name typeface (reference design uses Playfair Display 700).
+    # Variable font — select the weight via FontVariation('wght', 700).
+    - family: PlayfairDisplay
+      fonts:
+        - asset: assets/fonts/PlayfairDisplay.ttf

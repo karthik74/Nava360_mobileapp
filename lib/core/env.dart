@@ -31,12 +31,4 @@ class Env {
 
   /// Public privacy policy URL (hosted by the web app).
   static String get privacyPolicyUrl => fileUrl('/privacy-policy.html')!;
-
-  /// Digital business card page. The employee's details are appended as
-  /// `?data=<base64 JSON>` ({name, designation, phone, email, location}).
-  /// Override via `--dart-define=BUSINESS_CARD_BASE_URL=...` for other tenants.
-  static const String businessCardBaseUrl = String.fromEnvironment(
-    'BUSINESS_CARD_BASE_URL',
-    defaultValue: 'https://raghunandan1157.github.io/digital-business-card/',
-  );
 }
