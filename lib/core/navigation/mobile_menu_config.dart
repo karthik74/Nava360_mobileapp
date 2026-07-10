@@ -97,7 +97,9 @@ const List<MobileMenuItem> kMobileMenu = [
 
   // ── HRMS module cards ──
   // Dashboard (= Home) is surfaced as the drawer's top tile / Home tab, not an HRMS item.
-  MobileMenuItem(key: 'hrms.assistant', label: 'AI Assistant', route: '/assistant', icon: Icons.auto_awesome_rounded, module: MobileModule.hrms, order: 1, featureFlag: 'FEATURE_AI_ASSISTANT'),
+  // AI Assistant intentionally has no menu entry — it's the sparkle button
+  // at the top-right of the Home screen app bar (home_shell._AssistantButton),
+  // still gated by FEATURE_AI_ASSISTANT.
   MobileMenuItem(key: 'hrms.profile', label: 'My Profile', route: '/profile', icon: Icons.person_rounded, module: MobileModule.hrms, order: 2),
   // My Business Card intentionally has no menu entry — it lives inside
   // My Profile (Documents section), next to My documents.

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/api_client.dart';
+import '../../core/branding.dart';
 import '../../core/navigation/mobile_menu_config.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -125,7 +126,7 @@ class HomeShell extends ConsumerWidget {
     if (loc.startsWith('/tasks')) return 'Tasks';
     if (loc.startsWith('/team')) return 'Team';
     if (loc.startsWith('/performance')) return 'Performance';
-    return 'Nava360';
+    return Branding.current.productName;
   }
 
   @override
@@ -216,6 +217,14 @@ class HomeShell extends ConsumerWidget {
                           ],
                         ),
                       ),
+                      // AI Assistant lives here (top-right of Home), not in
+                      // the menu list — per product decision.
+                      if (loc.startsWith('/home') &&
+                          ref
+                              .watch(brandingProvider)
+                              .featureEnabled('FEATURE_AI_ASSISTANT'))
+                        _AssistantButton(
+                            onTap: () => context.push('/assistant')),
                     ],
                   ),
                 ),
@@ -288,6 +297,45 @@ class HomeShell extends ConsumerWidget {
           ),
         ),
       ),
+      ),
+    );
+  }
+}
+
+/// Top-right AI Assistant entry point on the Home tab — a small gradient
+/// sparkle button (the assistant has no menu-list entry).
+class _AssistantButton extends StatelessWidget {
+  const _AssistantButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'AI Assistant',
+      child: SizedBox(
+        width: 38,
+        height: 38,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(11),
+          child: Material(
+            color: Colors.transparent,
+            child: Ink(
+              decoration: BoxDecoration(
+                gradient: AppColors.heroGradient,
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: InkWell(
+                onTap: onTap,
+                child: const Icon(
+                  Icons.auto_awesome_rounded,
+                  size: 18,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1388,7 +1436,7 @@ class _DrawerUserCard extends StatelessWidget {
                       ),
                       child: Text(
                         role,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppColors.primary,
                           fontSize: 8.5,
                           fontWeight: FontWeight.w800,
