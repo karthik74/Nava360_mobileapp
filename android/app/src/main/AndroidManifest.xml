@@ -88,5 +88,10 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- AI assistant voice input: lets the app discover the on-device
+             speech-recognition service on Android 11+ package-visibility rules. -->
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
+        </intent>
     </queries>
 </manifest>
