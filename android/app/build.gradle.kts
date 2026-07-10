@@ -19,7 +19,10 @@ val keystoreProperties = Properties().apply {
 android {
     namespace = "com.hrms.nava_360"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Pin to the NDK actually installed on this machine — flutter.ndkVersion
+    // references a version that isn't present, which makes release BUNDLE
+    // builds fail at "strip debug symbols" (APK builds don't hit it).
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
