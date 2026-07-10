@@ -217,12 +217,11 @@ class HomeShell extends ConsumerWidget {
                           ],
                         ),
                       ),
-                      // AI Assistant lives here (top-right of Home), not in
-                      // the menu list — per product decision.
-                      if (loc.startsWith('/home') &&
-                          ref
-                              .watch(brandingProvider)
-                              .featureEnabled('FEATURE_AI_ASSISTANT'))
+                      // AI Assistant lives here (top-right of the shell
+                      // header, every tab), not in the menu list.
+                      if (ref
+                          .watch(brandingProvider)
+                          .featureEnabled('FEATURE_AI_ASSISTANT'))
                         _AssistantButton(
                             onTap: () => context.push('/assistant')),
                     ],
