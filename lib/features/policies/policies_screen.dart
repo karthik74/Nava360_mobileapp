@@ -89,7 +89,7 @@ class _PolicyCard extends StatelessWidget {
                 color: AppColors.primary.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.picture_as_pdf_rounded, color: AppColors.primary),
+              child: Icon(Icons.picture_as_pdf_rounded, color: AppColors.primary),
             ),
             const SizedBox(width: 12),
             Expanded(

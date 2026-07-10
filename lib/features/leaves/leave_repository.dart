@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/approvals.dart';
 import 'leave_models.dart';
 
 class LeaveRepository {
@@ -94,6 +95,28 @@ class LeaveRepository {
     );
   }
 
+  /// Leaves waiting on the CALLER as a configured chain approver (Wave 4b
+  /// approval engine). Empty when no chain step is pending on them — chain
+  /// approvers aren't necessarily direct managers, so this is surfaced on the
+  /// employee-facing Leaves screen too.
+  Future<List<LeaveRequest>> pendingMyApproval() {
+    return _api.get<List<LeaveRequest>>(
+      '/api/leaves/pending-my-approval',
+      parse: (d) => ((d as List?) ?? const [])
+          .map((e) => LeaveRequest.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  /// The configured approval chain of one leave (empty = default
+  /// direct-manager flow; hide the chain UI).
+  Future<List<ApprovalStep>> approvalSteps(int id) {
+    return _api.get<List<ApprovalStep>>(
+      '/api/leaves/$id/approval-steps',
+      parse: ApprovalStep.listFromJson,
+    );
+  }
+
   Future<LeaveRequest> review(int id,
       {required String status, int? reviewerEmployeeId, String? reviewComment}) {
     return _api.patch<LeaveRequest>(
@@ -112,3 +135,24 @@ class LeaveRepository {
 final leaveRepositoryProvider = Provider<LeaveRepository>(
   (ref) => LeaveRepository(ref.watch(apiClientProvider)),
 );
+
+/// Leaves pending the signed-in user's chain approval. Errors degrade to an
+/// empty list so the section simply hides.
+final leavesPendingMyApprovalProvider =
+    FutureProvider.autoDispose<List<LeaveRequest>>((ref) async {
+  try {
+    return await ref.watch(leaveRepositoryProvider).pendingMyApproval();
+  } catch (_) {
+    return const [];
+  }
+});
+
+/// Approval chain of one leave request (empty = no custom chain).
+final leaveApprovalStepsProvider = FutureProvider.autoDispose
+    .family<List<ApprovalStep>, int>((ref, id) async {
+  try {
+    return await ref.watch(leaveRepositoryProvider).approvalSteps(id);
+  } catch (_) {
+    return const [];
+  }
+});

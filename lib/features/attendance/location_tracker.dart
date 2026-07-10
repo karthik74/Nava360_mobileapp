@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:geolocator/geolocator.dart';
 
+import '../../core/branding.dart';
 import 'location_ping_models.dart';
 import 'location_repository.dart';
 
@@ -364,8 +365,8 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
         accuracy: LocationAccuracy.high,
         distanceFilter: 0,
         intervalDuration: _streamInterval,
-        foregroundNotificationConfig: const ForegroundNotificationConfig(
-          notificationTitle: 'Nava360 attendance',
+        foregroundNotificationConfig: ForegroundNotificationConfig(
+          notificationTitle: '${Branding.current.productName} attendance',
           notificationText: 'Recording your location while you are checked in',
           enableWakeLock: true,
           notificationChannelName: 'Attendance tracking',

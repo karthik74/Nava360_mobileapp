@@ -286,7 +286,7 @@ class _NoticePeriodCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: AppColors.primary.withOpacity(0.22)),
               ),
-              child: const Icon(Icons.event_note_rounded,
+              child: Icon(Icons.event_note_rounded,
                   color: AppColors.primary, size: 22),
             ),
             const SizedBox(width: 14),

@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/branding.dart';
 import '../../core/secure_storage.dart';
 import '../attendance/live_location_responder.dart';
 import 'notifications_repository.dart';
@@ -38,12 +39,15 @@ class PushService {
 
   final NotificationsRepository _repo;
 
-  static const _androidChannel = AndroidNotificationChannel(
-    'hrms_default_channel',
-    'Nava360 notifications',
-    description: 'Tasks, leaves, attendance and announcements.',
-    importance: Importance.high,
-  );
+  // Channel name follows the runtime product branding; Android updates the
+  // visible name when the channel is re-created with the same id.
+  static AndroidNotificationChannel get _androidChannel =>
+      AndroidNotificationChannel(
+        'hrms_default_channel',
+        '${Branding.current.productName} notifications',
+        description: 'Tasks, leaves, attendance and announcements.',
+        importance: Importance.high,
+      );
 
   final FlutterLocalNotificationsPlugin _local =
       FlutterLocalNotificationsPlugin();

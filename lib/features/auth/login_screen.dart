@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 // them together with the AuthTextField/AuthShell widgets this file provides.
 export '../../core/text_formatters.dart';
 
+import '../../core/branding.dart';
 import '../../core/env.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
@@ -109,10 +110,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final loading = state.isLoading;
     final error = state.hasError ? state.error.toString() : null;
     final bio = ref.watch(biometricControllerProvider);
+    // Deployment-level kill switch from /api/public/branding.
+    final bioFeatureOn = ref
+        .watch(brandingProvider)
+        .featureEnabled('FEATURE_BIOMETRIC_LOGIN');
 
     // Case A: if a biometric enrollment exists and the device can use it, prompt
     // automatically the first time the login screen appears.
-    if (bio.canOfferLogin && !_autoBioTried && !loading && !_justSignedIn) {
+    if (bioFeatureOn &&
+        bio.canOfferLogin &&
+        !_autoBioTried &&
+        !loading &&
+        !_justSignedIn) {
       _autoBioTried = true;
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _biometricLogin(auto: true),
@@ -283,11 +292,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ? null
                                   : _submit,
                             ),
-                            _BiometricLoginSection(
-                              state: bio,
-                              busy: _bioBusy,
-                              onTap: () => _biometricLogin(auto: false),
-                            ),
+                            if (bioFeatureOn)
+                              _BiometricLoginSection(
+                                state: bio,
+                                busy: _bioBusy,
+                                onTap: () => _biometricLogin(auto: false),
+                              ),
                             const SizedBox(height: 16),
                             Center(
                               child: InkWell(
@@ -295,7 +305,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 onTap: !formEnabled
                                     ? null
                                     : () => context.push('/first-login'),
-                                child: const Padding(
+                                child: Padding(
                                   padding: EdgeInsets.symmetric(
                                     horizontal: 4,
                                     vertical: 4,
@@ -354,7 +364,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Secured by Nava360 · v1.0',
+                        'Secured by ${Branding.current.productName} · v1.0',
                         style: TextStyle(
                           color: AppColors.muted.withOpacity(0.85),
                           fontSize: 12,
@@ -963,7 +973,7 @@ class _BiometricLoginSection extends StatelessWidget {
             onPressed: busy ? null : onTap,
             style: OutlinedButton.styleFrom(
               foregroundColor: AppColors.primary,
-              side: const BorderSide(color: AppColors.primary, width: 1.3),
+              side: BorderSide(color: AppColors.primary, width: 1.3),
               padding: const EdgeInsets.symmetric(vertical: 13),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12)),

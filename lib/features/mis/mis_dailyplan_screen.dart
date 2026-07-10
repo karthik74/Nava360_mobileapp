@@ -334,7 +334,7 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
                                     BorderRadius.circular(AppRadii.pill),
                               ),
                               child: Text(_fixedBranch ?? '—',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w800,
                                       color: AppColors.primary)),

@@ -373,7 +373,7 @@ class _BranchFieldState extends ConsumerState<_BranchField> {
                   final label = options.elementAt(i);
                   return ListTile(
                     dense: true,
-                    leading: const Icon(Icons.store_mall_directory_rounded,
+                    leading: Icon(Icons.store_mall_directory_rounded,
                         size: 18, color: AppColors.primary),
                     title: Text(label,
                         style: const TextStyle(
@@ -410,7 +410,7 @@ class _DateField extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(Icons.calendar_today_rounded, size: 15, color: AppColors.primary),
+            Icon(Icons.calendar_today_rounded, size: 15, color: AppColors.primary),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
@@ -453,7 +453,7 @@ class _ExistingAttachmentTile extends StatelessWidget {
         },
         child: Row(
           children: [
-            const Icon(Icons.description_rounded, color: AppColors.primary),
+            Icon(Icons.description_rounded, color: AppColors.primary),
             const SizedBox(width: 10),
             Expanded(
               child: Text(att.fileName ?? 'Attachment',

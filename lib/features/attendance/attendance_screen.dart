@@ -491,7 +491,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
             const SizedBox(height: 4),
             if (canRegularize)
               ListTile(
-                leading: const Icon(Icons.fact_check_outlined,
+                leading: Icon(Icons.fact_check_outlined,
                     color: AppColors.primary),
                 title: const Text('Request regularization'),
                 subtitle: const Text('Fix or mark your attendance for this day'),
@@ -777,7 +777,7 @@ class _DayRow extends StatelessWidget {
                               color: AppColors.primary.withOpacity(0.12),
                               borderRadius: BorderRadius.circular(AppRadii.pill),
                             ),
-                            child: const Text(
+                            child: Text(
                               'Today',
                               style: TextStyle(
                                 fontSize: 9,

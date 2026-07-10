@@ -288,7 +288,7 @@ class _DateField extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(Icons.calendar_today_rounded, size: 15, color: AppColors.primary),
+            Icon(Icons.calendar_today_rounded, size: 15, color: AppColors.primary),
             const SizedBox(width: 8),
             Expanded(
               child: Column(

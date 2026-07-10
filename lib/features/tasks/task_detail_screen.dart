@@ -826,7 +826,7 @@ class _CommentTile extends StatelessWidget {
             backgroundColor: AppColors.primary.withOpacity(0.12),
             child: Text(
               initials.isEmpty ? '?' : initials,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
                 color: AppColors.primary,

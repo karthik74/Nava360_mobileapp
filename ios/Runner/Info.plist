@@ -44,7 +44,9 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Nava360 needs photo access so you can attach images to a customer task.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Microphone access is required to record a voice message as evidence for your confidential concern.</string>
+	<string>Microphone access is required to record a voice message as evidence for your confidential concern, and to talk to the AI assistant.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Speech recognition converts your voice into text so the AI assistant can answer your HR questions.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

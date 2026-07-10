@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/text_formatters.dart';
+import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -177,7 +178,9 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
           icon: Icons.assignment_rounded,
           children: [
             AuditKeyValueRow(label: 'Code', value: plan.code ?? '—'),
-            AuditKeyValueRow(label: 'Branch', value: plan.branchName ?? '—'),
+            AuditKeyValueRow(
+                label: Branding.current.term('branch'),
+                value: plan.branchName ?? '—'),
             AuditKeyValueRow(
                 label: 'Template', value: plan.templateName ?? '—'),
             AuditKeyValueRow(

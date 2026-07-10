@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/text_formatters.dart';
+import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../tasks/task_detail_screen.dart';
@@ -203,7 +204,7 @@ class _CustomerHeader extends StatelessWidget {
       if (c.branchName != null && c.branchName!.isNotEmpty)
         _InfoRow(
             icon: Icons.store_mall_directory_outlined,
-            label: 'Branch',
+            label: Branding.current.term('branch'),
             value: c.branchName!),
       if (c.assignedEmployeeName != null && c.assignedEmployeeName!.isNotEmpty)
         _InfoRow(

@@ -378,24 +378,25 @@ class AnimatedGradientCard extends StatelessWidget {
   const AnimatedGradientCard({
     super.key,
     required this.child,
-    this.gradient = AppColors.heroGradient,
+    this.gradient,
     this.height,
   });
 
   final Widget child;
-  final Gradient gradient;
+  final Gradient? gradient;
   final double? height;
 
   @override
   Widget build(BuildContext context) {
+    final effectiveGradient = gradient ?? AppColors.heroGradient;
     return Container(
       height: height,
       decoration: BoxDecoration(
-        gradient: gradient,
+        gradient: effectiveGradient,
         borderRadius: BorderRadius.circular(AppRadii.xl),
         boxShadow: [
           BoxShadow(
-            color: (gradient.colors.first).withOpacity(0.35),
+            color: (effectiveGradient.colors.first).withOpacity(0.35),
             blurRadius: 30,
             offset: const Offset(0, 14),
           ),
@@ -852,7 +853,7 @@ class _HeroCta extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (busy)
-                  const SizedBox(
+                  SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
@@ -861,7 +862,7 @@ class _HeroCta extends StatelessWidget {
                     ),
                   )
                 else
-                  const Icon(
+                  Icon(
                     Icons.fingerprint_rounded,
                     size: 18,
                     color: AppColors.primary,
@@ -869,7 +870,7 @@ class _HeroCta extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.primary,
                     fontSize: 14,
                     fontWeight: FontWeight.w800,
@@ -1161,7 +1162,7 @@ class TodayScheduleList extends StatelessWidget {
                 ),
               ),
               alignment: Alignment.center,
-              child: const Icon(
+              child: Icon(
                 Icons.event_available_rounded,
                 size: 16,
                 color: AppColors.primary,

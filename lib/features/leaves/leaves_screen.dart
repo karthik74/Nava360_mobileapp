@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
+import '../../core/approvals.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -83,6 +84,7 @@ class LeavesScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final balance = ref.watch(_myBalanceProvider);
     final leaves = ref.watch(_myLeavesProvider);
+    final pendingMyApproval = ref.watch(leavesPendingMyApprovalProvider);
 
     final mq = MediaQuery.of(context);
     return Scaffold(
@@ -93,6 +95,7 @@ class LeavesScreen extends ConsumerWidget {
         onRefresh: () async {
           ref.invalidate(_myBalanceProvider);
           ref.invalidate(_myLeavesProvider);
+          ref.invalidate(leavesPendingMyApprovalProvider);
         },
         child: ListView(
           physics: const BouncingScrollPhysics(
@@ -107,6 +110,29 @@ class LeavesScreen extends ConsumerWidget {
           children: [
             _ApplyForLeaveButton(
               onTap: () => _openRequest(context, ref),
+            ),
+            // Approval-engine queue: leaves waiting on ME as a configured
+            // chain approver (chain approvers aren't necessarily managers, so
+            // it lives on the employee-facing screen — hidden when empty,
+            // exactly like the web's PendingApprovalsPanel).
+            ...pendingMyApproval.maybeWhen(
+              data: (rows) => rows.isEmpty
+                  ? const <Widget>[]
+                  : [
+                      const SizedBox(height: 22),
+                      const AppSectionHeader(
+                        title: 'Pending my approval',
+                        subtitle: 'Leave requests waiting on you',
+                        onDark: false,
+                      ),
+                      const SizedBox(height: 12),
+                      for (final r in rows)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _ApprovalQueueTile(r: r),
+                        ),
+                    ],
+              orElse: () => const <Widget>[],
             ),
             const SizedBox(height: 22),
             const AppSectionHeader(
@@ -323,13 +349,153 @@ class _BalanceCard extends StatelessWidget {
   }
 }
 
-class _LeaveTile extends StatelessWidget {
+/// "CASUAL" → "Casual leave" — open leave-type codes are DB-driven now, so
+/// unknown codes humanize generically instead of mapping through an enum.
+String _humanLeaveType(String t) {
+  if (t.isEmpty) return t;
+  final s = t.toLowerCase().replaceAll('_', ' ');
+  return '${s[0].toUpperCase()}${s.substring(1)} leave';
+}
+
+/// One leave waiting on the signed-in user as a configured chain approver —
+/// requester, dates, live chain, and Approve / Reject actions.
+class _ApprovalQueueTile extends ConsumerStatefulWidget {
+  const _ApprovalQueueTile({required this.r});
+  final LeaveRequest r;
+
+  @override
+  ConsumerState<_ApprovalQueueTile> createState() => _ApprovalQueueTileState();
+}
+
+class _ApprovalQueueTileState extends ConsumerState<_ApprovalQueueTile> {
+  bool _busy = false;
+
+  Future<void> _review(String status) async {
+    final user = ref.read(authUserProvider);
+    setState(() => _busy = true);
+    try {
+      await ref.read(leaveRepositoryProvider).review(
+            widget.r.id,
+            status: status,
+            reviewerEmployeeId: user?.employeeId,
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(status == 'APPROVED'
+            ? 'Leave approved.'
+            : 'Leave rejected.'),
+      ));
+      ref.invalidate(leavesPendingMyApprovalProvider);
+      ref.invalidate(_myLeavesProvider);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.r;
+    final steps = ref.watch(leaveApprovalStepsProvider(r.id));
+    return GlassCard(
+      padding: const EdgeInsets.all(14),
+      shadow: AppShadows.soft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      r.employeeName ?? 'Employee #${r.employeeId}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      '${_humanLeaveType(r.leaveType)} · ${r.numberOfDays ?? "?"} day(s) · ${r.fromDate} → ${r.toDate}',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              StatusPill(
+                  label: 'Awaiting you', color: AppColors.warning),
+            ],
+          ),
+          if (r.reason != null && r.reason!.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              r.reason!.trim(),
+              style: const TextStyle(
+                fontSize: 11.5,
+                color: AppColors.inkSoft,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+          steps.maybeWhen(
+            data: (s) => s.isEmpty
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: ApprovalChainInline(steps: s),
+                  ),
+            orElse: () => const SizedBox.shrink(),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : () => _review('REJECTED'),
+                  icon: const Icon(Icons.close_rounded,
+                      size: 16, color: AppColors.danger),
+                  label: const Text('Reject',
+                      style: TextStyle(color: AppColors.danger)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _busy ? null : () => _review('APPROVED'),
+                  icon: const Icon(Icons.check_rounded, size: 16),
+                  label: const Text('Approve'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LeaveTile extends ConsumerWidget {
   const _LeaveTile({required this.r});
   final LeaveRequest r;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final tone = StatusTone.forLeave(r.status);
+    // Show the configured approval chain on in-flight requests (empty = the
+    // default direct-manager flow → nothing rendered).
+    final steps = r.status == 'PENDING'
+        ? ref.watch(leaveApprovalStepsProvider(r.id))
+        : null;
     return GlassCard(
       padding: const EdgeInsets.all(14),
       shadow: AppShadows.soft,
@@ -406,15 +572,22 @@ class _LeaveTile extends StatelessWidget {
               ),
             ),
           ],
+          if (steps != null)
+            steps.maybeWhen(
+              data: (s) => s.isEmpty
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: ApprovalChainInline(steps: s),
+                    ),
+              orElse: () => const SizedBox.shrink(),
+            ),
         ],
       ),
     );
   }
 
-  String _humanType(String t) {
-    final s = t.toLowerCase().replaceAll('_', ' ');
-    return s[0].toUpperCase() + s.substring(1) + ' leave';
-  }
+  String _humanType(String t) => _humanLeaveType(t);
 }
 
 class _ApplyForLeaveButton extends StatelessWidget {
@@ -490,7 +663,7 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
       lastDate: DateTime.now().add(const Duration(days: 365)),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(
+          colorScheme: ColorScheme.light(
             primary: AppColors.primary,
             onPrimary: Colors.white,
             surface: Colors.white,
@@ -843,7 +1016,7 @@ class _DateField extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(Icons.calendar_today_rounded,
+            Icon(Icons.calendar_today_rounded,
                 size: 16, color: AppColors.primary),
             const SizedBox(width: 10),
             Expanded(

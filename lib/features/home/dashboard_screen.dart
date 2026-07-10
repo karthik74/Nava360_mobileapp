@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../attendance/attendance_models.dart';
@@ -433,6 +434,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     final activeTasks = pendingTasks + inProgressTasks;
 
+    // Deployment-configured widget hiding (DASHBOARD_WIDGETS setting) — the
+    // mobile sections reuse the web's widget keys where they overlap.
+    final hiddenWidgets = ref.watch(brandingProvider).hiddenDashboardWidgets;
+
     final mq = MediaQuery.of(context);
     return Stack(
       children: [
@@ -473,6 +478,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           const SizedBox(height: 18),
 
           // Stats grid (2×2, gap 10)
+          if (!hiddenWidgets.contains('stats')) ...[
           Row(
             children: [
               Expanded(
@@ -521,8 +527,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ],
           ),
           const SizedBox(height: 22),
+          ],
 
           // Today
+          if (!hiddenWidgets.contains('attendance')) ...[
           AppSectionHeader(
             title: 'Today',
             trailing: Text(
@@ -543,6 +551,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               onRetry: () => ref.invalidate(_dashAttendanceProvider),
             ),
           ),
+          ],
 
           // Team on leave (manager-aware, hide if empty)
           if (isManager && teamOnLeaveToday.isNotEmpty) ...[
@@ -662,11 +671,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 }
 
 /// Bottom-left "Report a Concern" launcher → confidential whistleblower form.
-class _ReportConcernButton extends StatelessWidget {
+/// Hidden when the deployment turns the whistleblower feature off.
+class _ReportConcernButton extends ConsumerWidget {
   const _ReportConcernButton();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(brandingProvider).featureEnabled('FEATURE_WHISTLEBLOWER')) {
+      return const SizedBox.shrink();
+    }
     return Material(
       color: AppColors.danger,
       elevation: 4,

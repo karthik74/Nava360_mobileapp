@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/approvals.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -508,6 +509,13 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
     // approve/reject actions here, matching the web app and the backend rule.
     final canReview = user != null;
     final leaves = ref.watch(_teamLeavesProvider);
+    // Approval-engine queue: chain steps can route leaves of NON-direct
+    // reports to this user — merge them in so the reviewer sees everything
+    // pending on them in one place.
+    final chainQueue = ref.watch(leavesPendingMyApprovalProvider).maybeWhen(
+          data: (rows) => rows,
+          orElse: () => const <LeaveRequest>[],
+        );
     final mq = MediaQuery.of(context);
     final pad = EdgeInsets.fromLTRB(
       16,
@@ -518,7 +526,10 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
 
     return RefreshIndicator(
       color: AppColors.primary,
-      onRefresh: () async => ref.invalidate(_teamLeavesProvider),
+      onRefresh: () async {
+        ref.invalidate(_teamLeavesProvider);
+        ref.invalidate(leavesPendingMyApprovalProvider);
+      },
       child: leaves.when(
         loading: () => const _CenterLoader(),
         error: (e, _) => _ErrorList(
@@ -530,6 +541,9 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
           // Cancelled leaves are not relevant to a reviewer — hide them.
           final rows =
               allRows.where((r) => r.status != 'CANCELLED').toList();
+          for (final q in chainQueue) {
+            if (!rows.any((r) => r.id == q.id)) rows.add(q);
+          }
           final pending = rows.where((r) => r.status == 'PENDING').length;
           final approved = rows.where((r) => r.status == 'APPROVED').length;
           final rejected = rows.where((r) => r.status == 'REJECTED').length;
@@ -572,7 +586,10 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
                       r: r,
                       canReview: canReview && r.status == 'PENDING',
                       reviewerEmployeeId: user?.employeeId,
-                      onReviewed: () => ref.invalidate(_teamLeavesProvider),
+                      onReviewed: () {
+                        ref.invalidate(_teamLeavesProvider);
+                        ref.invalidate(leavesPendingMyApprovalProvider);
+                      },
                     ),
                   ),
             ],
@@ -601,6 +618,13 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
   Widget build(BuildContext context) {
     final user = ref.watch(authUserProvider);
     final async = ref.watch(teamRegularizationsProvider);
+    // Approval-engine queue: chain steps can route regularizations of
+    // NON-direct reports to this user — merge them into the same list.
+    final chainQueue =
+        ref.watch(regularizationsPendingMyApprovalProvider).maybeWhen(
+              data: (rows) => rows,
+              orElse: () => const <RegularizationRequest>[],
+            );
     final mq = MediaQuery.of(context);
     final pad = EdgeInsets.fromLTRB(
       16,
@@ -611,7 +635,10 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
 
     return RefreshIndicator(
       color: AppColors.primary,
-      onRefresh: () async => ref.invalidate(teamRegularizationsProvider),
+      onRefresh: () async {
+        ref.invalidate(teamRegularizationsProvider);
+        ref.invalidate(regularizationsPendingMyApprovalProvider);
+      },
       child: async.when(
         loading: () => const _CenterLoader(),
         error: (e, _) => _ErrorList(
@@ -619,7 +646,11 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
           padding: pad,
           onRetry: () => ref.invalidate(teamRegularizationsProvider),
         ),
-        data: (rows) {
+        data: (teamRows) {
+          final rows = [...teamRows];
+          for (final q in chainQueue) {
+            if (!rows.any((r) => r.id == q.id)) rows.add(q);
+          }
           final pending = rows.where((r) => r.status == 'PENDING').length;
           final approved = rows.where((r) => r.status == 'APPROVED').length;
           final rejected = rows.where((r) => r.status == 'REJECTED').length;
@@ -666,8 +697,11 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
                     child: _RegularizationCard(
                       r: r,
                       reviewerEmployeeId: user?.employeeId,
-                      onReviewed: () =>
-                          ref.invalidate(teamRegularizationsProvider),
+                      onReviewed: () {
+                        ref.invalidate(teamRegularizationsProvider);
+                        ref.invalidate(
+                            regularizationsPendingMyApprovalProvider);
+                      },
                     ),
                   ),
             ],
@@ -804,7 +838,7 @@ class _RegularizationCardState extends ConsumerState<_RegularizationCard> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.schedule_rounded,
+                  Icon(Icons.schedule_rounded,
                       size: 13, color: AppColors.primary),
                   const SizedBox(width: 6),
                   Text(
@@ -841,6 +875,18 @@ class _RegularizationCardState extends ConsumerState<_RegularizationCard> {
               ],
             ),
           ],
+          // Configured approval chain (Wave 4b engine); empty = default
+          // direct-manager flow → renders nothing.
+          if (r.isPending)
+            ref.watch(regularizationApprovalStepsProvider(r.id)).maybeWhen(
+                  data: (s) => s.isEmpty
+                      ? const SizedBox.shrink()
+                      : Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: ApprovalChainInline(steps: s),
+                        ),
+                  orElse: () => const SizedBox.shrink(),
+                ),
           if (r.isPending) ...[
             const SizedBox(height: 12),
             Row(
@@ -1292,7 +1338,7 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.calendar_today_rounded,
+                Icon(Icons.calendar_today_rounded,
                     size: 13, color: AppColors.primary),
                 const SizedBox(width: 6),
                 Expanded(
@@ -1330,6 +1376,18 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
               ],
             ),
           ],
+          // Configured approval chain (Wave 4b engine); empty = default
+          // direct-manager flow → renders nothing.
+          if (r.status == 'PENDING')
+            ref.watch(leaveApprovalStepsProvider(r.id)).maybeWhen(
+                  data: (s) => s.isEmpty
+                      ? const SizedBox.shrink()
+                      : Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: ApprovalChainInline(steps: s),
+                        ),
+                  orElse: () => const SizedBox.shrink(),
+                ),
           if (widget.canReview) ...[
             const SizedBox(height: 12),
             Row(

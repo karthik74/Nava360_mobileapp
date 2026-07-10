@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/text_formatters.dart';
+import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'audit_models.dart';
@@ -518,12 +519,15 @@ class _RatingTabState extends ConsumerState<_RatingTab> {
         ),
         const SizedBox(height: 12),
         AuditSectionCard(
-          title: 'Branch',
+          title: Branding.current.term('branch'),
           icon: Icons.store_mall_directory_rounded,
           children: [
-            AuditKeyValueRow(label: 'Branch', value: d.branchName ?? '—'),
+            AuditKeyValueRow(
+                label: Branding.current.term('branch'),
+                value: d.branchName ?? '—'),
             AuditKeyValueRow(label: 'Code', value: d.branchCode ?? '—'),
-            AuditKeyValueRow(label: 'State', value: d.state ?? '—'),
+            AuditKeyValueRow(
+                label: Branding.current.term('state'), value: d.state ?? '—'),
             AuditKeyValueRow(label: 'Auditor', value: d.auditorName ?? '—'),
             AuditKeyValueRow(label: 'Period', value: '${d.periodFrom ?? '—'} → ${d.periodTo ?? '—'}'),
           ],

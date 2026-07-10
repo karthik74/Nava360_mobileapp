@@ -13,17 +13,18 @@ class ComingSoonScreen extends StatelessWidget {
     super.key,
     required this.title,
     required this.icon,
-    this.accent = AppColors.primary,
+    this.accent,
     this.description,
   });
 
   final String title;
   final IconData icon;
-  final Color accent;
+  final Color? accent;
   final String? description;
 
   @override
   Widget build(BuildContext context) {
+    final Color accent = this.accent ?? AppColors.primary;
     final mq = MediaQuery.of(context);
     return Scaffold(
       backgroundColor: Colors.transparent,

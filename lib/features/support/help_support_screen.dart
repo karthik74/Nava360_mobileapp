@@ -1,21 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/branding.dart';
 import '../../core/env.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 
-/// Static help & support screen — contact channels, FAQs and app info.
-///
-/// NOTE: update [_supportEmail] / [_supportPhone] / [_website] below with the
-/// organisation's real support contacts.
-class HelpSupportScreen extends StatelessWidget {
+/// Help & support screen — contact channels, FAQs and app info. Support
+/// contacts come from the runtime company branding (/api/public/branding);
+/// tiles with no configured value are hidden.
+class HelpSupportScreen extends ConsumerWidget {
   const HelpSupportScreen({super.key});
-
-  static const _supportEmail = 'support@navachetanalivelihoods.com';
-  static const _supportPhone = '';
-  static const _website = 'https://navachetanalivelihoods.com';
 
   Future<void> _launch(BuildContext context, Uri uri) async {
     try {
@@ -35,7 +32,11 @@ class HelpSupportScreen extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final b = ref.watch(brandingProvider);
+    final supportEmail = b.supportEmail;
+    final supportPhone = b.supportPhone;
+    final website = b.website;
     return Scaffold(
       appBar: AppBar(title: const Text('Help & support')),
       body: GlassBackdrop(
@@ -51,41 +52,44 @@ class HelpSupportScreen extends StatelessWidget {
               const SizedBox(height: 18),
               const AppSectionHeader(title: 'Contact us'),
               const SizedBox(height: 8),
-              _ContactTile(
-                icon: Icons.email_outlined,
-                color: AppColors.info,
-                label: 'Email support',
-                value: _supportEmail,
-                onTap: () => _launch(
-                  context,
-                  Uri(
-                    scheme: 'mailto',
-                    path: _supportEmail,
-                    query: 'subject=Nava360 app support',
+              if (supportEmail.isNotEmpty)
+                _ContactTile(
+                  icon: Icons.email_outlined,
+                  color: AppColors.info,
+                  label: 'Email support',
+                  value: supportEmail,
+                  onTap: () => _launch(
+                    context,
+                    Uri(
+                      scheme: 'mailto',
+                      path: supportEmail,
+                      query: 'subject=${b.productName} app support',
+                    ),
                   ),
                 ),
-              ),
-              if (_supportPhone.isNotEmpty) ...[
+              if (supportPhone.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 _ContactTile(
                   icon: Icons.call_outlined,
                   color: AppColors.success,
                   label: 'Call us',
-                  value: _supportPhone,
+                  value: supportPhone,
                   onTap: () => _launch(
                     context,
-                    Uri(scheme: 'tel', path: _supportPhone),
+                    Uri(scheme: 'tel', path: supportPhone),
                   ),
                 ),
               ],
-              const SizedBox(height: 8),
-              _ContactTile(
-                icon: Icons.language_outlined,
-                color: AppColors.accent,
-                label: 'Website',
-                value: _website.replaceFirst('https://', ''),
-                onTap: () => _launch(context, Uri.parse(_website)),
-              ),
+              if (website.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                _ContactTile(
+                  icon: Icons.language_outlined,
+                  color: AppColors.accent,
+                  label: 'Website',
+                  value: website.replaceFirst('https://', ''),
+                  onTap: () => _launch(context, Uri.parse(website)),
+                ),
+              ],
               const SizedBox(height: 8),
               _ContactTile(
                 icon: Icons.privacy_tip_outlined,
@@ -254,11 +258,12 @@ class _FaqCard extends StatelessWidget {
   }
 }
 
-class _AppInfoCard extends StatelessWidget {
+class _AppInfoCard extends ConsumerWidget {
   const _AppInfoCard();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final productName = ref.watch(brandingProvider).productName;
     return GlassCard(
       child: FutureBuilder<PackageInfo>(
         future: PackageInfo.fromPlatform(),
@@ -278,14 +283,14 @@ class _AppInfoCard extends StatelessWidget {
                   border: Border.all(color: AppColors.primary.withOpacity(0.22)),
                 ),
                 alignment: Alignment.center,
-                child: const Icon(Icons.info_outline_rounded,
+                child: Icon(Icons.info_outline_rounded,
                     color: AppColors.primary, size: 18),
               ),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  'Nava360',
-                  style: TextStyle(
+                  productName,
+                  style: const TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w700,
                     color: AppColors.ink,

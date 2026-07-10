@@ -754,7 +754,7 @@ class _MisNavRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const items = [
+    final items = [
       ('Collection', Icons.payments_rounded, '/mis/collection', AppColors.success),
       ('Portfolio', Icons.pie_chart_rounded, '/mis/portfolio', AppColors.primary),
       ('Disbursement', Icons.account_balance_rounded, '/mis/disbursement',

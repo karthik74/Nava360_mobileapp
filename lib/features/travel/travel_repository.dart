@@ -9,6 +9,12 @@ import 'travel_models.dart';
 final travelRepositoryProvider =
     Provider((ref) => TravelRepository(ref.watch(apiClientProvider)));
 
+/// Server-driven expense-category options for claim forms (never errors —
+/// falls back to the built-in category list).
+final travelExpenseCategoriesProvider =
+    FutureProvider.autoDispose<List<TravelCategoryOption>>(
+        (ref) => ref.watch(travelRepositoryProvider).expenseCategories());
+
 typedef TravelProgressCb = void Function(int sent, int total);
 
 /// Pulls the `content` list out of a paged `ApiResponse<PageResponse<T>>` `data`
@@ -116,6 +122,29 @@ class TravelRepository {
           .where((s) => s.isNotEmpty)
           .toList(),
     );
+  }
+
+  /// Active expense-category options (Settings → Lookups → Travel expense
+  /// categories). The backend dropped the `TravelExpenseCategory` enum — the
+  /// list is DB-driven and companies can add their own codes. Falls back to
+  /// the legacy built-in list when offline / the lookup is empty.
+  Future<List<TravelCategoryOption>> expenseCategories() async {
+    try {
+      final list = await _api.get<List<TravelCategoryOption>>(
+        '/api/lookups/travel-expense-categories',
+        query: {'activeOnly': true},
+        parse: (d) => (d as List)
+            .map((e) => TravelCategoryOption.fromJson(e as Map<String, dynamic>))
+            .where((o) => o.code.isNotEmpty)
+            .toList(),
+      );
+      if (list.isNotEmpty) return list;
+    } catch (_) {
+      // Fall through to the static defaults below.
+    }
+    return TravelEnums.expenseCategories
+        .map((c) => TravelCategoryOption(code: c, label: TravelEnums.label(c)))
+        .toList();
   }
 
   Future<TravelPlan> updatePlan(

@@ -33,7 +33,7 @@ StatusTone travelClaimTone(String s) {
     case 'SENT_BACK':
       return const StatusTone(AppColors.warning, 'Sent Back');
     case 'SETTLED':
-      return const StatusTone(AppColors.primary, 'Settled');
+      return StatusTone(AppColors.primary, 'Settled');
     default:
       return StatusTone(AppColors.muted, TravelEnums.label(s));
   }

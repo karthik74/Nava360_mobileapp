@@ -809,7 +809,7 @@ class _DesignationRow extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       child: Row(
         children: [
-          const Icon(Icons.badge_outlined, size: 18, color: AppColors.primary),
+          Icon(Icons.badge_outlined, size: 18, color: AppColors.primary),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -863,7 +863,7 @@ class _BranchRow extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       child: Row(
         children: [
-          const Icon(Icons.apartment_rounded, size: 18, color: AppColors.primary),
+          Icon(Icons.apartment_rounded, size: 18, color: AppColors.primary),
           const SizedBox(width: 10),
           Expanded(
             child: Column(

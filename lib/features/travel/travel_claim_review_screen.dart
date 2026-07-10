@@ -1056,7 +1056,7 @@ class _AttachmentRowState extends ConsumerState<_AttachmentRow> {
       shadow: AppShadows.soft,
       child: Row(
         children: [
-          const Icon(Icons.description_rounded, color: AppColors.primary),
+          Icon(Icons.description_rounded, color: AppColors.primary),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1082,7 +1082,7 @@ class _AttachmentRowState extends ConsumerState<_AttachmentRow> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.download_rounded,
+                : Icon(Icons.download_rounded,
                     color: AppColors.primary, size: 20),
             tooltip: 'Download',
           ),
@@ -1104,7 +1104,7 @@ class _SettlementCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
               Icon(Icons.verified_rounded, color: AppColors.primary, size: 18),
               SizedBox(width: 6),

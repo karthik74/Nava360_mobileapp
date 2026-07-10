@@ -100,6 +100,26 @@ class TravelEnums {
   }
 }
 
+/// One DB-driven expense-category option from
+/// `/api/lookups/travel-expense-categories` (the backend enum was removed —
+/// companies define their own codes). [TravelEnums.expenseCategories] remains
+/// only as an offline fallback.
+class TravelCategoryOption {
+  final String code;
+  final String label;
+
+  const TravelCategoryOption({required this.code, required this.label});
+
+  factory TravelCategoryOption.fromJson(Map<String, dynamic> j) {
+    final code = j['code'] as String? ?? '';
+    final label = (j['label'] as String?)?.trim() ?? '';
+    return TravelCategoryOption(
+      code: code,
+      label: label.isEmpty ? TravelEnums.label(code) : label,
+    );
+  }
+}
+
 /// A file staged on-device for upload as a plan/claim/expense bill or evidence.
 class TravelUploadFile {
   final String path;

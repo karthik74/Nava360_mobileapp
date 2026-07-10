@@ -459,7 +459,7 @@ class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
               onTap: () => setState(() {
                 _region = _division = _area = _branch = null;
               }),
-              child: const Row(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.close_rounded, size: 14, color: AppColors.primary),
@@ -821,7 +821,7 @@ class _DisbBucketRow extends StatelessWidget {
         );
       }
       if (pVal == null && cVal != null) {
-        return const Text('new',
+        return Text('new',
             style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,

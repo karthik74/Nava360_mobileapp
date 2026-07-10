@@ -985,7 +985,7 @@ class _MisCalendarSheetState extends State<_MisCalendarSheet> {
         child: Container(
           margin: const EdgeInsets.all(4),
           decoration:
-              const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
+              BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
           alignment: Alignment.center,
           child: Text('$d',
               style: const TextStyle(

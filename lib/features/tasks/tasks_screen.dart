@@ -365,7 +365,7 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(AppRadii.lg),
-                  borderSide: const BorderSide(color: AppColors.primary),
+                  borderSide: BorderSide(color: AppColors.primary),
                 ),
               ),
             ),
@@ -644,14 +644,14 @@ class _ProgressBar extends StatelessWidget {
               value: clamped / 100,
               minHeight: 5,
               backgroundColor: AppColors.primary.withOpacity(0.12),
-              valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+              valueColor: AlwaysStoppedAnimation(AppColors.primary),
             ),
           ),
         ),
         const SizedBox(width: 8),
         Text(
           '$clamped%',
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w800,
             color: AppColors.primary,

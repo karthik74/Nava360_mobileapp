@@ -277,13 +277,13 @@ class PerfRankBadge extends StatelessWidget {
     required this.label,
     required this.rank,
     this.icon = Icons.emoji_events_rounded,
-    this.color = AppColors.primary,
+    this.color,
   });
 
   final String label;
   final int? rank;
   final IconData icon;
-  final Color color;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -295,7 +295,7 @@ class PerfRankBadge extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(icon, size: 15, color: color),
+              Icon(icon, size: 15, color: color ?? AppColors.primary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -317,7 +317,7 @@ class PerfRankBadge extends StatelessWidget {
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.w800,
-              color: color,
+              color: color ?? AppColors.primary,
               height: 1.0,
               letterSpacing: -0.5,
             ),
@@ -353,7 +353,7 @@ class PerfMonthSelector extends StatelessWidget {
       shadow: AppShadows.card,
       child: Row(
         children: [
-          const Icon(Icons.calendar_month_rounded,
+          Icon(Icons.calendar_month_rounded,
               size: 18, color: AppColors.primary),
           const SizedBox(width: 10),
           Expanded(

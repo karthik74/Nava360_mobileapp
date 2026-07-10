@@ -143,7 +143,7 @@ class _MisFeedbackScreenState extends ConsumerState<MisFeedbackScreen> {
                   color: AppColors.primary.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(11),
                 ),
-                child: const Icon(Icons.forum_rounded,
+                child: Icon(Icons.forum_rounded,
                     color: AppColors.primary, size: 20),
               ),
               const SizedBox(width: 12),

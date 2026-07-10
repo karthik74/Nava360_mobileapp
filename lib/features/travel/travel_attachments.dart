@@ -35,12 +35,12 @@ class TravelFilePicker extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.photo_camera_rounded, color: AppColors.primary),
+              leading: Icon(Icons.photo_camera_rounded, color: AppColors.primary),
               title: const Text('Take a photo'),
               onTap: () => Navigator.pop(context, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_rounded, color: AppColors.primary),
+              leading: Icon(Icons.photo_library_rounded, color: AppColors.primary),
               title: const Text('Choose from gallery'),
               onTap: () => Navigator.pop(context, ImageSource.gallery),
             ),
@@ -128,7 +128,7 @@ class TravelFilePicker extends StatelessWidget {
                           color: AppColors.primary.withOpacity(0.12),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Icon(Icons.picture_as_pdf_rounded, color: AppColors.primary),
+                        child: Icon(Icons.picture_as_pdf_rounded, color: AppColors.primary),
                       ),
                     const SizedBox(width: 10),
                     Expanded(

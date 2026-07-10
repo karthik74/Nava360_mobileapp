@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../auth/auth_controller.dart';
 
@@ -216,7 +217,7 @@ class _PermissionGateState extends ConsumerState<PermissionGate>
     if (ref.watch(authUserProvider) == null) return widget.child;
 
     if (_checking) {
-      return const Material(
+      return Material(
         color: AppColors.bg,
         child: Center(
           child: SizedBox(
@@ -340,11 +341,12 @@ class _PermissionWall extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Nava360 needs these permissions to track attendance '
-                    'reliably. Please enable all of them to continue.',
+                  Text(
+                    '${Branding.current.productName} needs these permissions '
+                    'to track attendance reliably. Please enable all of them '
+                    'to continue.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 14,
                       color: AppColors.inkSoft,
                       height: 1.45,

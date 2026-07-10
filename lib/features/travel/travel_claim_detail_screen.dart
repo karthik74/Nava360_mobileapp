@@ -825,7 +825,7 @@ class _AttachmentTile extends StatelessWidget {
         },
         child: Row(
           children: [
-            const Icon(Icons.description_rounded, color: AppColors.primary),
+            Icon(Icons.description_rounded, color: AppColors.primary),
             const SizedBox(width: 10),
             Expanded(
               child: Text(att.fileName ?? 'Bill',
@@ -1033,17 +1033,42 @@ class _ExpenseSheetState extends ConsumerState<_ExpenseSheet> {
                 style: const TextStyle(
                     fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink)),
             const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              value: _category,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.category_outlined, size: 20)),
-              items: [
-                for (final c in TravelEnums.expenseCategories)
-                  DropdownMenuItem(value: c, child: Text(TravelEnums.label(c))),
-              ],
-              onChanged: (v) => setState(() => _category = v ?? _category),
-            ),
+            // DB-driven categories (/api/lookups/travel-expense-categories) —
+            // the backend enum was removed, so companies can define their own.
+            // The provider itself falls back to the legacy built-in list.
+            Builder(builder: (context) {
+              final serverCats =
+                  ref.watch(travelExpenseCategoriesProvider).maybeWhen(
+                        data: (list) => list,
+                        orElse: () => const <TravelCategoryOption>[],
+                      );
+              final options = serverCats.isNotEmpty
+                  ? [...serverCats] // copy — never mutate the provider cache
+                  : [
+                      for (final c in TravelEnums.expenseCategories)
+                        TravelCategoryOption(
+                            code: c, label: TravelEnums.label(c)),
+                    ];
+              // Keep an existing expense's (possibly retired) code selectable.
+              final codes = options.map((o) => o.code).toSet();
+              if (!codes.contains(_category)) {
+                options.insert(
+                    0,
+                    TravelCategoryOption(
+                        code: _category, label: TravelEnums.label(_category)));
+              }
+              return DropdownButtonFormField<String>(
+                value: _category,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.category_outlined, size: 20)),
+                items: [
+                  for (final o in options)
+                    DropdownMenuItem(value: o.code, child: Text(o.label)),
+                ],
+                onChanged: (v) => setState(() => _category = v ?? _category),
+              );
+            }),
             const SizedBox(height: 12),
             TextField(
               controller: _amount,

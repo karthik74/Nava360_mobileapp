@@ -61,13 +61,13 @@ Future<ImageSource?> _pickSource(BuildContext context) {
         mainAxisSize: MainAxisSize.min,
         children: [
           ListTile(
-            leading: const Icon(Icons.photo_camera_rounded,
+            leading: Icon(Icons.photo_camera_rounded,
                 color: AppColors.primary),
             title: const Text('Take a photo'),
             onTap: () => Navigator.pop(context, ImageSource.camera),
           ),
           ListTile(
-            leading: const Icon(Icons.photo_library_rounded,
+            leading: Icon(Icons.photo_library_rounded,
                 color: AppColors.primary),
             title: const Text('Choose from gallery'),
             onTap: () => Navigator.pop(context, ImageSource.gallery),

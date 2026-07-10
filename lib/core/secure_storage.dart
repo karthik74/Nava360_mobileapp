@@ -10,6 +10,7 @@ class SecureStorage {
   static const _kUserJson = 'auth.user';
   static const _kWelcomeSeen = 'onboarding.welcome_seen';
   static const _kNotifEnabled = 'notifications.enabled';
+  static const _kBranding = 'branding.json';
 
   // ── Biometric login (mobile only) — survive a "logout only" sign-out so the
   // next open can offer fingerprint / Face ID; wiped by clearBiometric(). ──
@@ -84,6 +85,18 @@ class SecureStorage {
 
   static Future<void> writeNotificationsEnabled(bool enabled) =>
       _write(_kNotifEnabled, enabled ? '1' : '0');
+
+  /// Cached `/api/public/branding` payload — survives sign-out so the app
+  /// paints branded on every launch, even before login.
+  static Future<String?> readBrandingJson() => _read(_kBranding);
+
+  static Future<void> writeBrandingJson(String json) => _write(_kBranding, json);
+
+  /// AI-assistant voice preferences (JSON) — per device, survives sign-out.
+  static Future<String?> readAssistantVoiceJson() => _read('assistant.voice');
+
+  static Future<void> writeAssistantVoiceJson(String json) =>
+      _write('assistant.voice', json);
 
   /// Clears auth credentials. The welcome flag and any biometric enrollment are
   /// intentionally preserved — a "logout only" keeps biometric login available.

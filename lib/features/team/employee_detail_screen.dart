@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api_client.dart';
+import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../assets/assets_models.dart';
@@ -352,9 +353,12 @@ class _OverviewTab extends ConsumerWidget {
               icon: Icons.person_outline_rounded,
               children: [
                 _InfoRow(Icons.badge_outlined, 'Employee code', e.employeeCode),
-                _InfoRow(Icons.work_outline_rounded, 'Designation', e.designation),
-                _InfoRow(Icons.apartment_rounded, 'Department', e.department),
-                _InfoRow(Icons.location_city_rounded, 'Branch', e.branchLabel),
+                _InfoRow(Icons.work_outline_rounded,
+                    Branding.current.term('designation'), e.designation),
+                _InfoRow(Icons.apartment_rounded,
+                    Branding.current.term('department'), e.department),
+                _InfoRow(Icons.location_city_rounded,
+                    Branding.current.term('branch'), e.branchLabel),
                 _InfoRow(Icons.supervisor_account_rounded, 'Reporting manager',
                     e.reportingManagerName),
                 _InfoRow(Icons.category_rounded, 'Employee type', e.employeeType),
@@ -698,7 +702,7 @@ class _LocationTabState extends ConsumerState<_LocationTab> {
                         color: AppColors.primary.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(11),
                       ),
-                      child: const Icon(Icons.map_rounded,
+                      child: Icon(Icons.map_rounded,
                           color: AppColors.primary, size: 20),
                     ),
                     const SizedBox(width: 12),
@@ -1230,7 +1234,7 @@ class _BalanceRow extends StatelessWidget {
               ),
               Text(
                 '$balance / $allowance left',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                   color: AppColors.primary,
@@ -1245,7 +1249,7 @@ class _BalanceRow extends StatelessWidget {
               value: ratio,
               minHeight: 6,
               backgroundColor: AppColors.hairline,
-              valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+              valueColor: AlwaysStoppedAnimation(AppColors.primary),
             ),
           ),
         ],
@@ -1858,7 +1862,7 @@ class _InfoRow extends StatelessWidget {
           ),
           if (tappable) ...[
             const SizedBox(width: 6),
-            const Icon(Icons.open_in_new_rounded,
+            Icon(Icons.open_in_new_rounded,
                 size: 14, color: AppColors.primary),
           ],
         ],

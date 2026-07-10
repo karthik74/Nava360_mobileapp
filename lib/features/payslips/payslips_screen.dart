@@ -275,7 +275,7 @@ void _showPayslipReceipt(
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'SALARY SLIP',
                           style: TextStyle(
                             fontSize: 12,
@@ -370,7 +370,7 @@ void _showPayslipReceipt(
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Column(
+                      Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
@@ -395,7 +395,7 @@ void _showPayslipReceipt(
                       ),
                       Text(
                         '₹${NumberFormat('#,##,###').format(payroll.netSalary)}',
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppColors.primary,
                           fontSize: 22,
                           fontWeight: FontWeight.w800,
@@ -457,7 +457,7 @@ class _PayslipCardState extends ConsumerState<_PayslipCard> {
               border: Border.all(color: AppColors.primary.withOpacity(0.2)),
             ),
             alignment: Alignment.center,
-            child: const Icon(Icons.receipt_long_rounded, color: AppColors.primary, size: 20),
+            child: Icon(Icons.receipt_long_rounded, color: AppColors.primary, size: 20),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -486,7 +486,7 @@ class _PayslipCardState extends ConsumerState<_PayslipCard> {
           ),
           IconButton(
             icon: _busy
-                ? const SizedBox(
+                ? SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
@@ -494,13 +494,13 @@ class _PayslipCardState extends ConsumerState<_PayslipCard> {
                       valueColor: AlwaysStoppedAnimation(AppColors.primary),
                     ),
                   )
-                : const Icon(Icons.download_rounded,
+                : Icon(Icons.download_rounded,
                     color: AppColors.primary, size: 20),
             onPressed: _busy ? null : _download,
             tooltip: 'Download PDF',
           ),
           IconButton(
-            icon: const Icon(Icons.visibility_outlined, color: AppColors.primary, size: 20),
+            icon: Icon(Icons.visibility_outlined, color: AppColors.primary, size: 20),
             onPressed: () =>
                 _showPayslipReceipt(context, payroll, monthName),
             tooltip: 'View Slip Details',

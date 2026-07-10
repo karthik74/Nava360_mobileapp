@@ -24,7 +24,7 @@ StatusTone claimStatusTone(String status) {
     case 'SENT_BACK':
       return const StatusTone(AppColors.pink, 'Sent back');
     case 'SETTLED':
-      return const StatusTone(AppColors.primary, 'Settled');
+      return StatusTone(AppColors.primary, 'Settled');
     default:
       return StatusTone(AppColors.muted, TravelEnums.label(status));
   }

@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/approvals.dart';
 import 'team_models.dart';
 
 class TeamRepository {
@@ -38,6 +39,27 @@ class TeamRepository {
     );
   }
 
+  /// Regularizations waiting on the CALLER as a configured chain approver
+  /// (Wave 4b approval engine) — chain approvers aren't necessarily direct
+  /// managers.
+  Future<List<RegularizationRequest>> regularizationsPendingMyApproval() {
+    return _api.get<List<RegularizationRequest>>(
+      '/api/regularizations/pending-my-approval',
+      parse: (d) => ((d as List?) ?? const [])
+          .map((e) => RegularizationRequest.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  /// The configured approval chain of one regularization (empty = default
+  /// direct-manager flow; hide the chain UI).
+  Future<List<ApprovalStep>> regularizationApprovalSteps(int id) {
+    return _api.get<List<ApprovalStep>>(
+      '/api/regularizations/$id/approval-steps',
+      parse: ApprovalStep.listFromJson,
+    );
+  }
+
   /// Approve or reject a regularization request.
   /// [status] must be 'APPROVED' or 'REJECTED'.
   Future<void> reviewRegularization(
@@ -71,4 +93,29 @@ final teamMembersProvider =
 final teamRegularizationsProvider =
     FutureProvider.autoDispose<List<RegularizationRequest>>((ref) {
   return ref.watch(teamRepositoryProvider).teamRegularizations();
+});
+
+/// Regularizations pending the signed-in user's chain approval. Errors
+/// degrade to an empty list so the section simply hides.
+final regularizationsPendingMyApprovalProvider =
+    FutureProvider.autoDispose<List<RegularizationRequest>>((ref) async {
+  try {
+    return await ref
+        .watch(teamRepositoryProvider)
+        .regularizationsPendingMyApproval();
+  } catch (_) {
+    return const [];
+  }
+});
+
+/// Approval chain of one regularization (empty = no custom chain).
+final regularizationApprovalStepsProvider = FutureProvider.autoDispose
+    .family<List<ApprovalStep>, int>((ref, id) async {
+  try {
+    return await ref
+        .watch(teamRepositoryProvider)
+        .regularizationApprovalSteps(id);
+  } catch (_) {
+    return const [];
+  }
 });

@@ -145,7 +145,7 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
                           ),
                         ),
                         _creating
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 22,
                                 height: 22,
                                 child: CircularProgressIndicator(

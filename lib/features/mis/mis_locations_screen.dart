@@ -82,7 +82,7 @@ class _MisLocationsScreenState extends ConsumerState<MisLocationsScreen> {
           children: [
             Row(
               children: [
-                const Icon(Icons.location_on_rounded,
+                Icon(Icons.location_on_rounded,
                     color: AppColors.primary, size: 22),
                 const SizedBox(width: 8),
                 Expanded(
@@ -200,7 +200,7 @@ class _MisLocationsScreenState extends ConsumerState<MisLocationsScreen> {
                                     alignment: Alignment.topCenter,
                                     child: GestureDetector(
                                       onTap: () => _showBranch(b),
-                                      child: const Icon(
+                                      child: Icon(
                                         Icons.location_on,
                                         color: AppColors.primary,
                                         size: 34,

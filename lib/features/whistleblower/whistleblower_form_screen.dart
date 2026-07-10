@@ -380,7 +380,7 @@ class _PersonSelectorState extends ConsumerState<_PersonSelector> {
                         dense: true,
                         title: Text(e.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                         subtitle: e.code == null ? null : Text(e.code!, style: const TextStyle(fontSize: 11.5)),
-                        trailing: const Icon(Icons.add_circle_outline_rounded, size: 20, color: AppColors.primary),
+                        trailing: Icon(Icons.add_circle_outline_rounded, size: 20, color: AppColors.primary),
                         onTap: () => _add(e),
                       ),
                   ],

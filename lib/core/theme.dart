@@ -8,9 +8,13 @@ import 'package:flutter/services.dart';
 class AppColors {
   AppColors._();
 
-  // Brand — deep blue
-  static const primary = Color(0xFF1D4ED8); // blue-700
-  static const primaryDark = Color(0xFF1E40AF); // blue-800 (hover/darker)
+  // Brand — deep blue by default. NOT const: replaced at runtime with the
+  // deployment's configured color via [applyBrand] (core/branding.dart), so
+  // one build serves every company. Const usages must copy, not reference.
+  static const Color _defaultPrimary = Color(0xFF1D4ED8); // blue-700
+  static const Color _defaultPrimaryDark = Color(0xFF1E40AF); // blue-800
+  static Color primary = _defaultPrimary;
+  static Color primaryDark = _defaultPrimaryDark; // hover/darker
   static const accent = Color(0xFF0EA5E9); // sky-500 (secondary, used sparingly)
   static const pink = Color(0xFF7C3AED); // violet-600 (kept token name)
 
@@ -45,12 +49,40 @@ class AppColors {
   static const meshD = Color(0xFF8B5CF6);
   static const meshBase = Color(0xFFF1F5F9);
 
-  // Subtle deep-blue brand gradient — hero card, avatars (kept names).
-  static const heroGradient = LinearGradient(
+  // Subtle brand gradient — hero card, avatars (kept names). Recomputed from
+  // the runtime brand color by [applyBrand].
+  static const LinearGradient _defaultHeroGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
     colors: [Color(0xFF1E40AF), Color(0xFF2563EB)],
   );
+  static LinearGradient heroGradient = _defaultHeroGradient;
+
+  /// Applies the deployment's runtime brand color (null = product default).
+  /// Called by the branding bootstrap before/while the first screens build;
+  /// widgets pick the new tokens up as they (re)build.
+  static void applyBrand(Color? brand) {
+    if (brand == null) {
+      primary = _defaultPrimary;
+      primaryDark = _defaultPrimaryDark;
+      heroGradient = _defaultHeroGradient;
+      return;
+    }
+    primary = brand;
+    primaryDark = _shiftLightness(brand, -0.08);
+    heroGradient = LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [_shiftLightness(brand, -0.08), _shiftLightness(brand, 0.04)],
+    );
+  }
+
+  static Color _shiftLightness(Color c, double delta) {
+    final hsl = HSLColor.fromColor(c);
+    return hsl
+        .withLightness((hsl.lightness + delta).clamp(0.0, 1.0))
+        .toColor();
+  }
 
   static const successGradient = LinearGradient(
     begin: Alignment.topLeft,
@@ -242,7 +274,7 @@ ThemeData buildAppTheme() {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadii.md),
-        borderSide: const BorderSide(color: AppColors.primary, width: 1.6),
+        borderSide: BorderSide(color: AppColors.primary, width: 1.6),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadii.md),
