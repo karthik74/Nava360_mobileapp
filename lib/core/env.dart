@@ -1,15 +1,26 @@
+import 'package:flutter/services.dart' show appFlavor;
+
 /// Build-time configuration.
 ///
-/// Override via `--dart-define`:
-///   flutter run --dart-define=API_BASE_URL=http://192.168.1.5:8080
+/// The backend URL resolves per COMPANY FLAVOR (white-label builds; see
+/// android/app/build.gradle.kts productFlavors). An explicit `--dart-define`
+/// always wins, so local development against a LAN backend still works:
+///   flutter run --flavor livelihoods --dart-define=API_BASE_URL=http://192.168.1.5:8443
 class Env {
-  /// Default targets the Android emulator's host loopback. iOS simulator uses
-  /// `http://localhost:8080`; a physical device needs your LAN IP.
-  static const String apiBaseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: 'https://hrms.navachetanalivelihoods.com/',
-    //defaultValue: 'http://192.168.0.51:8443/',
-  );
+  static const String _overrideBaseUrl = String.fromEnvironment('API_BASE_URL');
+
+  /// One backend deployment per company; the flavor picks it at build time.
+  static const Map<String, String> _flavorBaseUrls = {
+    'livelihoods': 'https://hrms.navachetanalivelihoods.com/',
+    'souhardha': 'https://hrms.navachetanasouhardha.com/',
+    'laxmi': 'https://hrms.laxmimultistate.com/',
+  };
+
+  static final String apiBaseUrl = _overrideBaseUrl.isNotEmpty
+      ? _overrideBaseUrl
+      // Unflavored builds (plain `flutter run`/tests) behave like the
+      // original single-company app.
+      : _flavorBaseUrls[appFlavor] ?? _flavorBaseUrls['livelihoods']!;
 
   /// MIS (Grow With Me) backend base URL — a SEPARATE origin from [apiBaseUrl],
   /// with its own `Token` auth. Endpoints are relative to this (e.g. `/overview`,
