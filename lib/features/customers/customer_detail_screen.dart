@@ -12,6 +12,7 @@ import '../tasks/task_repository.dart';
 import '../tasks/task_status_ui.dart';
 import '../tasks/task_template_models.dart';
 import 'customer_models.dart';
+import 'customer_notice_screen.dart';
 import 'customer_repository.dart';
 
 final customerProvider =
@@ -93,6 +94,20 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
         backgroundColor: Colors.white,
         foregroundColor: AppColors.ink,
         elevation: 0.5,
+        actions: [
+          customerAsync.maybeWhen(
+            data: (customer) => IconButton(
+              tooltip: 'Notices',
+              icon: const Icon(Icons.description_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => CustomerNoticeScreen(customer: customer),
+                ),
+              ),
+            ),
+            orElse: () => const SizedBox.shrink(),
+          ),
+        ],
       ),
       bottomNavigationBar: customerAsync.maybeWhen(
         data: (customer) => SafeArea(
