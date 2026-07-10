@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
 import 'assistant_cards.dart';
@@ -59,6 +60,16 @@ class AssistantChatBubble extends StatelessWidget {
                       : message.content,
                   selectable: false,
                   styleSheet: _markdownStyle(context),
+                  // Without a handler, rendered links do nothing on tap.
+                  onTapLink: (text, href, title) {
+                    if (href == null) return;
+                    final uri = Uri.tryParse(href);
+                    if (uri == null ||
+                        !(uri.isScheme('http') || uri.isScheme('https'))) {
+                      return; // http/https only — never intent:/file: etc.
+                    }
+                    launchUrl(uri, mode: LaunchMode.externalApplication);
+                  },
                 ),
               ],
             ),
@@ -135,6 +146,11 @@ class AssistantChatBubble extends StatelessWidget {
     return MarkdownStyleSheet(
       p: body,
       listBullet: body,
+      a: const TextStyle(
+          fontSize: 13.5,
+          fontWeight: FontWeight.w600,
+          color: AppColors.primary,
+          decoration: TextDecoration.underline),
       strong: const TextStyle(
           fontSize: 13.5, fontWeight: FontWeight.w700, color: AppColors.ink),
       h1: const TextStyle(
