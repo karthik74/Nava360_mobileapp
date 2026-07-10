@@ -1319,13 +1319,16 @@ class _MessageBubble extends StatelessWidget {
                                 ? _imageWidth
                                 : double.infinity,
                           ),
-                          child: Text(
+                          child: LinkifiedText(
                             msg.content!,
                             style: const TextStyle(
                               fontSize: 13.8,
                               color: Color(0xFF111B21), // WhatsApp dark text color
                               height: 1.3,
                             ),
+                            // WhatsApp-style link blue, readable on both the
+                            // green (mine) and white (theirs) bubbles.
+                            linkColor: const Color(0xFF027EB5),
                           ),
                         ),
                     ],

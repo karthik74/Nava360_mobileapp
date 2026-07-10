@@ -1,7 +1,88 @@
 import 'dart:ui';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import 'theme.dart';
+
+// ------------------------------------------------------------------
+// Linkified text
+// ------------------------------------------------------------------
+
+/// Plain text whose http(s) URLs are tappable and open in the external
+/// browser. Only http/https ever launches — never intent:/file: schemes.
+class LinkifiedText extends StatefulWidget {
+  const LinkifiedText(this.text, {super.key, this.style, this.linkColor});
+
+  final String text;
+  final TextStyle? style;
+  final Color? linkColor;
+
+  @override
+  State<LinkifiedText> createState() => _LinkifiedTextState();
+}
+
+class _LinkifiedTextState extends State<LinkifiedText> {
+  static final RegExp _urlRe = RegExp("https?://[^\\s<>\"')]+");
+  static final RegExp _trailingPunct = RegExp(r'[.,;:!?]+$');
+
+  final List<TapGestureRecognizer> _recognizers = [];
+
+  @override
+  void dispose() {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Spans are rebuilt every build; retire the previous taps' recognizers.
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    _recognizers.clear();
+
+    final matches = _urlRe.allMatches(widget.text).toList();
+    if (matches.isEmpty) return Text(widget.text, style: widget.style);
+
+    final base = widget.style ?? DefaultTextStyle.of(context).style;
+    final linkStyle = base.copyWith(
+      color: widget.linkColor ?? AppColors.primary,
+      fontWeight: FontWeight.w600,
+      decoration: TextDecoration.underline,
+    );
+    final spans = <InlineSpan>[];
+    var last = 0;
+    for (final m in matches) {
+      if (m.start > last) {
+        spans.add(TextSpan(text: widget.text.substring(last, m.start)));
+      }
+      final raw = m.group(0)!;
+      // Trailing sentence punctuation belongs to the prose, not the URL.
+      final url = raw.replaceFirst(_trailingPunct, '');
+      final recognizer = TapGestureRecognizer()
+        ..onTap = () {
+          final uri = Uri.tryParse(url);
+          if (uri != null && (uri.isScheme('http') || uri.isScheme('https'))) {
+            launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        };
+      _recognizers.add(recognizer);
+      spans.add(TextSpan(text: url, style: linkStyle, recognizer: recognizer));
+      if (url.length < raw.length) {
+        spans.add(TextSpan(text: raw.substring(url.length)));
+      }
+      last = m.end;
+    }
+    if (last < widget.text.length) {
+      spans.add(TextSpan(text: widget.text.substring(last)));
+    }
+    return Text.rich(TextSpan(style: base, children: spans));
+  }
+}
 
 // ------------------------------------------------------------------
 // Empty / Error / Loading states
