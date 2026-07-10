@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../features/auth/auth_models.dart';
+import '../branding.dart';
 
 /// ───────────────────────────────────────────────────────────────────────────
 ///  CENTRALIZED MOBILE NAVIGATION — single source of truth for the bottom nav
@@ -39,6 +40,16 @@ class MobileMenuItem {
   /// Root entries rendered in the bottom navigation bar.
   final bool showInBottomNav;
 
+  /// Runtime feature flag (SettingKey name, e.g. `FEATURE_CHAT`) — hidden when
+  /// the deployment turns it off via /api/public/branding.
+  final String? featureFlag;
+
+  /// Backend module code (web menuConfig top-level key, e.g. `helpdesk`)
+  /// gating this item through ENABLED_MODULES. Defaults to the code of the
+  /// item's own [module]; set explicitly for items that belong to a different
+  /// web module (helpdesk/audit entries living under the HRMS grid).
+  final String? moduleCode;
+
   const MobileMenuItem({
     required this.key,
     required this.label,
@@ -52,7 +63,24 @@ class MobileMenuItem {
     this.webOnly = false,
     this.mobileAllowed = true,
     this.showInBottomNav = false,
+    this.featureFlag,
+    this.moduleCode,
   });
+}
+
+/// ENABLED_MODULES code for a mobile module (matches the web menuConfig
+/// top-level keys); null = never toggled off.
+String? _moduleCodeOf(MobileModule m) {
+  switch (m) {
+    case MobileModule.hrms:
+      return 'hrms';
+    case MobileModule.payroll:
+      return 'payroll';
+    case MobileModule.mis:
+      return 'mis';
+    default:
+      return null;
+  }
 }
 
 const List<MobileMenuItem> kMobileMenu = [
@@ -69,14 +97,16 @@ const List<MobileMenuItem> kMobileMenu = [
 
   // ── HRMS module cards ──
   // Dashboard (= Home) is surfaced as the drawer's top tile / Home tab, not an HRMS item.
+  MobileMenuItem(key: 'hrms.assistant', label: 'AI Assistant', route: '/assistant', icon: Icons.auto_awesome_rounded, module: MobileModule.hrms, order: 1, featureFlag: 'FEATURE_AI_ASSISTANT'),
   MobileMenuItem(key: 'hrms.profile', label: 'My Profile', route: '/profile', icon: Icons.person_rounded, module: MobileModule.hrms, order: 2),
+  MobileMenuItem(key: 'hrms.businessCard', label: 'My Business Card', route: '/business-card', icon: Icons.badge_rounded, module: MobileModule.hrms, order: 2),
   MobileMenuItem(key: 'hrms.attendance', label: 'Attendance', route: '/attendance', icon: Icons.fingerprint_rounded, module: MobileModule.hrms, order: 3),
   MobileMenuItem(key: 'hrms.leaves', label: 'Leaves', route: '/leaves', icon: Icons.event_available_rounded, module: MobileModule.hrms, order: 4),
   MobileMenuItem(key: 'hrms.tasks', label: 'Tasks', route: '/tasks', icon: Icons.task_alt_rounded, module: MobileModule.hrms, order: 5),
-  MobileMenuItem(key: 'hrms.chats', label: 'Chats', route: '/chats', icon: Icons.chat_rounded, module: MobileModule.hrms, order: 6),
+  MobileMenuItem(key: 'hrms.chats', label: 'Chats', route: '/chats', icon: Icons.chat_rounded, module: MobileModule.hrms, order: 6, featureFlag: 'FEATURE_CHAT'),
   MobileMenuItem(key: 'hrms.interviews', label: 'My Interviews', route: '/interviews', icon: Icons.event_note_rounded, module: MobileModule.hrms, order: 7, requiredPermissions: ['INTERVIEW_VIEW']),
   MobileMenuItem(key: 'hrms.requisitions', label: 'Job Requisitions', route: '/requisitions', icon: Icons.work_outline_rounded, module: MobileModule.hrms, order: 8, requiredPermissions: ['REQUISITION_VIEW']),
-  MobileMenuItem(key: 'hrms.helpdesk', label: 'Helpdesk', route: '/helpdesk', icon: Icons.support_agent_rounded, module: MobileModule.hrms, order: 8, requiredPermissions: ['HELPDESK_CREATE_TICKET']),
+  MobileMenuItem(key: 'hrms.helpdesk', label: 'Helpdesk', route: '/helpdesk', icon: Icons.support_agent_rounded, module: MobileModule.hrms, order: 8, requiredPermissions: ['HELPDESK_CREATE_TICKET'], moduleCode: 'helpdesk'),
   // Knowledge Base lives under More (moved from HRMS 2026-07-04).
   // Helpdesk Dashboard intentionally removed from the mobile drawer (2026-07-04)
   // — it stays a web-only view; the /helpdesk/dashboard route still exists for
@@ -92,7 +122,7 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'hrms.assets', label: 'My Assets', route: '/assets', icon: Icons.devices_other_rounded, module: MobileModule.hrms, order: 15),
   MobileMenuItem(key: 'hrms.resignation', label: 'My Resignation', route: '/my-resignation', icon: Icons.logout_rounded, module: MobileModule.hrms, order: 16),
   MobileMenuItem(key: 'hrms.performance', label: 'My Performance', route: '/my-performance', icon: Icons.insights_rounded, module: MobileModule.hrms, order: 17, requiredPermissions: ['VIEW_SELF_PERFORMANCE']),
-  MobileMenuItem(key: 'hrms.audit', label: 'Internal Audit', route: '/audit', icon: Icons.fact_check_rounded, module: MobileModule.hrms, order: 18, requiredPermissions: ['AUDIT_PERFORM', 'AUDIT_VIEW_BRANCH', 'AUDIT_VIEW_HIERARCHY', 'AUDIT_VIEW_ALL', 'AUDIT_BM_COMPLIANCE', 'AUDIT_VERIFY']),
+  MobileMenuItem(key: 'hrms.audit', label: 'Internal Audit', route: '/audit', icon: Icons.fact_check_rounded, module: MobileModule.hrms, order: 18, requiredPermissions: ['AUDIT_PERFORM', 'AUDIT_VIEW_BRANCH', 'AUDIT_VIEW_HIERARCHY', 'AUDIT_VIEW_ALL', 'AUDIT_BM_COMPLIANCE', 'AUDIT_VERIFY'], moduleCode: 'audit'),
   // Whistleblower is intentionally NOT in the menu — reached via the dashboard's
   // "Report a concern" button (keeps the reporting entry low-profile).
 
@@ -134,7 +164,7 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'more.notifications', label: 'Notifications', route: '/notifications', icon: Icons.notifications_rounded, module: MobileModule.more, order: 1),
   MobileMenuItem(key: 'more.password', label: 'Change Password', route: '/change-password', icon: Icons.lock_rounded, module: MobileModule.more, order: 2),
   MobileMenuItem(key: 'more.support', label: 'Help / Support', route: '/help-support', icon: Icons.help_rounded, module: MobileModule.more, order: 3),
-  MobileMenuItem(key: 'more.helpdeskKb', label: 'Knowledge Base', route: '/helpdesk/kb', icon: Icons.menu_book_rounded, module: MobileModule.more, order: 4),
+  MobileMenuItem(key: 'more.helpdeskKb', label: 'Knowledge Base', route: '/helpdesk/kb', icon: Icons.menu_book_rounded, module: MobileModule.more, order: 4, moduleCode: 'helpdesk'),
 ];
 
 /// True when the signed-in user may see manager-only entries. Heuristic (until
@@ -150,9 +180,17 @@ bool _passesPermissions(MobileMenuItem m, AuthUser? user) =>
 
 bool _visible(MobileMenuItem m, AuthUser? user, bool isManager) {
   if (m.webOnly || !m.mobileAllowed) return false; // (1) drop web-only
+  // (2) runtime deployment config (/api/public/branding): module toggles +
+  // feature flags — same semantics as the web's moduleEnabled/featureEnabled.
+  final branding = Branding.current;
+  final code = m.moduleCode ?? _moduleCodeOf(m.module);
+  if (code != null && !branding.moduleEnabled(code)) return false;
+  if (m.featureFlag != null && !branding.featureEnabled(m.featureFlag!)) {
+    return false;
+  }
   if (!m.employeeAllowed && !isManager) return false; // manager-only gate
   if (!m.managerAllowed && isManager) return false;
-  return _passesPermissions(m, user); // (2) ANY-of permission
+  return _passesPermissions(m, user); // (3) ANY-of permission
 }
 
 /// Cards for a module, filtered for the user and sorted by order. (5)
@@ -214,8 +252,13 @@ const List<MobileModuleInfo> kMobileModules = [
   MobileModuleInfo(module: MobileModule.more, label: 'More', route: '/more', icon: Icons.more_horiz_rounded),
 ];
 
-/// Modules visible to the user (My Team only for managers).
+/// Modules visible to the user (My Team only for managers; modules the
+/// deployment disabled via ENABLED_MODULES are dropped for everyone).
 List<MobileModuleInfo> modulesFor(AuthUser? user) {
   final isManager = isManagerUser(user);
-  return kMobileModules.where((m) => !m.managerOnly || isManager).toList();
+  return kMobileModules.where((m) {
+    if (m.managerOnly && !isManager) return false;
+    final code = _moduleCodeOf(m.module);
+    return code == null || Branding.current.moduleEnabled(code);
+  }).toList();
 }

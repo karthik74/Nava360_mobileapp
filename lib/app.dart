@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/api_client.dart';
+import 'core/branding.dart';
 import 'core/nava360_splash_screen.dart';
 import 'core/theme.dart';
 import 'features/app_update/in_app_update_gate.dart';
@@ -16,6 +17,7 @@ import 'features/auth/change_password_screen.dart';
 import 'features/auth/first_login_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/welcome_screen.dart';
+import 'features/assistant/assistant_screen.dart';
 import 'features/interviews/interviews_screen.dart';
 import 'features/requisitions/create_requisition_screen.dart';
 import 'features/requisitions/requisitions_screen.dart';
@@ -29,6 +31,7 @@ import 'features/notifications/notifications_screen.dart';
 import 'features/notifications/push_lifecycle.dart';
 import 'features/notifications/push_service.dart';
 import 'features/permissions/permission_gate.dart';
+import 'features/profile/business_card_screen.dart';
 import 'features/profile/my_documents_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/team/team_screen.dart';
@@ -136,6 +139,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const ProfileScreen(),
       ),
       GoRoute(
+        path: '/business-card',
+        builder: (_, __) => const BusinessCardScreen(),
+      ),
+      GoRoute(
         path: '/profile/documents',
         builder: (_, __) => const MyDocumentsScreen(),
       ),
@@ -150,6 +157,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/help-support',
         builder: (_, __) => const HelpSupportScreen(),
+      ),
+      GoRoute(
+        path: '/assistant',
+        builder: (_, __) => const AssistantScreen(),
       ),
       GoRoute(
         path: '/interviews',
@@ -403,6 +414,9 @@ class HrmsApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(goRouterProvider);
+    // Rebuild the whole tree (incl. ThemeData built from the runtime-mutable
+    // AppColors tokens) whenever fresh company branding arrives.
+    final branding = ref.watch(brandingProvider);
     // Activate the auth → side-effect bindings once at the app root.
     ref.watch(locationLifecycleProvider);
     ref.watch(pushLifecycleProvider);
@@ -445,7 +459,7 @@ class HrmsApp extends ConsumerWidget {
     // …and to any explicit in-app route a push carries (announcement actions).
     ref.read(pushServiceProvider).onOpenRoute = (route) => router.push(route);
     return MaterialApp.router(
-      title: 'Nava360',
+      title: branding.productName,
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       routerConfig: router,

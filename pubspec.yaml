@@ -64,6 +64,8 @@ dependencies:
 
   # URL Launcher
   url_launcher: ^6.3.0
+  # System share sheet (digital business card link)
+  share_plus: ^10.1.0
 
   #Chart
 
