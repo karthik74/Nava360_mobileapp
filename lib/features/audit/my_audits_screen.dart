@@ -20,11 +20,14 @@ import 'audit_models.dart';
 import 'audit_repository.dart';
 import 'audit_widgets.dart';
 
+// Values MUST be backend AuditStatus enum names — anything else makes the
+// list endpoint fail with "Failed to convert…".
 const _kStatusFilters = <({String? value, String label})>[
   (value: null, label: 'All'),
   (value: 'IN_PROGRESS', label: 'In Progress'),
-  (value: 'SENT_TO_BM', label: 'Sent to BM'),
-  (value: 'BM_SUBMITTED', label: 'BM Submitted'),
+  (value: 'SUBMITTED', label: 'Submitted'),
+  (value: 'BM_ACTION_PENDING', label: 'Sent to BM'),
+  (value: 'VERIFICATION_PENDING', label: 'BM Submitted'),
   (value: 'CLOSED', label: 'Closed'),
 ];
 

@@ -287,7 +287,9 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
       ));
     }
 
-    if (canBm && status == 'SENT_TO_BM') {
+    // Backend statuses: BM_ACTION_PENDING (sent to BM; REOPENED also accepts a
+    // BM re-submission) and VERIFICATION_PENDING (BM submitted, awaiting close).
+    if (canBm && (status == 'BM_ACTION_PENDING' || status == 'REOPENED')) {
       btns.add(_SecondaryAction(
         label: 'Submit BM compliance',
         icon: Icons.assignment_turned_in_rounded,
@@ -299,7 +301,7 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
       ));
     }
 
-    if (canVerify && status == 'BM_SUBMITTED') {
+    if (canVerify && status == 'VERIFICATION_PENDING') {
       btns.add(_SecondaryAction(
         label: 'Close audit',
         icon: Icons.check_circle_rounded,
