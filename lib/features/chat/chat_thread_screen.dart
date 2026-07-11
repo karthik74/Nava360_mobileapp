@@ -1205,8 +1205,12 @@ class _MessageBubble extends StatelessWidget {
       opaque: false,
       barrierColor: Colors.black,
       transitionDuration: const Duration(milliseconds: 220),
-      pageBuilder: (_, __, ___) =>
-          _ImageViewerScreen(url: url, title: msg.attachmentName ?? 'Image'),
+      pageBuilder: (_, __, ___) => _ImageViewerScreen(
+        url: url,
+        // WhatsApp-style header: who sent it and when (not the file name).
+        title: isMine ? 'You' : msg.senderName,
+        subtitle: DateFormat('d MMM yyyy, h:mm a').format(msg.createdAt),
+      ),
       transitionsBuilder: (_, anim, __, child) => FadeTransition(
         opacity: anim,
         child: ScaleTransition(
@@ -2222,9 +2226,11 @@ class _SheetAction extends StatelessWidget {
 /// zoom to the tapped point, 90° rotate, and tap-to-toggle chrome. Mirrors the
 /// web ImageViewer's interaction model, dependency-free.
 class _ImageViewerScreen extends StatefulWidget {
-  const _ImageViewerScreen({required this.url, required this.title});
+  const _ImageViewerScreen({required this.url, required this.title, this.subtitle});
   final String url;
   final String title;
+  /// Secondary line under the title (e.g. when the image was sent).
+  final String? subtitle;
 
   @override
   State<_ImageViewerScreen> createState() => _ImageViewerScreenState();
@@ -2332,11 +2338,27 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen>
                     onPressed: () => Navigator.pop(context),
                   ),
                   Expanded(
-                    child: Text(
-                      widget.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontSize: 15),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        if (widget.subtitle != null)
+                          Text(
+                            widget.subtitle!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                      ],
                     ),
                   ),
                   IconButton(
