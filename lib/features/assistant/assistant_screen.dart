@@ -11,6 +11,7 @@ import 'assistant_models.dart';
 import 'assistant_repository.dart';
 import 'assistant_voice_controller.dart';
 import 'assistant_voice_sheet.dart';
+import 'voice/voice_conversation_screen.dart';
 import 'assistant_widgets.dart';
 
 /// The AI-assistant chat page (route /assistant). Voice arrives in Phase 2 —
@@ -39,6 +40,14 @@ class _AssistantScreenState extends ConsumerState<AssistantScreen> {
     _input.clear();
     ref.read(assistantChatControllerProvider.notifier).send(text);
     _scrollToBottom();
+  }
+
+  /// Opens the ChatGPT-style hands-free voice conversation (full screen).
+  Future<void> _openVoiceConversation() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => const VoiceConversationScreen(),
+    ));
   }
 
   Future<void> _openVoice() async {
@@ -100,6 +109,11 @@ class _AssistantScreenState extends ConsumerState<AssistantScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Voice chat',
+            icon: const Icon(Icons.graphic_eq_rounded, size: 21),
+            onPressed: _openVoiceConversation,
+          ),
           IconButton(
             tooltip: 'New chat',
             icon: const Icon(Icons.add_comment_outlined, size: 20),
