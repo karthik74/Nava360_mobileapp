@@ -79,7 +79,11 @@ class VoiceConversationController extends StateNotifier<VoiceConvState> {
 
   // ── Public control ─────────────────────────────────────────────────────────
 
-  /// Opens the conversation and starts the first listen.
+  /// A friendly spoken opener, like ChatGPT voice mode.
+  static const String _greeting =
+      'Hi! I am your assistant. How can I help you today?';
+
+  /// Opens the conversation: greets aloud, then starts the listen loop.
   Future<void> start() async {
     if (_active) return;
     if (!await _recorder.hasPermission()) {
@@ -89,7 +93,22 @@ class VoiceConversationController extends StateNotifier<VoiceConvState> {
       return;
     }
     _active = true;
-    unawaited(_loop());
+    unawaited(_run());
+  }
+
+  Future<void> _run() async {
+    await _greet();
+    if (_active) await _loop();
+  }
+
+  /// Speaks the opening greeting before the first listen. Never blocks the
+  /// conversation — a TTS hiccup just skips straight to listening.
+  Future<void> _greet() async {
+    try {
+      await _speak(_greeting, 'en-IN');
+    } catch (_) {
+      // ignore — proceed to listening
+    }
   }
 
   /// Barge-in: whatever we're doing, stop and listen to the user now.
