@@ -115,6 +115,21 @@ class PushService {
     }
   }
 
+  /// Fired whenever an ANNOUNCEMENT push is tapped (with or without a custom
+  /// route) so the app can report the tap to the backend ("who clicked").
+  /// Buffered like [onOpenChat] for cold-start taps.
+  void Function(int announcementId)? _onAnnouncementTapped;
+  int? _pendingTappedAnnouncementId;
+
+  set onAnnouncementTapped(void Function(int announcementId)? cb) {
+    _onAnnouncementTapped = cb;
+    final pending = _pendingTappedAnnouncementId;
+    if (cb != null && pending != null) {
+      _pendingTappedAnnouncementId = null;
+      cb(pending);
+    }
+  }
+
   /// Opens an arbitrary in-app route carried in the push payload ("route"),
   /// e.g. an announcement whose action is "/profile/documents". Buffered like
   /// [onOpenChat] for cold-start taps.
@@ -289,6 +304,20 @@ class PushService {
 
   void _handleTapData(Map<String, dynamic> data) {
     final type = data['type']?.toString();
+    // Any announcement tap is reported for the admin "who clicked" view —
+    // BEFORE routing, so notification-only nudges (route, no list entry)
+    // are counted too.
+    if (type == 'ANNOUNCEMENT') {
+      final tappedId = int.tryParse('${data['announcementId']}');
+      if (tappedId != null) {
+        final tapCb = _onAnnouncementTapped;
+        if (tapCb != null) {
+          tapCb(tappedId);
+        } else {
+          _pendingTappedAnnouncementId = tappedId;
+        }
+      }
+    }
     // A push carrying an explicit in-app route wins over the per-type default
     // (e.g. an announcement that should open My documents instead of itself).
     final route = data['route']?.toString();

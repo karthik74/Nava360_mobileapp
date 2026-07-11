@@ -30,6 +30,12 @@ class AnnouncementsRepository {
     );
   }
 
+  /// Reports that the employee TAPPED this announcement's push notification —
+  /// powers the admin "who clicked" report. Fire-and-forget; never surfaces.
+  Future<void> markOpened(int id) {
+    return _api.post<void>('/api/announcements/$id/opened', parse: (_) {});
+  }
+
   /// Marks read and returns the (now-read) announcement — used to open detail.
   Future<MyAnnouncement> markRead(int id) {
     return _api.post<MyAnnouncement>(

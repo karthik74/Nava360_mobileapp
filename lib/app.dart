@@ -39,6 +39,7 @@ import 'features/chat/chat_list_screen.dart';
 import 'features/chat/chat_thread_by_id_screen.dart';
 import 'features/meetings/meetings_screen.dart';
 import 'features/trainings/trainings_screen.dart';
+import 'features/announcements/announcements_repository.dart';
 import 'features/announcements/announcements_screen.dart';
 import 'features/announcements/announcement_detail_screen.dart';
 import 'features/policies/policies_screen.dart';
@@ -451,6 +452,15 @@ class HrmsApp extends ConsumerWidget {
     // …and into an announcement.
     ref.read(pushServiceProvider).onOpenAnnouncement =
         (id) => router.push('/announcements/$id');
+    // Every announcement-push tap is reported (fire-and-forget) so admins can
+    // see who clicked — including notification-only nudges that never appear
+    // in the announcements list.
+    ref.read(pushServiceProvider).onAnnouncementTapped = (id) {
+      ref
+          .read(announcementsRepositoryProvider)
+          .markOpened(id)
+          .catchError((Object _) {});
+    };
     // …and into a company policy.
     ref.read(pushServiceProvider).onOpenPolicy =
         (id) => router.push('/policies/$id');
