@@ -15,6 +15,9 @@ class TaskRepository {
       query: {
         'activeOnly': true,
         'taskType': 'CUSTOMER',
+        // Perform picker: targeting rules apply even to template managers,
+        // matching the server-side guard at task creation.
+        'applicableOnly': true,
         if (query.trim().isNotEmpty) 'q': query.trim(),
         'size': 100,
       },
@@ -40,6 +43,9 @@ class TaskRepository {
       query: {
         'activeOnly': true,
         'taskType': 'INTERNAL',
+        // Self-task picker: targeting rules apply even to template managers,
+        // matching the server-side guard at task creation.
+        'applicableOnly': true,
         if (query.trim().isNotEmpty) 'q': query.trim(),
         'size': 100,
       },
