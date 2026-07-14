@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'api_client.dart';
+import 'env.dart';
 import 'secure_storage.dart';
 import 'theme.dart';
 
@@ -135,6 +136,11 @@ class Branding {
 
   /// Optional org level (keys: `state`, `area`) — on unless explicitly off.
   bool orgLevelEnabled(String level) => orgLevels[level] != false;
+
+  /// Privacy-policy link: the company-configured URL when set, else the
+  /// deployment's hosted default page (which brands itself at runtime).
+  String get effectivePrivacyUrl =>
+      privacyUrl.isNotEmpty ? privacyUrl : Env.privacyPolicyUrl;
 
   /// Company-configured label for an org level, falling back to the default.
   String term(String key) =>

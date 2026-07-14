@@ -11,7 +11,6 @@ import 'package:url_launcher/url_launcher.dart';
 export '../../core/text_formatters.dart';
 
 import '../../core/branding.dart';
-import '../../core/env.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import 'auth_controller.dart';
@@ -347,7 +346,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       InkWell(
                         borderRadius: BorderRadius.circular(6),
                         onTap: () => launchUrl(
-                          Uri.parse(Env.privacyPolicyUrl),
+                          Uri.parse(Branding.current.effectivePrivacyUrl),
                           mode: LaunchMode.externalApplication,
                         ),
                         child: Padding(

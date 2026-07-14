@@ -4,7 +4,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/branding.dart';
-import '../../core/env.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 
@@ -96,7 +95,7 @@ class HelpSupportScreen extends ConsumerWidget {
                 color: AppColors.primary,
                 label: 'Privacy Policy',
                 value: 'How we handle your data',
-                onTap: () => _launch(context, Uri.parse(Env.privacyPolicyUrl)),
+                onTap: () => _launch(context, Uri.parse(b.effectivePrivacyUrl)),
               ),
               const SizedBox(height: 22),
               const AppSectionHeader(title: 'Frequently asked'),
