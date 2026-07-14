@@ -319,18 +319,24 @@ class _MisTappableCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // IntrinsicHeight gives the Row a bounded height so CrossAxisAlignment.stretch
+    // can size the full-height accent bar. Without it, the card lives in a
+    // vertically-unbounded ListView/Column and `stretch` forces infinite height
+    // onto the children, throwing during layout so the card renders nothing.
     final content = GlassCard(
       padding: EdgeInsets.zero,
       shadow: AppShadows.soft,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (accentBar != null)
-            Container(width: 4, decoration: BoxDecoration(color: accentBar)),
-          Expanded(
-            child: Padding(padding: const EdgeInsets.all(13), child: child),
-          ),
-        ],
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (accentBar != null)
+              Container(width: 4, decoration: BoxDecoration(color: accentBar)),
+            Expanded(
+              child: Padding(padding: const EdgeInsets.all(13), child: child),
+            ),
+          ],
+        ),
       ),
     );
     if (onTap == null) return content;

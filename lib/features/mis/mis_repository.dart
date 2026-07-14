@@ -105,21 +105,34 @@ class PortfolioQuery {
   final String? region;
   final String? division;
   final String? area;
+  final String? branch;
   const PortfolioQuery({
     this.month,
     this.product = '',
     this.region,
     this.division,
     this.area,
+    this.branch,
   });
 
-  String get level => area != null
-      ? 'branch'
-      : division != null
-          ? 'area'
-          : region != null
-              ? 'division'
-              : 'region';
+  // Portfolio drills to the FO/officer level; the backend names it `officer`
+  // (NOT `employee` — cf. the collection/disbursement endpoints).
+  String get level => branch != null
+      ? 'officer'
+      : area != null
+          ? 'branch'
+          : division != null
+              ? 'area'
+              : region != null
+                  ? 'division'
+                  : 'region';
+
+  Map<String, dynamic> get parent => {
+        if (region != null) 'region': region,
+        if (division != null) 'division': division,
+        if (area != null) 'area': area,
+        if (branch != null) 'branch': branch,
+      };
 
   @override
   bool operator ==(Object other) =>
@@ -128,10 +141,12 @@ class PortfolioQuery {
       other.product == product &&
       other.region == region &&
       other.division == division &&
-      other.area == area;
+      other.area == area &&
+      other.branch == branch;
 
   @override
-  int get hashCode => Object.hash(month, product, region, division, area);
+  int get hashCode =>
+      Object.hash(month, product, region, division, area, branch);
 }
 
 // ── Disbursement ─────────────────────────────────────────────────────────────
@@ -389,9 +404,7 @@ class MisRepository {
         query: {
           'month': q.month,
           'product': _p(q.product),
-          'region': q.region,
-          'division': q.division,
-          'area': q.area,
+          ...q.parent,
         },
         parse: PortfolioSummary.fromJson,
       );
@@ -402,9 +415,7 @@ class MisRepository {
           'month': q.month,
           'level': q.level,
           'product': _p(q.product),
-          'region': q.region,
-          'division': q.division,
-          'area': q.area,
+          ...q.parent,
         },
         parse: (d) => _list(d, PortfolioUnitRow.fromJson),
       );

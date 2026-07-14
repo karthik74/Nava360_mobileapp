@@ -194,7 +194,9 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
         c += b.collectionCount;
       }
     }
+    // ignore: unused_local_variable  (used by the hidden snapshot cards below)
     final demand = d + s.npaCases;
+    // ignore: unused_local_variable  (used by the hidden snapshot cards below)
     final collection = c + (s.npa.isNotEmpty ? s.npa.first.accounts : 0);
 
     final donut = [
@@ -216,24 +218,26 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        MisSnapshotGrid(cards: [
-          MisSnapshotCard(
-              accent: 'indigo',
-              icon: Icons.layers_rounded,
-              label: 'Total regular demand',
-              value: misNum(demand),
-              sub: 'Regular + buckets + NPA'),
-          MisSnapshotCard(
-              accent: 'emerald',
-              icon: Icons.trending_up_rounded,
-              label: 'Collection',
-              value: misNum(collection)),
-          MisSnapshotCard(
-              accent: 'sky',
-              icon: Icons.percent_rounded,
-              label: 'Collection %',
-              value: misPct(collection, demand)),
-        ]),
+        // Top three snapshot cards — hidden for now (commented per request).
+        // Uncomment to restore.
+        // MisSnapshotGrid(cards: [
+        //   MisSnapshotCard(
+        //       accent: 'indigo',
+        //       icon: Icons.layers_rounded,
+        //       label: 'Total regular demand',
+        //       value: misNum(demand),
+        //       sub: 'Regular + buckets + NPA'),
+        //   MisSnapshotCard(
+        //       accent: 'emerald',
+        //       icon: Icons.trending_up_rounded,
+        //       label: 'Collection',
+        //       value: misNum(collection)),
+        //   MisSnapshotCard(
+        //       accent: 'sky',
+        //       icon: Icons.percent_rounded,
+        //       label: 'Collection %',
+        //       value: misPct(collection, demand)),
+        // ]),
         if (donut.any((s) => s.value > 0)) ...[
           const SizedBox(height: 14),
           GlassCard(

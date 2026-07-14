@@ -28,6 +28,7 @@ const _levelLabel = {
   'division': 'Division',
   'area': 'Area',
   'branch': 'Branch',
+  'officer': 'Officer',
 };
 
 class MisPortfolioScreen extends ConsumerStatefulWidget {
@@ -42,7 +43,11 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
   String? _month;
   String _product = '';
   bool _table = false;
-  String? _region, _division, _area;
+  String? _region, _division, _area, _branch;
+  // An opened field officer (leaf). `_empRow` carries that FO's bucket-wise
+  // portfolio, since `/portfolio/summary` cannot scope to an individual officer.
+  String? _emp, _empName;
+  PortfolioUnitRow? _empRow;
 
   void _drill(PortfolioUnitRow r) {
     setState(() {
@@ -50,24 +55,38 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
         _region = r.unit;
       } else if (_division == null) {
         _division = r.unit;
+      } else if (_area == null) {
+        _area = r.unit;
+      } else if (_branch == null) {
+        _branch = r.unit;
       } else {
-        _area ??= r.unit;
+        // Officer level — open the FO's own bucket-wise detail.
+        _emp = r.empId ?? r.unit;
+        _empName = r.unit;
+        _empRow = r;
       }
     });
   }
 
   void _resetTo(String? level) {
     setState(() {
+      _emp = _empName = null;
+      _empRow = null;
       switch (level) {
         case null:
-          _region = _division = _area = null;
+          _region = _division = _area = _branch = null;
           break;
         case 'region':
-          _division = _area = null;
+          _division = _area = _branch = null;
           break;
         case 'division':
-          _area = null;
+          _area = _branch = null;
           break;
+        case 'area':
+          _branch = null;
+          break;
+        case 'branch':
+          break; // keep the branch; only the opened officer is cleared
       }
     });
   }
@@ -77,7 +96,11 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
         if (_region != null) MisCrumb(_region!, onTap: () => _resetTo('region')),
         if (_division != null)
           MisCrumb(_division!, onTap: () => _resetTo('division')),
-        if (_area != null) MisCrumb(_area!),
+        if (_area != null) MisCrumb(_area!, onTap: () => _resetTo('area')),
+        if (_branch != null)
+          MisCrumb(_branch!,
+              onTap: _emp != null ? () => _resetTo('branch') : null),
+        if (_emp != null) MisCrumb(_empName ?? _emp!),
       ];
 
   @override
@@ -110,6 +133,7 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
       region: _region,
       division: _division,
       area: _area,
+      branch: _branch,
     );
     final summaryAsync = ref.watch(misPortfolioSummaryProvider(q));
 
@@ -150,17 +174,23 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
           const SizedBox(height: 12),
           MisBreadcrumb(crumbs: _crumbs()),
           const SizedBox(height: 14),
-          summaryAsync.when(
-            loading: () => const AppLoadingBlock(height: 200),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(misPortfolioSummaryProvider(q)),
+          if (_empRow != null)
+            // An opened field officer is a leaf: show that FO's bucket-wise
+            // portfolio (built from the drill row) and no further drill grid.
+            _summary(_empRow!.toSummary())
+          else ...[
+            summaryAsync.when(
+              loading: () => const AppLoadingBlock(height: 200),
+              error: (e, _) => AppErrorPanel(
+                message: e.toString(),
+                onRetry: () => ref.invalidate(misPortfolioSummaryProvider(q)),
+              ),
+              data: (s) => _summary(s),
             ),
-            data: (s) => _summary(s),
-          ),
-          const SizedBox(height: 18),
-          MisSectionTitle('By ${_levelLabel[q.level]!.toLowerCase()}'),
-          _grid(q),
+            const SizedBox(height: 18),
+            MisSectionTitle('By ${_levelLabel[q.level]!.toLowerCase()}'),
+            _grid(q),
+          ],
         ],
       ),
     );
@@ -169,14 +199,16 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
   Widget _summary(PortfolioSummary s) {
     double amt(String k) => s.amt(k);
     final total = amt('total');
+    // ignore: unused_local_variable  (used by the hidden Total Account card)
     final totalAcc = amt('total_acc');
     double bucketAcc(String k) => amt('${k}_acc');
     final bucketAccTotal =
         ['regular', 'sma0', 'sma1', 'pnpa', 'npa'].fold<double>(
             0, (sum, k) => sum + bucketAcc(k));
-    final activeAcc = ['regular', 'sma0', 'sma1', 'pnpa']
-        .fold<double>(0, (sum, k) => sum + bucketAcc(k));
-    final npaAcc = bucketAcc('npa');
+    // Used only by the (currently hidden) Active Accounts card:
+    // final activeAcc = ['regular', 'sma0', 'sma1', 'pnpa']
+    //     .fold<double>(0, (sum, k) => sum + bucketAcc(k));
+    // final npaAcc = bucketAcc('npa');
     final hasAcc = bucketAccTotal > 0;
 
     String pctContrib(double v) =>
@@ -185,24 +217,27 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        MisSnapshotGrid(cards: [
-          MisSnapshotCard(
-              accent: 'emerald',
-              icon: Icons.tag_rounded,
-              label: 'Total Account',
-              value: misNum(totalAcc)),
-          MisSnapshotCard(
-              accent: 'sky',
-              icon: Icons.show_chart_rounded,
-              label: 'Active Accounts',
-              value: hasAcc ? misNum(activeAcc) : '—',
-              sub: hasAcc ? 'NPA ${misNum(npaAcc)}' : 'no PAR data'),
-          MisSnapshotCard(
-              accent: 'indigo',
-              icon: Icons.account_balance_wallet_rounded,
-              label: 'POS (Amount)',
-              value: misRupees(total)),
-        ]),
+        // Snapshot cards — all hidden for now (commented per request).
+        // Uncomment the whole grid to restore.
+        // MisSnapshotGrid(cards: [
+        //   MisSnapshotCard(
+        //       accent: 'emerald',
+        //       icon: Icons.tag_rounded,
+        //       label: 'Total Account',
+        //       value: misNum(totalAcc)),
+        //   // Active Accounts card:
+        //   // MisSnapshotCard(
+        //   //     accent: 'sky',
+        //   //     icon: Icons.show_chart_rounded,
+        //   //     label: 'Active Accounts',
+        //   //     value: hasAcc ? misNum(activeAcc) : '—',
+        //   //     sub: hasAcc ? 'NPA ${misNum(npaAcc)}' : 'no PAR data'),
+        //   MisSnapshotCard(
+        //       accent: 'indigo',
+        //       icon: Icons.account_balance_wallet_rounded,
+        //       label: 'POS (Amount)',
+        //       value: misRupees(total)),
+        // ]),
         const SizedBox(height: 18),
         const MisSectionTitle('Bucket-wise Portfolio'),
         MisTable<(String, String)>(
@@ -250,7 +285,9 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
 
   Widget _grid(PortfolioQuery q) {
     final unitsAsync = ref.watch(misPortfolioUnitsProvider(q));
-    final canDrill = _area == null; // branch level is a leaf
+    // region → division → area → branch → officer. Every level is tappable:
+    // tapping an officer opens that FO's bucket-wise detail (see _drill).
+    final isEmp = q.level == 'officer';
     return unitsAsync.when(
       loading: () => const AppLoadingBlock(height: 160),
       error: (e, _) => AppErrorPanel(
@@ -263,7 +300,7 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
         }
         if (_table) {
           return MisTable<PortfolioUnitRow>(
-            onRowTap: canDrill ? _drill : null,
+            onRowTap: _drill,
             columns: [
               MisColumn(_levelLabel[q.level]!, (r) => Text(r.unit)),
               MisColumn(
@@ -281,6 +318,7 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
             for (final r in rows) ...[
               MisMetricColumnsCard(
                 title: r.unit,
+                subtitle: isEmp ? r.empId : null,
                 badge: StatusPill(
                   label: 'NPA ${r.npaPct.toStringAsFixed(1)}%',
                   color: r.npaPct > 20 ? AppColors.danger : AppColors.muted,
@@ -290,7 +328,7 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
                   ('POS', misRupees(r.total)),
                   ('NPA', misRupees(r.npa)),
                 ],
-                onTap: canDrill ? () => _drill(r) : null,
+                onTap: () => _drill(r),
               ),
               const SizedBox(height: 8),
             ],

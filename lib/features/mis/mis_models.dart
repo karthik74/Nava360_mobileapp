@@ -320,6 +320,7 @@ class PortfolioSummary {
 /// Per-unit pivot row from `/portfolio/by-unit`.
 class PortfolioUnitRow {
   final String unit;
+  final String? empId; // only at the officer (FO) drill level
   final double total;
   final double npa;
   final double npaAcc;
@@ -327,9 +328,15 @@ class PortfolioUnitRow {
   final double sma0Acc;
   final double sma1Acc;
   final double pnpaAcc;
+  // Full bucket-wise pivot (status_name -> amount / account count), identical in
+  // shape to a PortfolioSummary's `pos`. Lets an opened officer render the same
+  // bucket-wise detail as a branch, since `/portfolio/summary` cannot scope to
+  // an individual FO.
+  final Map<String, double> pos;
 
   const PortfolioUnitRow({
     this.unit = '',
+    this.empId,
     this.total = 0,
     this.npa = 0,
     this.npaAcc = 0,
@@ -337,10 +344,17 @@ class PortfolioUnitRow {
     this.sma0Acc = 0,
     this.sma1Acc = 0,
     this.pnpaAcc = 0,
+    this.pos = const {},
   });
+
+  static const _posKeys = [
+    'regular', 'sma0', 'sma1', 'pnpa', 'npa', 'total',
+    'total_acc', 'regular_acc', 'sma0_acc', 'sma1_acc', 'pnpa_acc', 'npa_acc',
+  ];
 
   factory PortfolioUnitRow.fromJson(Map<String, dynamic> j) => PortfolioUnitRow(
         unit: misToStr(j['unit']) ?? '',
+        empId: misToStr(j['emp_id']),
         total: misToDouble(j['total']) ?? 0,
         npa: misToDouble(j['npa']) ?? 0,
         npaAcc: misToDouble(j['npa_acc']) ?? 0,
@@ -348,11 +362,16 @@ class PortfolioUnitRow {
         sma0Acc: misToDouble(j['sma0_acc']) ?? 0,
         sma1Acc: misToDouble(j['sma1_acc']) ?? 0,
         pnpaAcc: misToDouble(j['pnpa_acc']) ?? 0,
+        pos: {for (final k in _posKeys) k: misToDouble(j[k]) ?? 0},
       );
 
   double get activeAcc => regularAcc + sma0Acc + sma1Acc + pnpaAcc;
   double get totalAcc => activeAcc + npaAcc;
   double get npaPct => total > 0 ? (npa / total) * 100 : 0;
+
+  /// This row's bucket breakdown as a PortfolioSummary, so an opened officer
+  /// reuses the same summary UI as a branch.
+  PortfolioSummary toSummary() => PortfolioSummary(pos: pos);
 }
 
 // ── Disbursement ─────────────────────────────────────────────────────────────

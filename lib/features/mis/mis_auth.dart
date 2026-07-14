@@ -91,9 +91,17 @@ class MisAuthController extends StateNotifier<AsyncValue<MisSession?>> {
     if (id.isEmpty) return;
     if (state.isLoading) return; // a sign-in is already in flight
     final cur = state.asData?.value;
-    if (cur?.user != null &&
-        cur!.user!.empId.toUpperCase() == id.toUpperCase()) {
-      return; // already signed in as the right user
+    final u = cur?.user;
+    // Treat a cached session that carries neither designation nor role as
+    // incomplete (e.g. persisted by an older build) and re-authenticate to
+    // refresh the profile — otherwise the dashboard falls back to the scope
+    // tier label ("CEO / Director") forever for that user.
+    final hasProfile = (u?.designation?.trim().isNotEmpty ?? false) ||
+        (u?.role?.trim().isNotEmpty ?? false);
+    if (u != null &&
+        u.empId.toUpperCase() == id.toUpperCase() &&
+        hasProfile) {
+      return; // already signed in as the right user with a full profile
     }
     try {
       await signIn(id, deriveMisPassword(id));
