@@ -179,10 +179,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '/notifications',
         builder: (_, __) => const NotificationsScreen(),
       ),
-      GoRoute(
-        path: '/chats',
-        builder: (_, __) => const ChatListScreen(),
-      ),
+      // NOTE: /chats (the list) lives INSIDE the ShellRoute below so it renders
+      // as a bottom-nav tab with the persistent nav bar. Only the thread
+      // (/chats/:id) stays top-level as a pushed full-screen route.
       GoRoute(
         path: '/chats/:id',
         builder: (_, state) => ChatThreadByIdScreen(
@@ -378,6 +377,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(path: '/leaves', builder: (_, __) => const LeavesScreen()),
           GoRoute(path: '/tasks', builder: (_, __) => const CustomerTasksHub()),
+          GoRoute(path: '/chats', builder: (_, __) => const ChatListScreen()),
           GoRoute(path: '/team', builder: (_, __) => const TeamScreen()),
           GoRoute(path: '/performance', builder: (_, __) => const TeamPerformanceScreen()),
           GoRoute(path: '/hrms', builder: (_, __) => const HrmsScreen()),

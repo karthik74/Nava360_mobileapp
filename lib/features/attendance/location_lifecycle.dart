@@ -19,7 +19,11 @@ final locationLifecycleProvider = Provider<void>((ref) {
       final isUser = next.asData?.value != null;
       if (!wasUser && isUser) {
         // Fire-and-forget — tracker handles its own errors.
-        ref.read(locationTrackerProvider.notifier).restoreIfActive();
+        final tracker = ref.read(locationTrackerProvider.notifier);
+        tracker.restoreIfActive();
+        // Drain any pings queued offline in a previous session (e.g. captured
+        // with no internet, then checked out) now that we're logged in/online.
+        tracker.syncPendingPings();
       } else if (wasUser && !isUser) {
         ref.read(locationTrackerProvider.notifier).stop(flushBuffer: false);
       }

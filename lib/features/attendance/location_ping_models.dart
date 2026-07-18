@@ -21,6 +21,16 @@ class LocationPing {
         if (accuracyMeters != null) 'accuracyMeters': accuracyMeters,
         if (speedMps != null) 'speedMps': speedMps,
       };
+
+  /// Rebuilds a ping from its persisted [toJson] form (offline queue).
+  static LocationPing fromJson(Map<String, dynamic> json) => LocationPing(
+        recordedAt:
+            DateTime.parse(json['recordedAt'] as String).toUtc(),
+        latitude: (json['latitude'] as num).toDouble(),
+        longitude: (json['longitude'] as num).toDouble(),
+        accuracyMeters: (json['accuracyMeters'] as num?)?.toDouble(),
+        speedMps: (json['speedMps'] as num?)?.toDouble(),
+      );
 }
 
 class LocationPingBatch {

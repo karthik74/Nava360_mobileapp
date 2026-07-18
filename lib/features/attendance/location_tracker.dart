@@ -1,12 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/branding.dart';
 import 'location_ping_models.dart';
+import 'location_ping_store.dart';
 import 'location_repository.dart';
 
 /// Public state of the tracker, exposed via Riverpod.
@@ -73,10 +76,20 @@ class LocationTrackerState {
 ///
 /// The tracker self-flushes when its buffer reaches [_flushAtCount] or
 /// [_flushIntervalSeconds] have passed since the last successful upload.
-class LocationTracker extends StateNotifier<LocationTrackerState> {
-  LocationTracker(this._repo) : super(LocationTrackerState.idle);
+class LocationTracker extends StateNotifier<LocationTrackerState>
+    with WidgetsBindingObserver {
+  LocationTracker(this._repo) : super(LocationTrackerState.idle) {
+    // Observe app lifecycle so we can self-heal (resume a killed session) and
+    // drain the offline queue the moment the app returns to the foreground.
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   final LocationRepository _repo;
+
+  /// Durable offline queue — every captured ping is persisted here and removed
+  /// only once the server confirms it, so the trail survives app restarts / no
+  /// internet and syncs when connectivity returns.
+  final LocationPingStore _store = LocationPingStore.instance;
 
   // ---- Tunables ----
   static const Duration _intervalDefault = Duration(minutes: 5);
@@ -130,8 +143,13 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
         .listen(_onPosition, onError: _onStreamError);
     _ticker = Timer.periodic(_tick, (_) => _maybeCapture());
     // Foreground heartbeat. The location stream also fires heartbeats (see
-    // _onPosition) so they keep flowing while the app is backgrounded.
-    _statusTicker = Timer.periodic(_statusInterval, (_) => _maybeSendStatus(tracking: true));
+    // _onPosition) so they keep flowing while the app is backgrounded. Also
+    // attempt a flush here so queued pings sync even when the device is
+    // stationary (no new captures) after connectivity is restored.
+    _statusTicker = Timer.periodic(_statusInterval, (_) {
+      _maybeSendStatus(tracking: true);
+      _maybeAutoFlush();
+    });
 
     state = state.copyWith(
       active: true,
@@ -142,6 +160,19 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
     );
     _lastStatusSentAt = DateTime.now();
     unawaited(_sendStatus(tracking: true)); // report ON immediately
+
+    // Re-load any pings persisted but not yet uploaded (a previous session that
+    // ended offline, or an app kill) so they sync as soon as we're online again.
+    try {
+      final persisted = await _store.load(employeeId);
+      if (persisted.isNotEmpty) {
+        _buffer.insertAll(0, persisted); // oldest first
+        state = state.copyWith(bufferedCount: _buffer.length);
+        _maybeAutoFlush();
+      }
+    } catch (_) {
+      // A read failure must not block tracking.
+    }
 
     // Try to capture an immediate baseline sample so the user sees activity right away.
     try {
@@ -210,6 +241,46 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
     final empId = int.tryParse(raw);
     if (empId == null) return;
     await start(empId);
+  }
+
+  /// Uploads any pings left in the durable offline queue — e.g. captured while
+  /// the employee had no internet and then checked out, so no tracking session
+  /// is active to drain them. Call once on app start / when back online. The
+  /// currently-tracked employee (if any) is skipped, since [start]/[_flush]
+  /// already own that queue and draining it here would race.
+  Future<void> syncPendingPings() async {
+    try {
+      final grouped = await _store.loadGrouped();
+      for (final entry in grouped.entries) {
+        final empId = entry.key;
+        final pings = entry.value;
+        if (pings.isEmpty || empId == state.employeeId) continue;
+        try {
+          await _repo.uploadBatch(
+            LocationPingBatch(employeeId: empId, pings: pings),
+          );
+          await _store.removeOldest(empId, pings.length);
+        } catch (_) {
+          // Still offline — leave them queued for the next attempt.
+        }
+      }
+    } catch (_) {
+      // Never let a queue-drain failure surface at startup.
+    }
+  }
+
+  /// When the app returns to the foreground: drain the offline queue promptly
+  /// and, if a session should be running but was killed by the OS, resume it —
+  /// so no ping sits unsynced and tracking self-heals without a manual re-start.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
+    if (lifecycle != AppLifecycleState.resumed) return;
+    if (state.active) {
+      _maybeAutoFlush(); // push the active employee's buffered/queued pings
+    } else {
+      unawaited(restoreIfActive()); // a killed session? bring it back
+    }
+    unawaited(syncPendingPings()); // leftover queues from prior sessions
   }
 
   // -------------------- internals --------------------
@@ -282,6 +353,12 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
       speedMps: p.speed,
     );
     _buffer.add(ping);
+    // Persist immediately so an offline ping is never lost if the OS kills the
+    // app before it can be uploaded (this is what fills the gaps in the trail).
+    final empId = state.employeeId;
+    if (empId != null) {
+      unawaited(_store.append(empId, [ping]));
+    }
     _lastCaptureAt = DateTime.now();
     _lastCapturedPosition = p;
     state = state.copyWith(
@@ -302,12 +379,16 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
 
   Future<void> _flush() async {
     if (_buffer.isEmpty || state.employeeId == null) return;
+    final empId = state.employeeId!;
     final pending = List<LocationPing>.from(_buffer);
     try {
       final saved = await _repo.uploadBatch(
-        LocationPingBatch(employeeId: state.employeeId!, pings: pending),
+        LocationPingBatch(employeeId: empId, pings: pending),
       );
       _buffer.removeRange(0, pending.length);
+      // Drop the confirmed pings from the durable queue (FIFO — pings captured
+      // during this in-flight upload stay queued for the next flush).
+      await _store.removeOldest(empId, pending.length);
       state = state.copyWith(
         lastFlushedAt: DateTime.now(),
         bufferedCount: _buffer.length,
@@ -315,7 +396,7 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
         clearError: true,
       );
     } catch (e) {
-      // Keep buffer so the next tick retries.
+      // Keep buffer AND the durable queue so the next tick / next session retries.
       state = state.copyWith(lastError: e.toString());
       if (kDebugMode) debugPrint('Location flush failed: $e');
     }
@@ -351,7 +432,28 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
       return false;
     }
 
+    // Best-effort: ask the OS to exempt the app from battery optimisation so the
+    // foreground tracking service isn't killed/dozed — the single biggest lever
+    // for keeping GPS capture (and therefore pings) alive in the background.
+    await _requestBatteryExemption();
+
     return true;
+  }
+
+  /// Prompts (once) to disable battery optimisation for this app on Android.
+  /// Never blocks tracking — a denied/failed request just means the OS may kill
+  /// the service more aggressively; the durable offline queue still protects
+  /// already-captured pings.
+  Future<void> _requestBatteryExemption() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      final status = await Permission.ignoreBatteryOptimizations.status;
+      if (!status.isGranted) {
+        await Permission.ignoreBatteryOptimizations.request();
+      }
+    } catch (_) {
+      // Permission unavailable on this OS/OEM — ignore.
+    }
   }
 
   /// Platform-specific stream settings. We use a TIME interval (not a distance
@@ -385,7 +487,7 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
         activityType: ActivityType.other,
       );
     }
-    return LocationSettings(
+    return const LocationSettings(
       accuracy: LocationAccuracy.high,
       distanceFilter: 0,
     );
@@ -393,6 +495,7 @@ class LocationTracker extends StateNotifier<LocationTrackerState> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _streamSub?.cancel();
     _ticker?.cancel();
     _statusTicker?.cancel();

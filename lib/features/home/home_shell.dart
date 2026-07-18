@@ -124,6 +124,7 @@ class HomeShell extends ConsumerWidget {
     if (loc.startsWith('/attendance')) return 'Attendance';
     if (loc.startsWith('/leaves')) return 'Leaves';
     if (loc.startsWith('/tasks')) return 'Tasks';
+    if (loc.startsWith('/chats')) return 'Chats';
     if (loc.startsWith('/team')) return 'Team';
     if (loc.startsWith('/performance')) return 'Performance';
     return Branding.current.productName;

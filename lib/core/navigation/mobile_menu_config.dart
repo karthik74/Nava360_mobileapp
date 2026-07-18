@@ -106,7 +106,10 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'hrms.attendance', label: 'Attendance', route: '/attendance', icon: Icons.fingerprint_rounded, module: MobileModule.hrms, order: 3),
   MobileMenuItem(key: 'hrms.leaves', label: 'Leaves', route: '/leaves', icon: Icons.event_available_rounded, module: MobileModule.hrms, order: 4),
   MobileMenuItem(key: 'hrms.tasks', label: 'Tasks', route: '/tasks', icon: Icons.task_alt_rounded, module: MobileModule.hrms, order: 5),
-  MobileMenuItem(key: 'hrms.chats', label: 'Chats', route: '/chats', icon: Icons.chat_rounded, module: MobileModule.hrms, order: 6, featureFlag: 'FEATURE_CHAT'),
+  // Chats is a bottom-nav root (order 2) — NOT a drawer/HRMS-grid item.
+  // showInBottomNav also excludes it from menuFor()/allMenuItems(), so it no
+  // longer appears in the left navigation menu.
+  MobileMenuItem(key: 'hrms.chats', label: 'Chats', route: '/chats', icon: Icons.chat_rounded, module: MobileModule.hrms, order: 2, showInBottomNav: true, featureFlag: 'FEATURE_CHAT'),
   MobileMenuItem(key: 'hrms.interviews', label: 'My Interviews', route: '/interviews', icon: Icons.event_note_rounded, module: MobileModule.hrms, order: 7, requiredPermissions: ['INTERVIEW_VIEW']),
   MobileMenuItem(key: 'hrms.requisitions', label: 'Job Requisitions', route: '/requisitions', icon: Icons.work_outline_rounded, module: MobileModule.hrms, order: 8, requiredPermissions: ['REQUISITION_VIEW']),
   MobileMenuItem(key: 'hrms.helpdesk', label: 'Helpdesk', route: '/helpdesk', icon: Icons.support_agent_rounded, module: MobileModule.hrms, order: 8, requiredPermissions: ['HELPDESK_CREATE_TICKET'], moduleCode: 'helpdesk'),
