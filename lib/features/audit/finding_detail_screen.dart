@@ -83,13 +83,29 @@ class FindingDetailScreen extends ConsumerWidget {
                   parentId: findingId,
                   executionId: detail.finding.executionId,
                 ),
-                if (canBm) ...[
+                // Compliance can be submitted only while the finding awaits action
+                // (not once already submitted, until a verifier reopens/rejects it).
+                if (canBm && detail.canSubmitCompliance) ...[
                   const SizedBox(height: 18),
                   _CapaForm(findingId: findingId),
+                ] else if (canBm && detail.complianceSubmitted) ...[
+                  const SizedBox(height: 18),
+                  const _InfoNote(
+                    'Compliance has been submitted and is awaiting verification. '
+                    'You can submit again only if a verifier rejects or reopens this finding.',
+                  ),
                 ],
-                if (canVerify) ...[
+                // Verification is available only to verifiers, and only once
+                // compliance has been submitted.
+                if (canVerify && detail.canVerify) ...[
                   const SizedBox(height: 18),
                   _VerifyForm(findingId: findingId),
+                ] else if (canVerify && !detail.canVerify) ...[
+                  const SizedBox(height: 18),
+                  const _InfoNote(
+                    'Verification becomes available once the branch manager submits '
+                    'compliance for this finding.',
+                  ),
                 ],
               ],
             ),
@@ -322,17 +338,12 @@ class _CapaForm extends ConsumerStatefulWidget {
 class _CapaFormState extends ConsumerState<_CapaForm> {
   final _rootCause = TextEditingController();
   final _corrective = TextEditingController();
-  final _preventive = TextEditingController();
-  final _remarks = TextEditingController();
-  DateTime? _closure;
   bool _busy = false;
 
   @override
   void dispose() {
     _rootCause.dispose();
     _corrective.dispose();
-    _preventive.dispose();
-    _remarks.dispose();
     super.dispose();
   }
 
@@ -352,25 +363,17 @@ class _CapaFormState extends ConsumerState<_CapaForm> {
       await ref.read(auditRepositoryProvider).submitCapa(widget.findingId, {
         'rootCause': _rootCause.text.trim(),
         'correctiveAction': _corrective.text.trim(),
-        'preventiveAction': _preventive.text.trim(),
-        'complianceRemarks': _remarks.text.trim(),
-        if (_closure != null)
-          'expectedClosureDate':
-              DateFormat('yyyy-MM-dd').format(_closure!),
       });
       ref.invalidate(findingDetailProvider(widget.findingId));
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('CAPA submitted.'),
+          content: Text('Compliance submitted.'),
           backgroundColor: AppColors.success,
         ),
       );
       _rootCause.clear();
       _corrective.clear();
-      _preventive.clear();
-      _remarks.clear();
-      setState(() => _closure = null);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -384,26 +387,18 @@ class _CapaFormState extends ConsumerState<_CapaForm> {
   @override
   Widget build(BuildContext context) {
     return AuditSectionCard(
-      title: 'Submit CAPA (Branch Manager)',
+      title: 'Submit compliance',
       icon: Icons.edit_note_rounded,
       children: [
         _field(_rootCause, 'Root cause *', maxLines: 2),
         _field(_corrective, 'Corrective action *', maxLines: 2),
-        _field(_preventive, 'Preventive action', maxLines: 2),
-        _field(_remarks, 'Compliance remarks', maxLines: 2),
-        const SizedBox(height: 8),
-        _DatePickerRow(
-          label: 'Expected closure date',
-          value: _closure,
-          onPick: (d) => setState(() => _closure = d),
-        ),
         const SizedBox(height: 12),
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
             onPressed: _busy ? null : _submit,
             icon: const Icon(Icons.send_rounded, size: 18),
-            label: Text(_busy ? 'Submitting…' : 'Submit CAPA'),
+            label: Text(_busy ? 'Submitting…' : 'Submit compliance'),
           ),
         ),
       ],
@@ -521,6 +516,42 @@ class _VerifyFormState extends ConsumerState<_VerifyForm> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// A small informational note card (e.g. "compliance already submitted").
+class _InfoNote extends StatelessWidget {
+  const _InfoNote(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded, size: 18, color: AppColors.muted),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: AppColors.inkSoft,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
