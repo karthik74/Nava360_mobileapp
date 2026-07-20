@@ -373,11 +373,15 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
         DateTime.now().difference(state.lastFlushedAt!) >=
             const Duration(seconds: _flushIntervalSeconds);
     if (byCount || (byAge && _buffer.isNotEmpty)) {
-      _flushInFlight ??= _flush().whenComplete(() => _flushInFlight = null);
+      _flushInFlight ??=
+          _flush(heartbeat: true).whenComplete(() => _flushInFlight = null);
     }
   }
 
-  Future<void> _flush() async {
+  /// Uploads the buffered pings. When [heartbeat] is true, a location heartbeat
+  /// is piggybacked onto a successful upload (see below) — pass false for the
+  /// final checkout flush, which has already reported tracking:false.
+  Future<void> _flush({bool heartbeat = false}) async {
     if (_buffer.isEmpty || state.employeeId == null) return;
     final empId = state.employeeId!;
     final pending = List<LocationPing>.from(_buffer);
@@ -395,6 +399,17 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
         sentCount: state.sentCount + saved,
         clearError: true,
       );
+      // Piggyback a status heartbeat on the just-confirmed connection. Heartbeats
+      // are otherwise best-effort/fire-and-forget with no retry queue, so a run of
+      // failures (poor signal, or the OS deferring background requests) freezes the
+      // server's status at an old fix while the durable ping queue still carries the
+      // trail forward. Sending here — right after a successful upload, when the
+      // network is known-good — keeps the on/off status (and its position) advancing
+      // in step with the trail. Guarded to the active session so it never overrides
+      // the tracking:false we send at checkout.
+      if (heartbeat && state.active) {
+        _maybeSendStatus(tracking: true);
+      }
     } catch (e) {
       // Keep buffer AND the durable queue so the next tick / next session retries.
       state = state.copyWith(lastError: e.toString());
