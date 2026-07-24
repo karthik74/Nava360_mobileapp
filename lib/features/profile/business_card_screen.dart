@@ -14,6 +14,11 @@ import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import '../home/home_shell.dart' show employeeProfileProvider;
 
+/// Company logo shown on the right of the card (served from the HRMS file
+/// store). Falls back to the bundled asset if it can't be fetched.
+const String kBusinessCardLogoUrl =
+    'https://hrms.navachetanalivelihoods.com/api/files/907?t=pRT9fGBECrokzcKy3yoA_pGv2RUaeZglogc7rsZp-JI';
+
 /// vCard 3.0 for the QR code — scanning it saves the contact directly.
 /// Mirrors the reference module's generator (github.com/Raghunandan1157/
 /// digital-business-card script.js), but org/website come from branding
@@ -103,6 +108,12 @@ class _BusinessCardScreenState extends ConsumerState<BusinessCardScreen> {
     if (_sharing) return;
     setState(() => _sharing = true);
     try {
+      // Ensure the network logo is fully loaded & painted, otherwise the
+      // rasterized card would capture a blank logo area.
+      if (mounted) {
+        await precacheImage(const NetworkImage(kBusinessCardLogoUrl), context);
+        await WidgetsBinding.instance.endOfFrame;
+      }
       final boundary = _cardKey.currentContext!.findRenderObject()
           as RenderRepaintBoundary;
       // The card lays out at its design size (700×380); 2x makes a crisp
@@ -206,17 +217,20 @@ class _BusinessCardScreenState extends ConsumerState<BusinessCardScreen> {
                       ),
                     ),
                     const SizedBox(height: 18),
-                    const AppSectionHeader(title: 'Card details'),
+                    const AppSectionHeader(
+                      title: 'Card details',
+                      subtitle:
+                          'Name & designation are filled from your profile — '
+                          'edit your contact details below',
+                    ),
                     const SizedBox(height: 8),
-                    _field('Full name', Icons.person_outline_rounded, _name),
-                    _field('Designation', Icons.work_outline_rounded,
-                        _designation),
-                    _field('Phone', Icons.phone_outlined, _phone,
+                    // Name & designation are auto-filled from the profile and
+                    // shown on the card; only the contact details are editable.
+                    _field('Mobile', Icons.phone_outlined, _phone,
                         keyboard: TextInputType.phone),
                     _field('Email', Icons.email_outlined, _email,
                         keyboard: TextInputType.emailAddress),
-                    _field('Office location', Icons.location_on_outlined,
-                        _location,
+                    _field('Address', Icons.location_on_outlined, _location,
                         lines: 3),
                     const SizedBox(height: 14),
                     SizedBox(
@@ -322,17 +336,17 @@ class BusinessCardView extends StatelessWidget {
                               fontFamily: 'PlayfairDisplay',
                               fontVariations: [ui.FontVariation('wght', 700)],
                               fontWeight: FontWeight.w700,
-                              fontSize: 26,
+                              fontSize: 34,
                               color: lime,
                               letterSpacing: 0.5,
                               height: 1.15,
                             ),
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(height: 4),
                           Text(
                             designation.isEmpty ? 'Designation' : designation,
                             style: const TextStyle(
-                              fontSize: 14,
+                              fontSize: 18,
                               color: mint,
                               letterSpacing: 0.3,
                             ),
@@ -343,12 +357,12 @@ class BusinessCardView extends StatelessWidget {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _contactRow(Icons.phone, phone, 13),
+                        _contactRow(Icons.phone, phone, 16),
                         const SizedBox(height: 12),
-                        _contactRow(Icons.language, email, 13),
+                        _contactRow(Icons.language, email, 16),
                         const SizedBox(height: 12),
-                        _contactRow(Icons.location_on, location, 11.5,
-                            color: const Color(0xFFE8E8E8), height: 1.55),
+                        _contactRow(Icons.location_on, location, 14,
+                            color: const Color(0xFFE8E8E8), height: 1.5),
                       ],
                     ),
                   ],
@@ -362,7 +376,15 @@ class BusinessCardView extends StatelessWidget {
                 child: ConstrainedBox(
                   constraints:
                       const BoxConstraints(maxWidth: 200, maxHeight: 240),
-                  child: Image.asset('assets/logo.png', fit: BoxFit.contain),
+                  child: Image.network(
+                    kBusinessCardLogoUrl,
+                    fit: BoxFit.contain,
+                    // Keep whatever's painted stable across rebuilds, and fall
+                    // back to the bundled logo if the fetch fails.
+                    gaplessPlayback: true,
+                    errorBuilder: (_, __, ___) =>
+                        Image.asset('assets/logo.png', fit: BoxFit.contain),
+                  ),
                 ),
               ),
             ),
@@ -378,12 +400,12 @@ class BusinessCardView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 24,
-          height: 24,
+          width: 28,
+          height: 28,
           margin: const EdgeInsets.only(top: 2),
           decoration:
               const BoxDecoration(color: lime, shape: BoxShape.circle),
-          child: Icon(icon, size: 13, color: Colors.white),
+          child: Icon(icon, size: 16, color: Colors.white),
         ),
         const SizedBox(width: 12),
         Expanded(

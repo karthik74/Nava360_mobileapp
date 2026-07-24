@@ -259,6 +259,8 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
     final canSubmit = user?.hasPermission('AUDIT_SUBMIT') ?? false;
     final canBm = user?.hasPermission('AUDIT_BM_COMPLIANCE') ?? false;
     final canVerify = user?.hasPermission('AUDIT_VERIFY') ?? false;
+    final canSupervisorApprove =
+        user?.hasPermission('AUDIT_SUPERVISOR_APPROVE') ?? false;
 
     final btns = <Widget>[];
 
@@ -284,6 +286,36 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
           () => ref.read(auditRepositoryProvider).sendToBm(widget.planId),
           successMsg: 'Sent to Branch Manager',
         ),
+      ));
+    }
+
+    // The auditor's supervisor approves a submitted audit (with findings) before
+    // the branch manager can act. Only the reporting manager / AUDIT_ADMIN passes
+    // the backend guard; the button just needs the permission to appear.
+    if (canSupervisorApprove && status == 'SUPERVISOR_APPROVAL_PENDING') {
+      btns.add(_SecondaryAction(
+        label: 'Approve (supervisor)',
+        icon: Icons.verified_rounded,
+        busy: _busy,
+        onTap: () => _run(
+          () => ref.read(auditRepositoryProvider).supervisorApprove(widget.planId),
+          successMsg: 'Approved — branch action pending',
+        ),
+      ));
+      btns.add(_DangerAction(
+        label: 'Reject',
+        icon: Icons.close_rounded,
+        busy: _busy,
+        onTap: () async {
+          final reason = await _askReason('Reject audit');
+          if (reason == null) return;
+          await _run(
+            () => ref
+                .read(auditRepositoryProvider)
+                .supervisorReject(widget.planId, reason),
+            successMsg: 'Sent back to auditor',
+          );
+        },
       ));
     }
 

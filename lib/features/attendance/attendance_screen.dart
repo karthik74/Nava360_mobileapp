@@ -149,8 +149,9 @@ class _MonthData {
   final List<NonWorkingRule> nonworking;
   final Map<String, String> regs; // date → regularization status
   final Set<String> pendingLeaves; // dates with a PENDING leave request
+  final Set<String> approvedLeaves; // dates with an APPROVED leave request
   const _MonthData(this.cycle, this.recordsByDate, this.holidays,
-      this.nonworking, this.regs, this.pendingLeaves);
+      this.nonworking, this.regs, this.pendingLeaves, this.approvedLeaves);
 }
 
 /// key = "year:month1:cycleStartDay" (month is 1-indexed)
@@ -163,7 +164,8 @@ final _monthDataProvider =
   final sd = int.parse(parts[2]);
   final cycle = _buildCycleDates(y, m, sd);
   if (user?.employeeId == null || cycle.isEmpty) {
-    return _MonthData(cycle, const {}, const {}, const [], const {}, const {});
+    return _MonthData(
+        cycle, const {}, const {}, const [], const {}, const {}, const {});
   }
   final fmt = DateFormat('yyyy-MM-dd');
   final from = fmt.format(cycle.first);
@@ -175,16 +177,17 @@ final _monthDataProvider =
   final nonworking = await repo.listNonWorkingDays();
   final regs =
       await repo.myRegularizationStatusByDate(user.employeeId!, from: from, to: to);
-  final pendingLeaves = await ref
+  final leaveDates = await ref
       .watch(leaveRepositoryProvider)
-      .myPendingLeaveDates(user.employeeId!, from: from, to: to);
+      .myLeaveDates(user.employeeId!, from: from, to: to);
   return _MonthData(
     cycle,
     {for (final r in records) r.date: r},
     holidays,
     nonworking,
     regs,
-    pendingLeaves,
+    leaveDates.pending,
+    leaveDates.approved,
   );
 });
 
@@ -301,13 +304,22 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
       final isFuture = date.isAfter(todayStart);
       final regStatus = data.regs[iso];
       final leavePending = data.pendingLeaves.contains(iso);
+      final leaveApproved = data.approvedLeaves.contains(iso);
       // Past/today days always show. Future days are normally hidden, but a future
-      // day with a pending leave (leaves are usually future-dated) or pending
-      // regularization must still appear so the request shows on its exact day.
-      if (isFuture && !(leavePending || regStatus == 'PENDING')) continue;
+      // day with a pending/approved leave (leaves are usually future-dated) or
+      // pending regularization must still appear so it shows on its exact day.
+      if (isFuture && !(leavePending || leaveApproved || regStatus == 'PENDING')) {
+        continue;
+      }
       final holidayName = data.holidays[iso];
       final rec = data.recordsByDate[iso];
-      final bucket = _deriveBucket(date, rec, holidayName, data.nonworking);
+      var bucket = _deriveBucket(date, rec, holidayName, data.nonworking);
+      // An approved leave never writes an ON_LEAVE attendance row, so the day would
+      // otherwise fall through to Absent (or Upcoming, if future). Show it as On
+      // Leave — but keep a real Present/Half-day/Holiday/Non-working status intact.
+      if (leaveApproved && (bucket == 'absent' || bucket == 'future')) {
+        bucket = 'leave';
+      }
       if (counts.containsKey(bucket)) counts[bucket] = counts[bucket]! + 1;
       if (rec?.workingHours != null) totalHours += rec!.workingHours!;
       cells.add(_DayCellData(

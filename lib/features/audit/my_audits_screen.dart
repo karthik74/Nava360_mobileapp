@@ -26,6 +26,7 @@ const _kStatusFilters = <({String? value, String label})>[
   (value: null, label: 'All'),
   (value: 'IN_PROGRESS', label: 'In Progress'),
   (value: 'SUBMITTED', label: 'Submitted'),
+  (value: 'SUPERVISOR_APPROVAL_PENDING', label: 'Supervisor Approval'),
   (value: 'BM_ACTION_PENDING', label: 'Sent to BM'),
   (value: 'VERIFICATION_PENDING', label: 'BM Submitted'),
   (value: 'CLOSED', label: 'Closed'),

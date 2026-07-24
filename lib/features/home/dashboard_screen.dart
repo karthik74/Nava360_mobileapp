@@ -12,6 +12,8 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../announcements/announcements_models.dart';
+import '../announcements/announcements_repository.dart';
 import '../attendance/attendance_models.dart';
 import '../attendance/attendance_repository.dart';
 import '../attendance/location_tracker.dart';
@@ -182,6 +184,37 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         await ref.read(locationTrackerProvider.notifier).stop();
         _showSnack('Checked out successfully.');
       } else {
+        // Gate: any published announcement that requires acknowledgement and is
+        // still unacknowledged must be acknowledged before the employee can
+        // check in. Blocks here and sends them to the Announcements screen.
+        final pending = await _pendingMandatoryAcks();
+        if (pending.isNotEmpty) {
+          if (!mounted) return;
+          final go = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Acknowledgement required'),
+              content: Text(
+                pending.length == 1
+                    ? 'You have 1 announcement that must be acknowledged before you can check in.'
+                    : 'You have ${pending.length} announcements that must be acknowledged before you can check in.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Not now'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Review & acknowledge'),
+                ),
+              ],
+            ),
+          );
+          if (go == true && mounted) context.push('/announcements');
+          return; // check-in stays blocked until they acknowledge
+        }
+
         await ref.read(locationTrackerProvider.notifier).start(employeeId);
         final tracker = ref.read(locationTrackerProvider);
         if (!tracker.active) {
@@ -224,6 +257,26 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       _showSnack(e.toString());
     } finally {
       if (mounted) setState(() => _attendanceActionBusy = false);
+    }
+  }
+
+  /// Published announcements addressed to this employee that REQUIRE
+  /// acknowledgement and are still unacknowledged (and not expired) — these must
+  /// be acknowledged before checking in. Fails open on a network error so a
+  /// transient issue never traps the employee out of attendance.
+  Future<List<MyAnnouncement>> _pendingMandatoryAcks() async {
+    try {
+      final all =
+          await ref.read(announcementsRepositoryProvider).getMyAnnouncements();
+      final now = DateTime.now();
+      return all
+          .where((a) =>
+              a.requiresAcknowledgement &&
+              !a.acknowledged &&
+              (a.expiryDatetime == null || a.expiryDatetime!.isAfter(now)))
+          .toList();
+    } catch (_) {
+      return const <MyAnnouncement>[];
     }
   }
 

@@ -35,6 +35,8 @@ Color auditScoreTone(double? score) {
       return (color: AppColors.accent, label: 'Submitted');
     case 'ASSIGNED':
       return (color: AppColors.info, label: 'Assigned');
+    case 'SUPERVISOR_APPROVAL_PENDING':
+      return (color: AppColors.warning, label: 'Supervisor Approval');
     case 'BM_ACTION_PENDING':
     case 'SENT_TO_BM': // legacy alias
       return (color: AppColors.warning, label: 'Sent to BM');

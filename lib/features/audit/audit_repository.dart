@@ -155,6 +155,12 @@ class AuditRepository {
   Future<AuditPlan> sendToBm(int id) =>
       _planAction('/api/audit/plans/$id/send-to-bm');
 
+  Future<AuditPlan> supervisorApprove(int id) =>
+      _planAction('/api/audit/plans/$id/supervisor-approve');
+
+  Future<AuditPlan> supervisorReject(int id, String reason) =>
+      _planAction('/api/audit/plans/$id/supervisor-reject', query: {'reason': reason});
+
   Future<AuditPlan> bmSubmit(int id) =>
       _planAction('/api/audit/plans/$id/bm-submit');
 

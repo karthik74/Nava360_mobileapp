@@ -22,18 +22,27 @@ class LeaveRepository {
     );
   }
 
-  /// Dates in [from..to] (yyyy-MM-dd) covered by a PENDING leave request for the
-  /// employee, expanded across each request's from→to span. Used to flag
-  /// "Leave request submitted" days on the attendance screen.
-  Future<Set<String>> myPendingLeaveDates(
+  /// Pending and APPROVED leave dates in [from..to] (yyyy-MM-dd) for the employee,
+  /// each expanded across its from→to span, from a single fetch. Pending drives the
+  /// "Leave request submitted" note; approved must render the day as On Leave (not
+  /// Absent) because leave approval never writes an ON_LEAVE attendance row.
+  Future<({Set<String> pending, Set<String> approved})> myLeaveDates(
     int employeeId, {
     String? from,
     String? to,
   }) async {
     final leaves = await listForEmployee(employeeId, size: 100);
-    final out = <String>{};
+    final pending = <String>{};
+    final approved = <String>{};
     for (final lv in leaves) {
-      if (lv.status != 'PENDING') continue;
+      final Set<String> bucket;
+      if (lv.status == 'PENDING') {
+        bucket = pending;
+      } else if (lv.status == 'APPROVED') {
+        bucket = approved;
+      } else {
+        continue;
+      }
       final start = DateTime.tryParse(lv.fromDate);
       final end = DateTime.tryParse(lv.toDate);
       if (start == null || end == null) continue;
@@ -43,10 +52,10 @@ class LeaveRepository {
             '${d.day.toString().padLeft(2, '0')}';
         if (from != null && iso.compareTo(from) < 0) continue;
         if (to != null && iso.compareTo(to) > 0) continue;
-        out.add(iso);
+        bucket.add(iso);
       }
     }
-    return out;
+    return (pending: pending, approved: approved);
   }
 
   Future<List<LeaveRequest>> listForTeam({int page = 0, int size = 50}) async {
