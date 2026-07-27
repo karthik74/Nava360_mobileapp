@@ -484,12 +484,72 @@ class _ApprovalQueueTileState extends ConsumerState<_ApprovalQueueTile> {
   }
 }
 
-class _LeaveTile extends ConsumerWidget {
+class _LeaveTile extends ConsumerStatefulWidget {
   const _LeaveTile({required this.r});
   final LeaveRequest r;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_LeaveTile> createState() => _LeaveTileState();
+}
+
+class _LeaveTileState extends ConsumerState<_LeaveTile> {
+  bool _busy = false;
+
+  /// Withdraw an own request that nobody has acted on yet. This list is always
+  /// the signed-in employee's own leaves, so ownership needs no extra check —
+  /// only the PENDING gate, matching the web's Cancel button.
+  Future<void> _withdraw() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.lg)),
+        title: const Text('Withdraw this request?',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        content: const Text(
+          'Your leave request will be cancelled and removed from your '
+          'approver\'s queue. You can apply again if you change your mind.',
+          style: TextStyle(color: AppColors.inkSoft, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep it')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Withdraw'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _busy = true);
+    try {
+      await ref.read(leaveRepositoryProvider).cancel(widget.r.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Leave request withdrawn.')),
+      );
+      // The days go back to the balance, and the request leaves any approver's
+      // queue, so refresh all three views of it.
+      ref.invalidate(_myLeavesProvider);
+      ref.invalidate(_myBalanceProvider);
+      ref.invalidate(leavesPendingMyApprovalProvider);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.r;
     final tone = StatusTone.forLeave(r.status);
     // Show the configured approval chain on in-flight requests (empty = the
     // default direct-manager flow → nothing rendered).
@@ -582,6 +642,29 @@ class _LeaveTile extends ConsumerWidget {
                     ),
               orElse: () => const SizedBox.shrink(),
             ),
+          // Only an untouched request can be withdrawn. Once it is approved or
+          // rejected the decision is the approver's to undo, not the employee's.
+          if (r.status == 'PENDING') ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _busy ? null : _withdraw,
+                icon: _busy
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.undo_rounded,
+                        size: 16, color: AppColors.danger),
+                label: Text(
+                  _busy ? 'Withdrawing…' : 'Withdraw request',
+                  style: const TextStyle(color: AppColors.danger),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );

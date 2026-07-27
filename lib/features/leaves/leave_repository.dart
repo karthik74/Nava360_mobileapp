@@ -126,6 +126,16 @@ class LeaveRepository {
     );
   }
 
+  /// Withdraw a leave request the signed-in employee raised. The backend moves
+  /// it to CANCELLED and cancels any in-flight approval chain; it refuses once
+  /// an APPROVED leave has already started.
+  Future<LeaveRequest> cancel(int id) {
+    return _api.patch<LeaveRequest>(
+      '/api/leaves/$id/cancel',
+      parse: (d) => LeaveRequest.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
   Future<LeaveRequest> review(int id,
       {required String status, int? reviewerEmployeeId, String? reviewComment}) {
     return _api.patch<LeaveRequest>(
