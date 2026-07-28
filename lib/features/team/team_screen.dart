@@ -490,6 +490,42 @@ class _MemberCard extends StatelessWidget {
 // Leaves tab (approve / reject)
 // ─────────────────────────────────────────────────────────────────────
 
+/// Employee-name search box shared by the Leaves and Attendance approval tabs.
+/// Filters the loaded page in place, exactly as the Members tab does.
+class _EmployeeSearchField extends StatelessWidget {
+  const _EmployeeSearchField({
+    required this.controller,
+    required this.query,
+    required this.onChanged,
+    required this.onClear,
+  });
+  final TextEditingController controller;
+  final String query;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      textCapitalization: TextCapitalization.words,
+      inputFormatters: const [TitleCaseTextFormatter()],
+      decoration: InputDecoration(
+        hintText: 'Search by employee name…',
+        prefixIcon: const Icon(Icons.search_rounded, size: 20),
+        isDense: true,
+        suffixIcon: query.isEmpty
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18),
+                onPressed: onClear,
+              ),
+      ),
+      onChanged: onChanged,
+    );
+  }
+}
+
 class _LeavesView extends ConsumerStatefulWidget {
   const _LeavesView();
 
@@ -499,6 +535,17 @@ class _LeavesView extends ConsumerStatefulWidget {
 
 class _LeavesViewState extends ConsumerState<_LeavesView> {
   String _filter = 'ALL';
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  bool _matchesQuery(LeaveRequest r) =>
+      _query.isEmpty || (r.employeeName ?? '').toLowerCase().contains(_query);
 
   @override
   Widget build(BuildContext context) {
@@ -547,9 +594,11 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
           final pending = rows.where((r) => r.status == 'PENDING').length;
           final approved = rows.where((r) => r.status == 'APPROVED').length;
           final rejected = rows.where((r) => r.status == 'REJECTED').length;
-          final filtered = _filter == 'ALL'
-              ? rows
-              : rows.where((r) => r.status == _filter).toList();
+          final filtered = (_filter == 'ALL'
+                  ? rows
+                  : rows.where((r) => r.status == _filter).toList())
+              .where(_matchesQuery)
+              .toList();
 
           return ListView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -562,6 +611,17 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
                 rejected: rejected,
               ),
               const SizedBox(height: 16),
+              _EmployeeSearchField(
+                controller: _searchCtrl,
+                query: _query,
+                onChanged: (v) =>
+                    setState(() => _query = v.trim().toLowerCase()),
+                onClear: () {
+                  _searchCtrl.clear();
+                  setState(() => _query = '');
+                },
+              ),
+              const SizedBox(height: 12),
               _FilterBar(
                 value: _filter,
                 onChanged: (v) => setState(() => _filter = v),
@@ -574,9 +634,11 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
               ),
               const SizedBox(height: 14),
               if (filtered.isEmpty)
-                const AppEmptyState(
+                AppEmptyState(
                   icon: Icons.event_available_rounded,
-                  message: 'Nothing here right now.',
+                  message: _query.isNotEmpty
+                      ? 'No leave requests match your search.'
+                      : 'Nothing here right now.',
                 )
               else
                 for (final r in filtered)
@@ -613,6 +675,17 @@ class _AttendanceView extends ConsumerStatefulWidget {
 
 class _AttendanceViewState extends ConsumerState<_AttendanceView> {
   String _filter = 'ALL';
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  bool _matchesQuery(RegularizationRequest r) =>
+      _query.isEmpty || (r.employeeName ?? '').toLowerCase().contains(_query);
 
   @override
   Widget build(BuildContext context) {
@@ -654,9 +727,11 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
           final pending = rows.where((r) => r.status == 'PENDING').length;
           final approved = rows.where((r) => r.status == 'APPROVED').length;
           final rejected = rows.where((r) => r.status == 'REJECTED').length;
-          final filtered = _filter == 'ALL'
-              ? rows
-              : rows.where((r) => r.status == _filter).toList();
+          final filtered = (_filter == 'ALL'
+                  ? rows
+                  : rows.where((r) => r.status == _filter).toList())
+              .where(_matchesQuery)
+              .toList();
           // Pending first within the current filter.
           final sorted = [
             ...filtered.where((r) => r.isPending),
@@ -674,6 +749,17 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
                 rejected: rejected,
               ),
               const SizedBox(height: 16),
+              _EmployeeSearchField(
+                controller: _searchCtrl,
+                query: _query,
+                onChanged: (v) =>
+                    setState(() => _query = v.trim().toLowerCase()),
+                onClear: () {
+                  _searchCtrl.clear();
+                  setState(() => _query = '');
+                },
+              ),
+              const SizedBox(height: 12),
               _FilterBar(
                 value: _filter,
                 onChanged: (v) => setState(() => _filter = v),
@@ -686,9 +772,11 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
               ),
               const SizedBox(height: 14),
               if (sorted.isEmpty)
-                const AppEmptyState(
+                AppEmptyState(
                   icon: Icons.fact_check_outlined,
-                  message: 'Nothing here right now.',
+                  message: _query.isNotEmpty
+                      ? 'No requests match your search.'
+                      : 'Nothing here right now.',
                 )
               else
                 for (final r in sorted)
