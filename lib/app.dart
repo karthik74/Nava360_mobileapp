@@ -445,7 +445,11 @@ class HrmsApp extends ConsumerWidget {
     });
     final misUser = ref.read(authUserProvider)?.username;
     if (misUser != null && misUser.isNotEmpty) {
-      ref.read(misAuthControllerProvider.notifier).ensureAutoLogin(misUser);
+      // Deferred: ensureAutoLogin mutates provider state, which is not allowed
+      // synchronously from build.
+      Future(() {
+        ref.read(misAuthControllerProvider.notifier).ensureAutoLogin(misUser);
+      });
     }
     // Let push-notification taps deep-link into a chat thread.
     ref.read(pushServiceProvider).onOpenChat = (id) => router.push('/chats/$id');

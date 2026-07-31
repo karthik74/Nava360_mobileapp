@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>NSFaceIDUsageDescription</key>
-	<string>Use Face ID to sign in to Nava360 quickly and securely.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
@@ -28,23 +26,18 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<!-- Expose downloaded payslip PDFs (app Documents) in the Files app. -->
-	<key>UIFileSharingEnabled</key>
-	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Nava360 uses your location in the background while you are checked in to record attendance tracking.</string>
-	<key>NSLocationAlwaysUsageDescription</key>
-	<string>Nava360 uses your location in the background while you are checked in to record attendance tracking.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Nava360 uses your location while you are checked in to record attendance tracking.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Nava360 uses the camera so you can attach photos to a customer task.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Nava360 needs photo access so you can attach images to a customer task.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Use Face ID to sign in to Nava360 quickly and securely.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Nava360 uses your location while you are checked in to record attendance tracking.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Microphone access is required to record a voice message as evidence for your confidential concern, and to talk to the AI assistant.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Nava360 needs photo access so you can attach images to a customer task.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Speech recognition converts your voice into text so the AI assistant can answer your HR questions.</string>
 	<key>UIApplicationSceneManifest</key>
@@ -70,10 +63,8 @@
 	</dict>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>location</string>
-	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

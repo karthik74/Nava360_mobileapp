@@ -56,6 +56,7 @@ class PushService {
   StreamSubscription<RemoteMessage>? _openedSub;
   StreamSubscription<String>? _tokenRefreshSub;
   bool _started = false;
+  bool _startPending = false;
   bool _firebaseReady = false;
   bool _localReady = false;
 
@@ -217,6 +218,13 @@ class PushService {
     } catch (e) {
       debugPrint('Firebase init failed: $e');
     }
+
+    // A start() that arrived while init was still running (e.g. blocked on the
+    // first-ever permission dialog) bailed out on _firebaseReady — replay it.
+    if (_firebaseReady && _startPending) {
+      _startPending = false;
+      await start();
+    }
   }
 
   /// Starts listening for messages and registers the device token. Idempotent.
@@ -224,7 +232,10 @@ class PushService {
   Future<void> start() async {
     if (_started) return;
     if (!_firebaseReady) {
-      debugPrint('PushService.start skipped: Firebase not available');
+      // init() may still be running (first-launch permission dialog). Remember
+      // the request so init can replay it once Firebase comes up.
+      _startPending = true;
+      debugPrint('PushService.start deferred: Firebase not ready yet');
       return;
     }
     _started = true;
@@ -389,6 +400,15 @@ class PushService {
   Future<void> _registerCurrentToken() async {
     if (!_firebaseReady) return;
     try {
+      // iOS: FCM can't mint a token until Apple delivers the APNs token, which
+      // arrives shortly after launch. Poll briefly instead of failing the whole
+      // registration; onTokenRefresh still covers the late-arrival case.
+      if (Platform.isIOS) {
+        for (var i = 0; i < 10; i++) {
+          if (await FirebaseMessaging.instance.getAPNSToken() != null) break;
+          await Future.delayed(const Duration(seconds: 1));
+        }
+      }
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null && token.isNotEmpty) {
         await _register(token);

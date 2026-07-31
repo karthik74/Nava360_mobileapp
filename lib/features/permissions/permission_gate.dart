@@ -45,9 +45,11 @@ class _PermissionGateState extends ConsumerState<PermissionGate>
   bool _batteryOk = false;
   bool _bgActivityOk = false;
 
-  // The gate only applies on the mobile targets that have these permissions;
-  // on desktop/web it's a pass-through (those plugins would otherwise throw).
-  static final bool _gated = Platform.isAndroid || Platform.isIOS;
+  // Android-only. On iOS a hard permission wall violates App Store guidelines
+  // 5.1.1 (custom pre-permission UI / Settings redirects) and 4.5.4 (push must
+  // be optional) — iOS asks contextually via the system prompts instead. On
+  // desktop/web it's a pass-through (those plugins would otherwise throw).
+  static final bool _gated = Platform.isAndroid;
 
   static const MethodChannel _batteryChannel = MethodChannel('app/battery');
 

@@ -463,7 +463,7 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
     };
     // Routes hosted by the bottom-nav ShellRoute navigate with `go` (switch tab);
     // everything else pushes so the back button returns to the previous screen.
-    const tabRoutes = {'/home', '/attendance', '/leaves', '/tasks', '/team', '/performance', '/hrms', '/payroll', '/more'};
+    const tabRoutes = {'/home', '/attendance', '/leaves', '/tasks', '/chats', '/team', '/performance', '/hrms', '/payroll', '/more'};
 
     Color moduleAccent(MobileModule m) {
       switch (m) {

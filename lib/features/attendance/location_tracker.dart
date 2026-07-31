@@ -434,6 +434,14 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
       return false;
     }
 
+    // iOS (App Store): "While Using the App" is enough — tracking runs while
+    // the app is in the foreground. Never escalate to Always or bounce the user
+    // to Settings (rejected under guideline 5.1.1).
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      return perm == LocationPermission.whileInUse ||
+          perm == LocationPermission.always;
+    }
+
     if (perm == LocationPermission.whileInUse) {
       perm = await Geolocator.requestPermission();
     }
@@ -494,11 +502,10 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
       return AppleSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 0,
-        // Keep updates flowing in the background (don't let iOS pause them) so the
-        // heartbeat continues. allowBackgroundLocationUpdates is required for this.
-        pauseLocationUpdatesAutomatically: false,
-        allowBackgroundLocationUpdates: true,
-        showBackgroundLocationIndicator: false,
+        // Foreground-only on iOS: the App Store build has no location
+        // background mode (guideline 2.5.4), and enabling background updates
+        // without it crashes CoreLocation.
+        allowBackgroundLocationUpdates: false,
         activityType: ActivityType.other,
       );
     }
