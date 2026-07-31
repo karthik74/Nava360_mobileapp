@@ -196,11 +196,12 @@ class PushService {
       if (Firebase.apps.isEmpty) {
         await Firebase.initializeApp();
       }
-      await FirebaseMessaging.instance.requestPermission(
+      final settings = await FirebaseMessaging.instance.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
+      debugPrint('Push permission: ${settings.authorizationStatus}');
       await FirebaseMessaging.instance
           .setForegroundNotificationPresentationOptions(
         alert: true,
@@ -404,10 +405,13 @@ class PushService {
       // arrives shortly after launch. Poll briefly instead of failing the whole
       // registration; onTokenRefresh still covers the late-arrival case.
       if (Platform.isIOS) {
+        String? apns;
         for (var i = 0; i < 10; i++) {
-          if (await FirebaseMessaging.instance.getAPNSToken() != null) break;
+          apns = await FirebaseMessaging.instance.getAPNSToken();
+          if (apns != null) break;
           await Future.delayed(const Duration(seconds: 1));
         }
+        debugPrint('APNs token: ${apns == null ? 'MISSING' : 'present'}');
       }
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null && token.isNotEmpty) {
@@ -450,6 +454,7 @@ class PushService {
   /// Routes a foreground message: silent control messages (e.g. a live-location
   /// request) are handled without a notification; everything else is shown.
   Future<void> _onForegroundMessage(RemoteMessage message) async {
+    debugPrint('FCM foreground message: ${message.messageId}');
     if (message.data['type'] == 'LOCATION_REQUEST') {
       await respondToLiveLocationRequest();
       return;
