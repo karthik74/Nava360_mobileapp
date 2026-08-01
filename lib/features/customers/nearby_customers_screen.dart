@@ -29,6 +29,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
 import '../attendance/location_tracker.dart';
+import '../auth/auth_controller.dart';
 import 'customer_detail_screen.dart';
 import 'nearby_customer_models.dart';
 import 'nearby_customer_repository.dart';
@@ -921,6 +922,15 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
               ],
             ),
             const SizedBox(height: 8),
+            _LocationQualityBlock(
+              customer: c,
+              myPosition: _position,
+              onSubmitted: () {
+                Navigator.pop(ctx);
+                _locateAndLoad(force: true);
+              },
+            ),
+            const SizedBox(height: 4),
             SizedBox(
               width: double.infinity,
               child: TextButton.icon(
@@ -968,6 +978,207 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
     if (d.inDays == 1) return 'yesterday';
     if (d.inDays < 30) return '${d.inDays} days ago';
     return '${(d.inDays / 30).floor()} months ago';
+  }
+}
+
+/// Location quality for one customer, plus the action that fixes it.
+///
+/// A visit is only as trustworthy as the pin it is measured against, and only
+/// the person standing at the door knows where that is. So the employee sees
+/// whether the stored pin has ever been confirmed, how far they are from it
+/// right now, and can send their own position as the truth — which goes to an
+/// approver rather than silently moving the customer, because moving a pin
+/// changes what every past visit was measured against.
+class _LocationQualityBlock extends ConsumerStatefulWidget {
+  const _LocationQualityBlock({
+    required this.customer,
+    required this.myPosition,
+    required this.onSubmitted,
+  });
+
+  final NearbyCustomer customer;
+  final Position? myPosition;
+  final VoidCallback onSubmitted;
+
+  @override
+  ConsumerState<_LocationQualityBlock> createState() =>
+      _LocationQualityBlockState();
+}
+
+class _LocationQualityBlockState extends ConsumerState<_LocationQualityBlock> {
+  bool _busy = false;
+
+  /// Beyond this the employee is too far away for their fix to be evidence of
+  /// where the customer is.
+  static const _maxCaptureDistanceMeters = 100.0;
+
+  Future<void> _submit() async {
+    final pos = widget.myPosition;
+    if (pos == null || _busy) return;
+    final c = widget.customer;
+    final moving = c.hasLocation;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(moving ? 'Correct this location?' : 'Set this location?'),
+        content: Text(
+          moving
+              ? 'Your current position will be sent for approval as the '
+                  "customer's real location. It is ${c.distanceLabel} from the "
+                  'stored pin.\n\nAccuracy of your fix: ±${pos.accuracy.round()} m.'
+              : 'Your current position will be sent for approval as this '
+                  "customer's location.\n\nAccuracy of your fix: "
+                  '±${pos.accuracy.round()} m.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Send for approval'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      await ref.read(nearbyCustomerRepositoryProvider).suggestLocation(
+            customerId: c.id,
+            latitude: pos.latitude,
+            longitude: pos.longitude,
+            accuracyMeters: pos.accuracy,
+            reason: moving
+                ? 'Captured on site; stored pin was ${c.distanceLabel} away'
+                : 'Captured on site (customer had no location)',
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sent for approval. Thank you.')),
+      );
+      widget.onSubmitted();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_message(e))),
+      );
+    }
+  }
+
+  /// Turns the backend's ApiResponse error into something readable.
+  String _message(Object e) {
+    final s = e.toString();
+    if (s.contains('already awaiting approval')) {
+      return 'A correction for this customer is already awaiting approval.';
+    }
+    return 'Could not send the location. Please try again.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.customer;
+    final user = ref.watch(authUserProvider);
+    final canSuggest = user?.hasPermission('CUSTOMER_LOCATION_SUGGEST') ?? false;
+    final pos = widget.myPosition;
+
+    final Color tone = c.locationVerified
+        ? AppColors.success
+        : c.locationNeedsCorrection
+            ? AppColors.info
+            : AppColors.warning;
+    final IconData icon = c.locationVerified
+        ? Icons.verified_rounded
+        : c.locationNeedsCorrection
+            ? Icons.hourglass_top_rounded
+            : Icons.help_outline_rounded;
+
+    // Only a fix taken near the customer is evidence of where they are; and a
+    // very rough fix would just replace one bad pin with another.
+    final tooFar = c.hasLocation && c.distanceMeters > _maxCaptureDistanceMeters;
+    final noFix = pos == null;
+    final roughFix = pos != null && pos.accuracy > 50;
+    final canAct = canSuggest &&
+        !noFix &&
+        !tooFar &&
+        !c.locationNeedsCorrection &&
+        !_busy;
+
+    String? blockedReason;
+    if (!canSuggest) {
+      blockedReason = null; // no permission: show nothing, not an explanation
+    } else if (c.locationNeedsCorrection) {
+      blockedReason = 'A correction is already awaiting approval.';
+    } else if (noFix) {
+      blockedReason = 'Waiting for your GPS position.';
+    } else if (tooFar) {
+      blockedReason =
+          'Stand at the customer to confirm — you are ${c.distanceLabel} away.';
+    } else if (roughFix) {
+      blockedReason =
+          'Your GPS is currently ±${pos.accuracy.round()} m; move outside for a better fix if you can.';
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: tone.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tone.withOpacity(0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: tone),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  c.locationQualityLabel,
+                  style: TextStyle(
+                      fontSize: 12.5, fontWeight: FontWeight.w700, color: tone),
+                ),
+              ),
+              if (pos != null)
+                Text('±${pos.accuracy.round()} m',
+                    style: const TextStyle(
+                        fontSize: 11, color: AppColors.muted)),
+            ],
+          ),
+          if (canSuggest) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: canAct ? _submit : null,
+                icon: _busy
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.my_location_rounded, size: 18),
+                label: Text(!c.hasLocation
+                    ? 'Set location from where I am'
+                    : c.locationVerified
+                        ? 'Re-capture location from where I am'
+                        : 'Confirm location from where I am'),
+              ),
+            ),
+          ],
+          if (blockedReason != null) ...[
+            const SizedBox(height: 6),
+            Text(blockedReason,
+                style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+          ],
+        ],
+      ),
+    );
   }
 }
 

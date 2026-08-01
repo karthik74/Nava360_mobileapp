@@ -75,6 +75,28 @@ class NearbyCustomer {
 
   bool get hasLocation => latitude != null && longitude != null;
 
+  /// Someone stood at this customer and confirmed the pin.
+  bool get locationVerified => locationStatus == 'VERIFIED';
+
+  /// A correction has been raised and is waiting for approval.
+  bool get locationNeedsCorrection => locationStatus == 'NEEDS_CORRECTION';
+
+  /// Short label for the location-quality chip on the customer sheet.
+  String get locationQualityLabel {
+    switch (locationStatus) {
+      case 'VERIFIED':
+        return 'Location verified';
+      case 'NEEDS_CORRECTION':
+        return 'Correction awaiting approval';
+      case 'REJECTED':
+        return 'Location rejected';
+      case 'CAPTURED':
+        return 'Location not verified';
+      default:
+        return 'No location captured';
+    }
+  }
+
   /// "450 m" / "2.4 km" — distance the way a person reads it.
   String get distanceLabel => distanceMeters < 1000
       ? '$distanceMeters m'
