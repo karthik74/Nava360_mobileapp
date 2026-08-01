@@ -106,6 +106,10 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'hrms.attendance', label: 'Attendance', route: '/attendance', icon: Icons.fingerprint_rounded, module: MobileModule.hrms, order: 3),
   MobileMenuItem(key: 'hrms.leaves', label: 'Leaves', route: '/leaves', icon: Icons.event_available_rounded, module: MobileModule.hrms, order: 4),
   MobileMenuItem(key: 'hrms.tasks', label: 'Tasks', route: '/tasks', icon: Icons.task_alt_rounded, module: MobileModule.hrms, order: 5),
+  // Field tool: authorised customers around the employee, on a map. Hidden when
+  // the company turns the feature off, and further narrowed server-side to the
+  // employee's own branches and book.
+  MobileMenuItem(key: 'hrms.nearbyCustomers', label: 'Nearby Customers', route: '/nearby-customers', icon: Icons.person_pin_circle_rounded, module: MobileModule.hrms, order: 6, requiredPermissions: ['CUSTOMER_NEARBY_VIEW'], featureFlag: 'FEATURE_NEARBY_CUSTOMERS'),
   // Chats is a bottom-nav root (order 2) — NOT a drawer/HRMS-grid item.
   // showInBottomNav also excludes it from menuFor()/allMenuItems(), so it no
   // longer appears in the left navigation menu.

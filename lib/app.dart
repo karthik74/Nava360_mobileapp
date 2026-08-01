@@ -23,6 +23,7 @@ import 'features/requisitions/create_requisition_screen.dart';
 import 'features/requisitions/requisitions_screen.dart';
 import 'features/support/help_support_screen.dart';
 import 'features/customers/customers_screen.dart';
+import 'features/customers/nearby_customers_screen.dart';
 import 'features/home/dashboard_screen.dart';
 import 'features/home/home_shell.dart';
 import 'features/home/module_screens.dart';
@@ -178,6 +179,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/notifications',
         builder: (_, __) => const NotificationsScreen(),
+      ),
+      // Full-screen (outside the shell) so the map gets the whole viewport and
+      // the bottom nav doesn't sit over the customer sheet.
+      GoRoute(
+        path: '/nearby-customers',
+        builder: (_, __) => const NearbyCustomersScreen(),
       ),
       // NOTE: /chats (the list) lives INSIDE the ShellRoute below so it renders
       // as a bottom-nav tab with the persistent nav bar. Only the thread

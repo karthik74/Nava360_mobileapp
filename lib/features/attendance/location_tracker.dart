@@ -8,6 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/branding.dart';
+import '../auth/biometric/device_info_service.dart';
 import 'location_ping_models.dart';
 import 'location_ping_store.dart';
 import 'location_repository.dart';
@@ -92,6 +93,9 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
   final LocationPingStore _store = LocationPingStore.instance;
 
   // ---- Tunables ----
+  // Compiled-in fallbacks. The live values come from the server
+  // (/api/customers/nearby/config) via [applyConfig], so cadence can be retuned
+  // for a company without an app release.
   static const Duration _intervalDefault = Duration(minutes: 5);
   static const Duration _intervalMoving = Duration(minutes: 1);
   static const Duration _intervalStopped = Duration(minutes: 30);
@@ -129,6 +133,24 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
   final List<LocationPing> _buffer = [];
   Future<void>? _flushInFlight;
 
+  /// Server-tuned cadence; falls back to the constants above until it arrives.
+  Duration _cfgMoving = _intervalMoving;
+  Duration _cfgStopped = _intervalStopped;
+  Duration _cfgNearCustomer = const Duration(seconds: 30);
+  int _cfgDistanceFilterMeters = _distanceFilterMeters;
+  double _cfgNearCustomerRadiusMeters = 200;
+
+  /// Coordinates of nearby customers, refreshed by the Nearby Customers screen.
+  /// Used only to decide when to sample faster — never uploaded anywhere.
+  List<({double lat, double lng})> _nearbyCustomerPoints = const [];
+
+  /// Stable id for this device, attached to every fix so the backend can tell
+  /// two phones sharing one login apart.
+  String? _deviceId;
+
+  /// Monotonic counter behind the per-sample idempotency key.
+  int _pingSeq = 0;
+
   /// Start (or noop if already running for the same employee).
   Future<void> start(int employeeId) async {
     if (state.active && state.employeeId == employeeId) return;
@@ -137,6 +159,15 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
     if (!await _ensurePermissionAndService()) return;
 
     await _storage.write(key: _kActiveEmployee, value: '$employeeId');
+
+    // Stamp every fix with this install's device id. Reuses the same persisted
+    // UUID as biometric login — no hardware identifier, no PII — so the backend
+    // can tell two phones on one login apart without learning anything new.
+    try {
+      _deviceId = (await DeviceInfoService().resolve()).deviceId;
+    } catch (_) {
+      // Optional context; tracking proceeds without it.
+    }
 
     final settings = _platformSettings();
     _streamSub = Geolocator.getPositionStream(locationSettings: settings)
@@ -285,10 +316,59 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
 
   // -------------------- internals --------------------
 
+  /// Applies server-side tuning. Safe to call repeatedly; takes effect on the
+  /// next capture decision.
+  void applyConfig({
+    int? movingSeconds,
+    int? stationarySeconds,
+    int? nearCustomerSeconds,
+    int? nearCustomerRadiusMeters,
+    int? minDisplacementMeters,
+  }) {
+    if (movingSeconds != null && movingSeconds > 0) {
+      _cfgMoving = Duration(seconds: movingSeconds);
+    }
+    if (stationarySeconds != null && stationarySeconds > 0) {
+      _cfgStopped = Duration(seconds: stationarySeconds);
+    }
+    if (nearCustomerSeconds != null && nearCustomerSeconds > 0) {
+      _cfgNearCustomer = Duration(seconds: nearCustomerSeconds);
+    }
+    if (nearCustomerRadiusMeters != null && nearCustomerRadiusMeters > 0) {
+      _cfgNearCustomerRadiusMeters = nearCustomerRadiusMeters.toDouble();
+    }
+    if (minDisplacementMeters != null && minDisplacementMeters > 0) {
+      _cfgDistanceFilterMeters = minDisplacementMeters;
+    }
+  }
+
+  /// Tells the tracker where the employee's nearby customers are, so it can
+  /// sample faster when close to one. Coordinates stay on the device.
+  void setNearbyCustomerPoints(List<({double lat, double lng})> points) {
+    _nearbyCustomerPoints = points;
+  }
+
+  /// True when the last fix is within the "near a customer" radius.
+  ///
+  /// This is what makes short visits detectable at all: at the everyday
+  /// stationary cadence a two-minute stop produces at most one fix, and one fix
+  /// is not evidence of a visit. Near a customer we sample often enough for the
+  /// backend to see an arrival, a stay and a departure.
+  bool _nearCustomer() {
+    final p = _lastPosition;
+    if (p == null || _nearbyCustomerPoints.isEmpty) return false;
+    for (final c in _nearbyCustomerPoints) {
+      final d = Geolocator.distanceBetween(p.latitude, p.longitude, c.lat, c.lng);
+      if (d <= _cfgNearCustomerRadiusMeters) return true;
+    }
+    return false;
+  }
+
   Duration _currentInterval() {
+    if (_nearCustomer()) return _cfgNearCustomer;
     final speed = _lastPosition?.speed ?? 0;
-    if (speed > _movingThresholdMps) return _intervalMoving;
-    if (speed < _stoppedThresholdMps) return _intervalStopped;
+    if (speed > _movingThresholdMps) return _cfgMoving;
+    if (speed < _stoppedThresholdMps) return _cfgStopped;
     return _intervalDefault;
   }
 
@@ -331,7 +411,7 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
               p.latitude,
               p.longitude,
             ) >=
-            _distanceFilterMeters;
+            _cfgDistanceFilterMeters;
 
     if (!dueByTime && !movedFar) return;
     // Avoid bursts — at most one ping per _minCaptureGap.
@@ -345,17 +425,26 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
   }
 
   void _capture(Position p) {
+    final empId = state.employeeId;
     final ping = LocationPing(
+      // Idempotency key: employee + capture time + a counter. Survives in the
+      // durable queue, so a batch retried after a timeout is stored once and
+      // cannot be counted twice inside a visit.
+      clientPingId: '$empId-${p.timestamp.toUtc().millisecondsSinceEpoch}-${_pingSeq++}',
       recordedAt: p.timestamp.toUtc(),
       latitude: p.latitude,
       longitude: p.longitude,
       accuracyMeters: p.accuracy,
       speedMps: p.speed,
+      headingDegrees: p.heading,
+      deviceId: _deviceId,
+      // Android reports spoofed positions; iOS has no equivalent signal, so
+      // null there means "unknown", not "genuine".
+      mockLocation: p.isMocked,
     );
     _buffer.add(ping);
     // Persist immediately so an offline ping is never lost if the OS kills the
     // app before it can be uploaded (this is what fills the gaps in the trail).
-    final empId = state.employeeId;
     if (empId != null) {
       unawaited(_store.append(empId, [ping]));
     }
