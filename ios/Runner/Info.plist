@@ -16,6 +16,16 @@
 	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>Nava360</string>
+	<!-- Nearby Customers: iOS returns false from canOpenURL for any scheme not
+	     listed here, so without this the Navigate button could never reach the
+	     Google Maps app and would silently fall back to a browser. -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>comgooglemaps</string>
+		<string>googlemaps</string>
+		<string>maps</string>
+		<string>tel</string>
+	</array>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

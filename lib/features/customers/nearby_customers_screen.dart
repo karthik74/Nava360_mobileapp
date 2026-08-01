@@ -18,6 +18,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -254,25 +255,42 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
-  /// Hands the destination to the platform's maps app. Only the coordinates are
-  /// passed — never the customer's name, phone number or account details, which
-  /// have no business leaving the app.
+  /// Starts turn-by-turn navigation to the customer in Google Maps.
+  ///
+  /// Only the coordinates are passed — never the customer's name, phone number
+  /// or account details, which have no business leaving the app.
+  ///
+  /// Each candidate is ATTEMPTED rather than gated on [canLaunchUrl] alone:
+  /// canLaunchUrl reports false for any scheme the platform hasn't been told we
+  /// use (Android's <queries>, iOS's LSApplicationQueriesSchemes), so trusting
+  /// it as the only check is how this button ends up claiming "no maps app" on
+  /// a phone with Google Maps installed.
   Future<void> _navigateTo(NearbyCustomer c) async {
     if (!c.hasLocation) return;
     final lat = c.latitude!, lng = c.longitude!;
+
     final candidates = <Uri>[
-      Uri.parse('google.navigation:q=$lat,$lng&mode=d'), // Android turn-by-turn
-      Uri.parse('https://maps.apple.com/?daddr=$lat,$lng&dirflg=d'), // iOS
-      Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng'),
+      if (Platform.isAndroid)
+        // Launches Google Maps straight into turn-by-turn guidance.
+        Uri.parse('google.navigation:q=$lat,$lng&mode=d'),
+      if (Platform.isIOS)
+        // Google Maps app on iOS, already in driving-directions mode.
+        Uri.parse('comgooglemaps://?daddr=$lat,$lng&directionsmode=driving'),
+      // Universal link: opens the Google Maps app on either platform when it is
+      // installed, and the web version when it isn't. dir_action=navigate asks
+      // it to begin guidance rather than just show the route.
+      Uri.parse('https://www.google.com/maps/dir/?api=1'
+          '&destination=$lat,$lng&travelmode=driving&dir_action=navigate'),
+      if (Platform.isIOS) Uri.parse('maps://?daddr=$lat,$lng&dirflg=d'),
+      // Last resort: whatever the device treats as its map handler.
+      Uri.parse('geo:$lat,$lng?q=$lat,$lng'),
     ];
+
     for (final uri in candidates) {
       try {
-        if (await canLaunchUrl(uri)) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-          return;
-        }
+        if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
       } catch (_) {
-        // Try the next scheme.
+        // Not installed / not handled — fall through to the next candidate.
       }
     }
     if (!mounted) return;
@@ -297,11 +315,17 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
   Future<void> _call(NearbyCustomer c) async {
     final number = c.mobileNumber;
     if (number == null || number.trim().isEmpty) return;
-    final uri = Uri(scheme: 'tel', path: number.trim());
+    // Strip spaces/dashes — the dialer wants digits, + and the usual separators.
+    final cleaned = number.replaceAll(RegExp(r'[^0-9+#*]'), '');
+    if (cleaned.isEmpty) return;
+    final uri = Uri(scheme: 'tel', path: cleaned);
     try {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      // Attempted directly for the same reason as navigation: canLaunchUrl is
+      // false for tel: unless the DIAL intent is declared, even with a dialer.
+      if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
+      _toast('Could not open the dialler.');
     } catch (_) {
-      _toast('Could not start the call.');
+      _toast('Could not open the dialler.');
     }
   }
 

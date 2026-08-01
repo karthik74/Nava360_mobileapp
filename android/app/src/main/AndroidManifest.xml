@@ -93,5 +93,31 @@
         <intent>
             <action android:name="android.speech.RecognitionService"/>
         </intent>
+
+        <!-- Nearby Customers: start turn-by-turn navigation and place calls.
+             Android 11+ hides other installed apps from us unless the intents we
+             use are declared here — and url_launcher's canLaunchUrl() reports
+             FALSE for anything undeclared even when Google Maps or the dialer is
+             installed, which silently turns the Navigate and Call buttons into
+             "no app available". -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="google.navigation"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="geo"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.DIAL"/>
+            <data android:scheme="tel"/>
+        </intent>
+        <!-- Google Maps by name, so the navigation intent resolves to it
+             directly when it is installed. -->
+        <package android:name="com.google.android.apps.maps"/>
     </queries>
 </manifest>
