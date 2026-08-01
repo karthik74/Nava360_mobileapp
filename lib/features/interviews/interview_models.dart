@@ -57,6 +57,8 @@ class Interview {
       case 'SELECTED':
       case 'OFFER_SENT':
       case 'OFFER_ACCEPTED':
+      case 'DOCUMENTS_SUBMITTED':
+      case 'PENDING_HIRE':
       case 'HIRED':
         return const StatusTone(AppColors.success, 'Selected');
       case 'REJECTED':

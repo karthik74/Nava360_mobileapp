@@ -616,6 +616,8 @@ class _PipelineCard extends StatelessWidget {
     ('SELECTED', 'Selected'),
     ('OFFER_SENT', 'Offer sent'),
     ('OFFER_ACCEPTED', 'Accepted'),
+    ('DOCUMENTS_SUBMITTED', 'Docs submitted'),
+    ('PENDING_HIRE', 'Pending hire'),
     ('HIRED', 'Hired'),
     ('REJECTED', 'Rejected'),
     ('OFFER_DECLINED', 'Declined'),
