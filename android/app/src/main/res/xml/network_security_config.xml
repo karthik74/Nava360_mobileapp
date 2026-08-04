@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 9+ (API 28) blocks cleartext HTTP by default, which would make EVERY
+  request fail on the company flavors whose backend is a bare IP with no TLS
+  certificate. Cleartext stays disabled globally and is opened ONLY for those
+  specific hosts — the https:// backends keep full TLS enforcement.
+
+  Remove the matching <domain> entry as soon as a flavor's backend moves to
+  https:// (see Env._flavorBaseUrls in lib/core/env.dart).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+
+    <!-- livelihoods -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">hrms.navachetanalivelihoods.com</domain>
+    </domain-config>
+
+    <!-- nmspl (hrms.navachetana.co.in) and cfspl (hrms.chetanafinancial.com)
+         both run on Let's Encrypt TLS now, so they need no exception and are
+         covered by the https-only base-config above. Only livelihoods remains
+         on cleartext. -->
+
+</network-security-config>

@@ -71,6 +71,16 @@ android {
             applicationId = "com.hrms.nava_360.laxmi"
             resValue("string", "app_name", "Laxmi Multistate")
         }
+        create("nmspl") {
+            dimension = "company"
+            applicationId = "com.hrms.nava_360.nmspl"
+            resValue("string", "app_name", "NMSPL")
+        }
+        create("cfspl") {
+            dimension = "company"
+            applicationId = "com.hrms.nava_360.cfspl"
+            resValue("string", "app_name", "CFSPL")
+        }
     }
 
     signingConfigs {

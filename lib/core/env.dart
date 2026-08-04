@@ -11,9 +11,14 @@ class Env {
 
   /// One backend deployment per company; the flavor picks it at build time.
   static const Map<String, String> _flavorBaseUrls = {
-    'livelihoods': 'https://hrms.navachetanalivelihoods.com/',
+    'livelihoods': 'http://hrms.navachetanalivelihoods.com/',
     'souhardha': 'https://hrms.navachetanasouhardha.com/',
     'laxmi': 'https://hrms.laxmimultistate.com/',
+    // Origin ROOT only — every request path already carries the `/api/` prefix
+    // (e.g. `/api/auth/login`), so a base URL ending in `/api/` would produce
+    // `/api/api/...`.
+    'nmspl': 'https://hrms.navachetana.co.in/',
+    'cfspl': 'https://hrms.chetanafinancial.com/',
   };
 
   static final String apiBaseUrl = _overrideBaseUrl.isNotEmpty

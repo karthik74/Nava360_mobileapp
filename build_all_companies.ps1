@@ -6,7 +6,7 @@
 # Outputs land in dist\<flavor>\ with a versioned file name.
 param([switch]$Apk)
 
-$flavors = @("livelihoods", "souhardha", "laxmi")
+$flavors = @("livelihoods", "souhardha", "laxmi", "nmspl", "cfspl")
 $kind = if ($Apk) { "apk" } else { "appbundle" }
 
 $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(\S+)').Matches[0].Groups[1].Value

@@ -26,9 +26,47 @@
     },
     {
       "client_info": {
+        "mobilesdk_app_id": "1:593693659664:android:5d135e2f0ad4b942b67095",
+        "android_client_info": {
+          "package_name": "com.hrms.nava_360.cfspl"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyADpXH2FeUNw1SB_zoNGIPEUqCFwkTb-zo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:593693659664:android:963eecb6030f7f12b67095",
         "android_client_info": {
           "package_name": "com.hrms.nava_360.laxmi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyADpXH2FeUNw1SB_zoNGIPEUqCFwkTb-zo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:593693659664:android:cc598d905d75ce61b67095",
+        "android_client_info": {
+          "package_name": "com.hrms.nava_360.nmspl"
         }
       },
       "oauth_client": [],
