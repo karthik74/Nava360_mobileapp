@@ -73,11 +73,20 @@ class RegisteredDevice {
 
 /// Local device identity captured for enrollment (never leaves basic metadata).
 class DeviceIdentity {
+  /// Per-INSTALL UUID persisted in secure storage. Keys biometric enrollment.
+  /// Changes on reinstall / Clear Data — do not use it for the device lock.
   final String deviceId;
+
+  /// Per-DEVICE id (Android SSAID / iOS identifierForVendor) that keys the
+  /// per-shift mobile device lock. Survives reinstall; resets on factory reset.
+  /// Falls back to [deviceId] when the platform cannot supply one.
+  final String hardwareId;
+
   final String deviceName;
   final String platform; // ANDROID | IOS
   const DeviceIdentity({
     required this.deviceId,
+    required this.hardwareId,
     required this.deviceName,
     required this.platform,
   });

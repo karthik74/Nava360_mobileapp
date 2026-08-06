@@ -132,6 +132,14 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'hrms.assets', label: 'My Assets', route: '/assets', icon: Icons.devices_other_rounded, module: MobileModule.hrms, order: 15),
   MobileMenuItem(key: 'hrms.resignation', label: 'My Resignation', route: '/my-resignation', icon: Icons.logout_rounded, module: MobileModule.hrms, order: 16),
   MobileMenuItem(key: 'hrms.performance', label: 'My Performance', route: '/my-performance', icon: Icons.insights_rounded, module: MobileModule.hrms, order: 17, requiredPermissions: ['VIEW_SELF_PERFORMANCE']),
+  // Appraisal KPA/KRA/KPI goals — distinct from 'hrms.performance' above, which
+  // is the FO scorecard. Self-service: every employee sees their own goals, so
+  // no permission gate (the endpoint scopes to the caller's employee id).
+  MobileMenuItem(key: 'hrms.goals', label: 'My Goals', route: '/my-goals', icon: Icons.flag_rounded, module: MobileModule.hrms, order: 17),
+  // Supervisor counterpart: approve target changes requested by direct reports.
+  // Manager-only — the endpoint additionally refuses any caller who is not the
+  // manager whose queue is being read.
+  MobileMenuItem(key: 'hrms.targetApprovals', label: 'Target Approvals', route: '/team-target-approvals', icon: Icons.fact_check_rounded, module: MobileModule.hrms, order: 18, employeeAllowed: false, requiredPermissions: ['PERFORMANCE_SCORE_REVIEW']),
   MobileMenuItem(key: 'hrms.audit', label: 'Internal Audit', route: '/audit', icon: Icons.fact_check_rounded, module: MobileModule.hrms, order: 18, requiredPermissions: ['AUDIT_PERFORM', 'AUDIT_VIEW_BRANCH', 'AUDIT_VIEW_HIERARCHY', 'AUDIT_VIEW_ALL', 'AUDIT_BM_COMPLIANCE', 'AUDIT_VERIFY'], moduleCode: 'audit'),
   // Whistleblower is intentionally NOT in the menu — reached via the dashboard's
   // "Report a concern" button (keeps the reporting entry low-profile).

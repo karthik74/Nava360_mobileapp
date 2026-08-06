@@ -49,6 +49,8 @@ import 'features/whistleblower/whistleblower_form_screen.dart';
 import 'features/assets/my_assets_screen.dart';
 import 'features/assets/asset_scan_screen.dart';
 import 'features/payslips/payslips_screen.dart';
+import 'features/goals/my_goals_screen.dart';
+import 'features/goals/team_target_approvals_screen.dart';
 import 'features/performance/my_performance_screen.dart';
 import 'features/performance/team_performance_screen.dart';
 import 'features/mis/mis_dashboard_screen.dart';
@@ -246,6 +248,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/my-performance',
         builder: (_, __) => const MyPerformanceScreen(),
+      ),
+      GoRoute(
+        path: '/my-goals',
+        builder: (_, __) => const MyGoalsScreen(),
+      ),
+      GoRoute(
+        path: '/team-target-approvals',
+        builder: (_, __) => const TeamTargetApprovalsScreen(),
       ),
       // ── MIS · Grow With Me analytics (own login gate + backend) ──
       GoRoute(

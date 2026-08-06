@@ -22,13 +22,24 @@ class BiometricRepository {
   }
 
   /// Public exchange of a stored credential (+ device id) for a fresh JWT.
+  ///
+  /// [hardwareDeviceId] carries the per-shift device lock key. It must be sent
+  /// here as well as on password login — a biometric enrollment made on the
+  /// bound phone would otherwise be usable from any device.
   Future<BiometricLoginResult> biometricLogin({
     required String deviceId,
     required String biometricToken,
+    String? hardwareDeviceId,
+    String? deviceName,
   }) {
     return _api.post<BiometricLoginResult>(
       '/api/auth/mobile/biometric-login',
-      body: {'deviceId': deviceId, 'biometricToken': biometricToken},
+      body: {
+        'deviceId': deviceId,
+        'biometricToken': biometricToken,
+        if (hardwareDeviceId != null) 'hardwareDeviceId': hardwareDeviceId,
+        if (deviceName != null) 'deviceName': deviceName,
+      },
       parse: (d) => BiometricLoginResult.fromJson(d as Map<String, dynamic>),
     );
   }

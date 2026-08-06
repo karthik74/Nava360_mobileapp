@@ -2,24 +2,57 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/secure_storage.dart';
 import 'biometric_models.dart';
 
-/// Resolves a stable device id (a persisted random UUID), a human-readable
-/// device name, and the platform string the backend expects (ANDROID / IOS).
+/// Resolves the two device identifiers the app uses, a human-readable device
+/// name, and the platform string the backend expects (ANDROID / IOS).
 ///
-/// The device id is our own persisted UUID rather than a hardware id so it stays
-/// stable and carries no PII; the name/platform are for the Registered Devices list.
+/// Two ids, deliberately:
+///  * [DeviceIdentity.deviceId]   — our own persisted UUID. Keys biometric
+///    enrollment. Per-install: reinstalling produces a new one.
+///  * [DeviceIdentity.hardwareId] — Android SSAID / iOS identifierForVendor.
+///    Keys the per-shift device lock, so it must survive a reinstall; otherwise
+///    every employee who reinstalled would be locked out until HR intervened.
+///
+/// A real IMEI is not obtainable: Android 10+ restricts `getImei()` to system /
+/// carrier apps holding READ_PRIVILEGED_PHONE_STATE, iOS never exposed it, and
+/// Play policy treats it as a restricted identifier. SSAID is the closest
+/// compliant equivalent and needs no permission.
 class DeviceInfoService {
+  static const MethodChannel _identityChannel = MethodChannel('app/device_identity');
+
   final DeviceInfoPlugin _plugin = DeviceInfoPlugin();
 
   Future<DeviceIdentity> resolve() async {
     final deviceId = await SecureStorage.readOrCreateDeviceId(_uuidV4);
     final name = await _deviceName();
     final platform = Platform.isIOS ? 'IOS' : 'ANDROID';
-    return DeviceIdentity(deviceId: deviceId, deviceName: name, platform: platform);
+    final hardwareId = await _hardwareId() ?? deviceId;
+    return DeviceIdentity(
+      deviceId: deviceId,
+      hardwareId: hardwareId,
+      deviceName: name,
+      platform: platform,
+    );
+  }
+
+  /// SSAID on Android, identifierForVendor on iOS. Null when unavailable — the
+  /// caller falls back to the persisted UUID rather than failing the login.
+  Future<String?> _hardwareId() async {
+    try {
+      if (Platform.isIOS) {
+        final ios = await _plugin.iosInfo;
+        final idfv = ios.identifierForVendor;
+        return (idfv == null || idfv.isEmpty) ? null : idfv;
+      }
+      return await _identityChannel.invokeMethod<String>('getHardwareId');
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<String> _deviceName() async {
