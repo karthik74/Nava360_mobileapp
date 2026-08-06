@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/api_client.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import 'profile_repository.dart';
@@ -249,11 +250,29 @@ class _UploadDocumentSheet extends ConsumerStatefulWidget {
 
 class _UploadDocumentSheetState extends ConsumerState<_UploadDocumentSheet> {
   final _label = TextEditingController();
+  final _documentNumber = TextEditingController();
   List<DocTypeOption>? _types;
   String? _selectedType;
   PlatformFile? _file;
+  DateTime? _startDate;
+  DateTime? _endDate;
   bool _busy = false;
   String? _error;
+
+  /// Configuration of the selected type — decides which extra inputs to show.
+  DocTypeOption? get _selected {
+    final list = _types;
+    if (list == null || _selectedType == null) return null;
+    for (final t in list) {
+      if (t.code == _selectedType) return t;
+    }
+    return null;
+  }
+
+  static String _iso(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-'
+      '${d.month.toString().padLeft(2, '0')}-'
+      '${d.day.toString().padLeft(2, '0')}';
 
   @override
   void initState() {
@@ -264,6 +283,7 @@ class _UploadDocumentSheetState extends ConsumerState<_UploadDocumentSheet> {
   @override
   void dispose() {
     _label.dispose();
+    _documentNumber.dispose();
     super.dispose();
   }
 
@@ -304,6 +324,27 @@ class _UploadDocumentSheetState extends ConsumerState<_UploadDocumentSheet> {
       setState(() => _error = 'Please choose a file to upload.');
       return;
     }
+    // Mirrors the server rule so the employee is told what is missing before
+    // the file is sent over a mobile connection.
+    final cfg = _selected;
+    if (cfg != null) {
+      if (cfg.requiresDocumentNumber && _documentNumber.text.trim().isEmpty) {
+        setState(() => _error = 'Document number is required.');
+        return;
+      }
+      if (cfg.requiresStartDate && _startDate == null) {
+        setState(() => _error = 'Start date is required.');
+        return;
+      }
+      if (cfg.requiresEndDate && _endDate == null) {
+        setState(() => _error = 'End date is required.');
+        return;
+      }
+      if (_startDate != null && _endDate != null && _endDate!.isBefore(_startDate!)) {
+        setState(() => _error = 'End date cannot be before the start date.');
+        return;
+      }
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -314,16 +355,47 @@ class _UploadDocumentSheetState extends ConsumerState<_UploadDocumentSheet> {
             filename: file.name,
             docType: type,
             label: _label.text,
+            documentNumber:
+                cfg?.requiresDocumentNumber == true ? _documentNumber.text : null,
+            startDate: cfg?.requiresStartDate == true && _startDate != null
+                ? _iso(_startDate!)
+                : null,
+            endDate: cfg?.requiresEndDate == true && _endDate != null
+                ? _iso(_endDate!)
+                : null,
           );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {
         setState(() {
           _busy = false;
-          _error = 'Upload failed. Please try again.';
+          // Surface the server's reason — a rejected upload is usually a missing
+          // required detail, and "please try again" gives the employee nothing
+          // to act on.
+          _error = e is ApiException ? e.message : 'Upload failed. Please try again.';
         });
       }
     }
+  }
+
+  Future<void> _pickDate({required bool start}) async {
+    final now = DateTime.now();
+    final initial = start ? (_startDate ?? now) : (_endDate ?? _startDate ?? now);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(now.year - 50),
+      lastDate: DateTime(now.year + 50),
+    );
+    if (picked == null) return;
+    setState(() {
+      if (start) {
+        _startDate = picked;
+      } else {
+        _endDate = picked;
+      }
+      _error = null;
+    });
   }
 
   @override
@@ -367,13 +439,57 @@ class _UploadDocumentSheetState extends ConsumerState<_UploadDocumentSheet> {
                             overflow: TextOverflow.ellipsis),
                       ))
                   .toList(),
-              onChanged:
-                  _busy ? null : (v) => setState(() => _selectedType = v),
+              onChanged: _busy
+                  ? null
+                  : (v) => setState(() {
+                        _selectedType = v;
+                        // The new type may ask for different details, or none.
+                        _documentNumber.clear();
+                        _startDate = null;
+                        _endDate = null;
+                        _error = null;
+                      }),
               decoration: const InputDecoration(
                 labelText: 'Document type *',
                 border: OutlineInputBorder(),
               ),
             ),
+
+            // Extra details this document type is configured to capture. The
+            // server rejects the upload without them, so they are mandatory here.
+            if (_selected?.capturesExtraFields == true) ...[
+              const SizedBox(height: 14),
+              if (_selected!.requiresDocumentNumber)
+                TextField(
+                  controller: _documentNumber,
+                  enabled: !_busy,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    labelText: 'Document number *',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (_) => setState(() => _error = null),
+                ),
+              if (_selected!.requiresStartDate) ...[
+                const SizedBox(height: 12),
+                _DateRow(
+                  label: 'Start date *',
+                  value: _startDate == null ? null : _iso(_startDate!),
+                  enabled: !_busy,
+                  onTap: () => _pickDate(start: true),
+                ),
+              ],
+              if (_selected!.requiresEndDate) ...[
+                const SizedBox(height: 12),
+                _DateRow(
+                  label: 'End date *',
+                  value: _endDate == null ? null : _iso(_endDate!),
+                  enabled: !_busy,
+                  onTap: () => _pickDate(start: false),
+                ),
+              ],
+            ],
+
             const SizedBox(height: 14),
             TextField(
               controller: _label,
@@ -426,6 +542,43 @@ class _UploadDocumentSheetState extends ConsumerState<_UploadDocumentSheet> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// A tappable, read-only date field matching the surrounding OutlineInputBorder
+/// inputs. Used for the start/end dates a document type requires.
+class _DateRow extends StatelessWidget {
+  const _DateRow({
+    required this.label,
+    required this.value,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String label;
+  final String? value;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(4),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          suffixIcon: const Icon(Icons.calendar_today_rounded, size: 18),
+        ),
+        child: Text(
+          value ?? 'Select a date',
+          style: TextStyle(
+            color: value == null ? AppColors.muted : AppColors.ink,
+          ),
+        ),
       ),
     );
   }
