@@ -6,7 +6,12 @@ import 'package:path_provider/path_provider.dart';
 
 /// Result of saving a file to the device's user-visible storage.
 class SavedDownload {
-  SavedDownload({required this.locationLabel, this.androidUri, this.filePath});
+  SavedDownload({
+    required this.locationLabel,
+    this.androidUri,
+    this.filePath,
+    this.mimeType = 'application/pdf',
+  });
 
   /// Human-friendly destination, e.g. "Downloads" or "Files app".
   final String locationLabel;
@@ -17,6 +22,9 @@ class SavedDownload {
   /// Absolute filesystem path (iOS Documents, or Android legacy Downloads).
   final String? filePath;
 
+  /// The type the file was saved as — the system viewer needs it to pick an app.
+  final String mimeType;
+
   bool get canOpen => androidUri != null || filePath != null;
 
   /// Opens the saved file in the system viewer.
@@ -26,7 +34,7 @@ class SavedDownload {
     if (uri != null) {
       await DownloadSaver.channel.invokeMethod<void>('openDownload', {
         'uri': uri,
-        'mimeType': 'application/pdf',
+        'mimeType': mimeType,
       });
     } else if (path != null) {
       await OpenFilex.open(path);
@@ -44,20 +52,34 @@ class DownloadSaver {
   /// collection via MediaStore (no permission on API 29+; falls back to a
   /// permissioned legacy write below that). On iOS it goes to the app's
   /// Documents directory, which is exposed in the Files app.
-  static Future<SavedDownload> savePdf(String fileName, Uint8List bytes) async {
+  static Future<SavedDownload> savePdf(String fileName, Uint8List bytes) =>
+      save(fileName, bytes, mimeType: 'application/pdf');
+
+  /// Saves [bytes] as [fileName] with an explicit [mimeType] — e.g.
+  /// `text/csv` for a report export.
+  static Future<SavedDownload> save(
+    String fileName,
+    Uint8List bytes, {
+    required String mimeType,
+  }) async {
     if (Platform.isAndroid) {
       final res = await channel.invokeMethod<String>('saveToDownloads', {
         'fileName': fileName,
         'bytes': bytes,
-        'mimeType': 'application/pdf',
+        'mimeType': mimeType,
       });
       final value = res ?? '';
       if (value.startsWith('content://')) {
-        return SavedDownload(locationLabel: 'Downloads', androidUri: value);
+        return SavedDownload(
+          locationLabel: 'Downloads',
+          androidUri: value,
+          mimeType: mimeType,
+        );
       }
       return SavedDownload(
         locationLabel: 'Downloads',
         filePath: value.isEmpty ? null : value,
+        mimeType: mimeType,
       );
     }
     // iOS and others: app Documents directory, visible via the Files app
@@ -65,6 +87,10 @@ class DownloadSaver {
     final dir = await getApplicationDocumentsDirectory();
     final file = File('${dir.path}/$fileName');
     await file.writeAsBytes(bytes, flush: true);
-    return SavedDownload(locationLabel: 'Files app', filePath: file.path);
+    return SavedDownload(
+      locationLabel: 'Files app',
+      filePath: file.path,
+      mimeType: mimeType,
+    );
   }
 }

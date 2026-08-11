@@ -11,6 +11,8 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_charts.dart';
 import 'mis_format.dart';
+import 'mis_hourly_series.dart';
+import 'mis_hourly_widgets.dart';
 import 'mis_models.dart';
 import 'mis_repository.dart';
 import 'mis_widgets.dart';
@@ -134,10 +136,14 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
       branch: _branch,
     );
     final summaryAsync = ref.watch(misHourlySummaryProvider(q));
+    // Live-snapshot freshness for the header. Metadata only — it never gates
+    // the screen, so a missing/failed snapshot simply hides the badge.
+    final snapshot = ref.watch(misHourlySnapshotProvider(activeDate)).valueOrNull;
 
     return RefreshIndicator(
       color: AppColors.primary,
       onRefresh: () async {
+        ref.invalidate(misHourlySnapshotProvider(activeDate));
         ref.invalidate(misHourlySummaryProvider(q));
         ref.invalidate(misHourlyListProvider(q));
       },
@@ -165,6 +171,19 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
             'Live hourly snapshot by DPD bucket — account counts (no rupee amounts).',
             style: TextStyle(fontSize: 12, color: AppColors.muted),
           ),
+          if (snapshot != null && !snapshot.isEmpty) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: MisSnapshotClock(
+                // Re-key on the hour so the odometer replays whenever a fresh
+                // snapshot lands.
+                key: ValueKey('${snapshot.periodDate}-${snapshot.periodHour}'),
+                periodHour: snapshot.hour!,
+                asOf: snapshot.asOf,
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           Align(
             alignment: Alignment.centerLeft,
@@ -187,6 +206,21 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
                 ? const MisInlineEmpty('No hourly data for this date.')
                 : _summary(s),
           ),
+          // Intra-day build-up for the current scope. Reads the same drill
+          // provider the grid below uses (same family key ⇒ no extra request),
+          // and renders nothing until the feed carries per-hour columns.
+          ref.watch(misHourlyListProvider(q)).maybeWhen(
+                data: (rows) {
+                  final agg =
+                      misAggregateHourSeries([for (final r in rows) r.raw]);
+                  if (agg.isEmpty) return const SizedBox.shrink();
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 18),
+                    child: _intraday(agg),
+                  );
+                },
+                orElse: () => const SizedBox.shrink(),
+              ),
           const SizedBox(height: 18),
           MisSectionTitle('By ${_levelHeader[_level]!.toLowerCase()}'),
           _grid(q),
@@ -302,7 +336,36 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
                         ? r.empId
                         : null;
 
+        // ── Intra-day breakdown — only when the feed carries per-hour columns.
+        // Everything below degrades to the classic table/cards when it doesn't,
+        // so the screen keeps working before the API's hour columns land.
+        final seriesByRow = [
+          for (final r in sorted) misHourSeries(r.raw),
+        ];
+        final hasHourly = seriesByRow.any((s) => s.isNotEmpty);
+        final aggregate =
+            misAggregateHourSeries([for (final r in sorted) r.raw]);
+
         if (_table) {
+          if (hasHourly) {
+            return MisHourlyHeatTable(
+              unitHeader: _levelHeader[_level]!,
+              hours: aggregate,
+              rows: [
+                for (var i = 0; i < sorted.length; i++)
+                  MisHeatRow(
+                    unit: unitOf(sorted[i]),
+                    sub: subOf(sorted[i]),
+                    demand: sorted[i].demandCount,
+                    collected: sorted[i].collectionCount,
+                    byHour: {
+                      for (final p in seriesByRow[i]) p.hour: p.value,
+                    },
+                    onTap: _canDrill ? () => _drill(sorted[i]) : null,
+                  ),
+              ],
+            );
+          }
           return MisTable<CollectionRow>(
             onRowTap: _canDrill ? _drill : null,
             columns: [
@@ -321,19 +384,122 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
         }
         return Column(
           children: [
-            for (final r in sorted) ...[
+            for (var i = 0; i < sorted.length; i++) ...[
               MisUnitCard(
-                title: unitOf(r),
-                subtitle: subOf(r),
-                demand: r.demandCount,
-                collection: r.collectionCount,
-                onTap: _canDrill ? () => _drill(r) : null,
+                title: unitOf(sorted[i]),
+                subtitle: subOf(sorted[i]),
+                demand: sorted[i].demandCount,
+                collection: sorted[i].collectionCount,
+                onTap: _canDrill ? () => _drill(sorted[i]) : null,
+                footer: hasHourly && seriesByRow[i].isNotEmpty
+                    ? _sparkFooter(seriesByRow[i])
+                    : null,
               ),
               const SizedBox(height: 8),
             ],
           ],
         );
       },
+    );
+  }
+
+  /// The intra-day sparkline shown under a unit card's metrics.
+  Widget _sparkFooter(List<MisHourPoint> series) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text(
+              'INTRA-DAY',
+              style: TextStyle(
+                fontSize: 9.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.5,
+                color: AppColors.muted,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '${series.first.label} – ${series.last.label}',
+              style: const TextStyle(fontSize: 9.5, color: AppColors.muted),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        MisSparkline(values: [for (final p in series) p.value]),
+      ],
+    );
+  }
+
+  /// The intra-day summary strip + hour-by-hour chart for the current scope.
+  Widget _intraday(List<MisHourPoint> aggregate) {
+    final peak = misPeakHour(aggregate);
+    final collectedToday =
+        aggregate.fold<double>(0, (s, p) => s + p.value);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const MisSectionTitle('Intra-day collection'),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(bottom: 10),
+                child: Text(
+                  'accounts collected by hour',
+                  style: TextStyle(fontSize: 11, color: AppColors.muted),
+                ),
+              ),
+            ),
+          ],
+        ),
+        LayoutBuilder(builder: (context, c) {
+          const gap = 10.0;
+          final w = (c.maxWidth - gap * 2) / 3;
+          return Wrap(
+            spacing: gap,
+            runSpacing: gap,
+            children: [
+              SizedBox(
+                width: w,
+                child: MisHourKpi(
+                  label: 'Collected today',
+                  value: misNum(collectedToday),
+                  sub: 'accounts',
+                ),
+              ),
+              if (peak != null)
+                SizedBox(
+                  width: w,
+                  child: MisHourKpi(
+                    label: 'Peak hour',
+                    value: peak.label,
+                    sub: '${misNum(peak.value)} accounts',
+                  ),
+                ),
+              SizedBox(
+                width: w,
+                child: MisHourKpi(
+                  label: 'Active hours',
+                  value: '${aggregate.length}',
+                  sub: 'with collection',
+                ),
+              ),
+            ],
+          );
+        }),
+        const SizedBox(height: 12),
+        GlassCard(
+          child: MisBarChart(
+            bars: [for (final p in aggregate) MisBar(p.label, p.value)],
+            color: MisPalette.seriesCollection,
+            showValues: true,
+            height: 210,
+          ),
+        ),
+      ],
     );
   }
 }

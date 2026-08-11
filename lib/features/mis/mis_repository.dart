@@ -149,6 +149,138 @@ class PortfolioQuery {
       Object.hash(month, product, region, division, area, branch);
 }
 
+// ── Clients (customer detail behind a portfolio bucket) ──────────────────────
+
+/// A `/clients/list` request: month + product + the open drill levels, one DPD
+/// bucket, plus server-side search, sort and paging.
+class ClientsQuery {
+  /// Screen bucket key → the key the API expects. `pnpa` is the screen's name
+  /// for SMA-2; the API also accepts `pnpa`, but `sma2` is the documented key.
+  static const Map<String, String> _apiBucket = {'pnpa': 'sma2'};
+
+  final String? month; // YYYY-MM
+  final String product; // "" = All
+  final String? region, division, area, branch;
+  final String? officer; // source-system OfficerID
+  /// Screen bucket key; "total" means every bucket in scope.
+  final String bucket;
+  final String query; // free-text search, "" = none
+  final String? sort; // an exact source-workbook column name
+  final bool ascending;
+  final int limit;
+  final int offset;
+
+  const ClientsQuery({
+    this.month,
+    this.product = '',
+    this.region,
+    this.division,
+    this.area,
+    this.branch,
+    this.officer,
+    this.bucket = 'total',
+    this.query = '',
+    this.sort,
+    this.ascending = false,
+    this.limit = 25,
+    this.offset = 0,
+  });
+
+  ClientsQuery copyWith({
+    String? bucket,
+    String? query,
+    String? sort,
+    bool? ascending,
+    int? limit,
+    int? offset,
+    bool clearSort = false,
+  }) =>
+      ClientsQuery(
+        month: month,
+        product: product,
+        region: region,
+        division: division,
+        area: area,
+        branch: branch,
+        officer: officer,
+        bucket: bucket ?? this.bucket,
+        query: query ?? this.query,
+        sort: clearSort ? null : (sort ?? this.sort),
+        ascending: ascending ?? this.ascending,
+        limit: limit ?? this.limit,
+        offset: offset ?? this.offset,
+      );
+
+  Map<String, dynamic> toQuery() => {
+        'month': month,
+        'product': product.isEmpty ? null : product,
+        'region': region,
+        'division': division,
+        'area': area,
+        'branch': branch,
+        'officer': officer,
+        // "total" = no bucket filter, i.e. every bucket in scope.
+        'bucket': bucket == 'total' ? null : (_apiBucket[bucket] ?? bucket),
+        'q': query.isEmpty ? null : query,
+        'sort': sort,
+        'dir': sort == null ? null : (ascending ? 'asc' : 'desc'),
+        'limit': limit,
+        'offset': offset,
+      };
+
+  @override
+  bool operator ==(Object other) =>
+      other is ClientsQuery &&
+      other.month == month &&
+      other.product == product &&
+      other.region == region &&
+      other.division == division &&
+      other.area == area &&
+      other.branch == branch &&
+      other.officer == officer &&
+      other.bucket == bucket &&
+      other.query == query &&
+      other.sort == sort &&
+      other.ascending == ascending &&
+      other.limit == limit &&
+      other.offset == offset;
+
+  @override
+  int get hashCode => Object.hash(
+        month,
+        product,
+        region,
+        division,
+        area,
+        branch,
+        officer,
+        bucket,
+        query,
+        sort,
+        ascending,
+        limit,
+        offset,
+      );
+}
+
+// ── Daily Plan (manager report surfaces) ─────────────────────────────────────
+
+/// A `/daily-plan/rows` or `/daily-plan/pending-branches` request.
+class DailyPlanReportQuery {
+  final String date; // YYYY-MM-DD
+  final String type; // plan | achievement
+  const DailyPlanReportQuery(this.date, this.type);
+
+  @override
+  bool operator ==(Object other) =>
+      other is DailyPlanReportQuery &&
+      other.date == date &&
+      other.type == type;
+
+  @override
+  int get hashCode => Object.hash(date, type);
+}
+
 // ── Disbursement ─────────────────────────────────────────────────────────────
 
 class DisbQuery {
@@ -524,6 +656,21 @@ class MisRepository {
     }
   }
 
+  /// Freshness of the live hourly snapshot (period date + hour slot, capture
+  /// time). Metadata only — the figures come from the summary / by-* feeds.
+  Future<HourlySnapshot> hourlySnapshot(String? date) => _api.get(
+        '/hourly/snapshot',
+        query: {'date': date},
+        parse: HourlySnapshot.fromJson,
+      );
+
+  // Clients (customer detail behind a portfolio bucket) -------------------------
+  Future<ClientsListResponse> clientsList(ClientsQuery q) => _api.get(
+        '/clients/list',
+        query: q.toQuery(),
+        parse: ClientsListResponse.fromJson,
+      );
+
   // Analytical -----------------------------------------------------------------
   Future<List<AnalyticalRow>> _collectionAnalytical(String date, String level) =>
       _api.get('/collection/analytical',
@@ -674,6 +821,41 @@ class MisRepository {
   Future<void> dailyPlanSave(Map<String, dynamic> payload) =>
       _api.post('/daily-plan/save', body: payload, parse: (_) {});
 
+  // Daily Plan (read — manager report surfaces) --------------------------------
+
+  /// Flat one-row-per-branch report feed, scoped. `{ rows: [...] }`.
+  Future<List<DailyPlanReportRow>> dailyPlanRows(String date, String type) =>
+      _api.get(
+        '/daily-plan/rows',
+        query: {'date': date, 'type': type},
+        parse: (d) {
+          final list = d is Map ? d['rows'] : d;
+          return list is List
+              ? list
+                  .whereType<Map>()
+                  .map((m) => DailyPlanReportRow(m.cast<String, dynamic>()))
+                  .toList()
+              : <DailyPlanReportRow>[];
+        },
+      );
+
+  /// Branches in scope that have NOT submitted for a date/type, with the BM's
+  /// name + phone for follow-up. `{ branches: [...] }`.
+  Future<List<PendingBranch>> dailyPlanPending(String date, String type) =>
+      _api.get(
+        '/daily-plan/pending-branches',
+        query: {'date': date, 'type': type},
+        parse: (d) {
+          final list = d is Map ? d['branches'] : d;
+          return list is List
+              ? list
+                  .whereType<Map>()
+                  .map((m) => PendingBranch.fromJson(m.cast<String, dynamic>()))
+                  .toList()
+              : <PendingBranch>[];
+        },
+      );
+
   // Feedback (write) -----------------------------------------------------------
   Future<List<FeedbackItem>> listFeedback() =>
       _api.get('/feedback', parse: (d) => _list(d, FeedbackItem.fromJson));
@@ -787,6 +969,28 @@ final misHourlySummaryProvider =
 final misHourlyListProvider =
     FutureProvider.autoDispose.family<List<CollectionRow>, CollectionQuery>(
   (ref, q) => ref.watch(misRepositoryProvider).hourlyList(q),
+);
+
+/// Live-snapshot freshness for the Hourly header. Keyed by date; the family
+/// argument is nullable so "latest" (no date) is its own cache entry.
+final misHourlySnapshotProvider =
+    FutureProvider.autoDispose.family<HourlySnapshot, String?>(
+  (ref, date) => ref.watch(misRepositoryProvider).hourlySnapshot(date),
+);
+
+final misClientsProvider =
+    FutureProvider.autoDispose.family<ClientsListResponse, ClientsQuery>(
+  (ref, q) => ref.watch(misRepositoryProvider).clientsList(q),
+);
+
+final misDailyPlanRowsProvider = FutureProvider.autoDispose
+    .family<List<DailyPlanReportRow>, DailyPlanReportQuery>(
+  (ref, q) => ref.watch(misRepositoryProvider).dailyPlanRows(q.date, q.type),
+);
+
+final misDailyPlanPendingProvider = FutureProvider.autoDispose
+    .family<List<PendingBranch>, DailyPlanReportQuery>(
+  (ref, q) => ref.watch(misRepositoryProvider).dailyPlanPending(q.date, q.type),
 );
 
 final misAnalyticalRowsProvider =

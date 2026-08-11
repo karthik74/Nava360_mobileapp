@@ -130,6 +130,7 @@ class MisUnitCard extends StatelessWidget {
     required this.collection,
     this.money = false,
     this.onTap,
+    this.footer,
   });
 
   final String title;
@@ -139,6 +140,9 @@ class MisUnitCard extends StatelessWidget {
   final double collection;
   final bool money;
   final VoidCallback? onTap;
+
+  /// Optional extra content below the metrics (e.g. an intra-day sparkline).
+  final Widget? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -199,6 +203,12 @@ class MisUnitCard extends StatelessWidget {
               valueColor: AlwaysStoppedAnimation(tone),
             ),
           ),
+          if (footer != null) ...[
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: AppColors.hairline),
+            const SizedBox(height: 8),
+            footer!,
+          ],
         ],
       ),
     );

@@ -14,15 +14,41 @@ num _toNum(dynamic v) {
 /// Indian-grouped integer/decimal string (e.g. 1234567 → "12,34,567").
 String misNum(dynamic value) => _inIN.format(_toNum(value));
 
-/// Indian-format rupee amounts as thousands / lakhs / crores — mirrors the web
-/// `rupees()`: ₹X.XX Cr ≥1cr, ₹X.XX L ≥1L, ₹X.X K ≥1k, else en-IN grouping.
+/// Every rupee amount renders in CRORES — one unit across the whole of MIS, so
+/// figures stay directly comparable between rows, cards and screens. Mirrors the
+/// web `rupees()`; the old Cr/L/K magnitude switching was dropped deliberately.
+///
+/// Small amounts keep their precision by growing the decimals instead of
+/// changing the unit, so a per-account figure never collapses to ₹0.00 Cr:
+///   ₹10,24,97,54,320 → ₹1,024.98 Cr    (≥ 1 Cr    → 2 dp)
+///   ₹1,00,000        → ₹0.0100 Cr      (≥ 1 L     → 4 dp)
+///   ₹75,000          → ₹0.007500 Cr    (below 1 L → 6 dp)
 String misRupees(dynamic value) {
+  final cr = _toNum(value).toDouble() / 1e7;
+  return '₹${misCroreDigits(cr)} Cr';
+}
+
+/// The Crore figure alone (no ₹ / no " Cr"), with the adaptive precision
+/// [misRupees] uses. Shared by the daily-plan amount columns and CSV exports.
+String misCroreDigits(double cr) {
+  final abs = cr.abs();
+  final dp = abs == 0 || abs >= 1
+      ? 2
+      : abs >= 0.01
+          ? 4
+          : 6;
+  return NumberFormat.decimalPatternDigits(
+    locale: 'en_IN',
+    decimalDigits: dp,
+  ).format(cr);
+}
+
+/// A raw rupee amount rendered as a bare Crore figure, e.g. "12.34 Cr".
+/// Zero/absent renders as "-" (the daily-plan report's empty-cell convention).
+String misCrore(dynamic value) {
   final n = _toNum(value).toDouble();
-  final a = n.abs();
-  if (a >= 1e7) return '₹${(n / 1e7).toStringAsFixed(2)} Cr';
-  if (a >= 1e5) return '₹${(n / 1e5).toStringAsFixed(2)} L';
-  if (a >= 1e3) return '₹${(n / 1e3).toStringAsFixed(1)} K';
-  return '₹${_inIN.format(n)}';
+  if (n == 0) return '-';
+  return '${misCroreDigits(n / 1e7)} Cr';
 }
 
 /// collection / demand → percentage achieved.

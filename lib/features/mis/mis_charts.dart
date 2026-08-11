@@ -183,6 +183,339 @@ class MisBar {
   const MisBar(this.label, this.value);
 }
 
+/// One category of a grouped bar chart — a label plus one value per series.
+class MisBarGroup {
+  final String label;
+  final List<double> values;
+  const MisBarGroup(this.label, this.values);
+}
+
+// ── Always-on value labels ───────────────────────────────────────────────────
+//
+// Every MIS chart prints its figures on the chart itself rather than hiding them
+// behind a tap. fl_chart's "permanent tooltip" draws a floating box per bar, and
+// with more than a handful of bars those boxes overlap into an unreadable smear —
+// so the labels are drawn here instead, over the chart, with the crowding handled
+// explicitly:
+//
+//   1. horizontal, if every label fits inside its bar's slot;
+//   2. otherwise rotated upright, which needs only a line-height of width;
+//   3. and if even that won't fit, every Nth label is dropped, so the ones that
+//      remain stay legible and correctly positioned — never merged or overlapping.
+
+/// One value to print, positioned in plot-relative fractions.
+class MisPlotLabel {
+  /// 0–1 across the plot area (0 = left edge of the plot, 1 = right edge).
+  final double xFrac;
+
+  /// 0–1 up the plot area (0 = baseline, 1 = top).
+  final double yFrac;
+  final String text;
+  final Color color;
+  const MisPlotLabel({
+    required this.xFrac,
+    required this.yFrac,
+    required this.text,
+    required this.color,
+  });
+}
+
+/// Draws [labels] over a chart, choosing an orientation (and thinning) so no two
+/// ever overlap. Sized to the same box as the chart it sits on; [leftPad] and
+/// [bottomPad] must match the chart's reserved axis sizes so the plot rectangle
+/// lines up exactly.
+class MisValueLabels extends StatelessWidget {
+  const MisValueLabels({
+    super.key,
+    required this.labels,
+    required this.slotWidth,
+    this.leftPad = 0,
+    this.bottomPad = 0,
+    this.fontSize = 9.5,
+  });
+
+  final List<MisPlotLabel> labels;
+
+  /// Horizontal space one label may occupy before it would touch its neighbour.
+  final double slotWidth;
+  final double leftPad;
+  final double bottomPad;
+  final double fontSize;
+
+  /// Rough advance width of a digit/character at [fontSize] for this font.
+  static const double _charW = 0.58;
+
+  @override
+  Widget build(BuildContext context) {
+    if (labels.isEmpty) return const SizedBox.shrink();
+
+    var widest = 0.0;
+    for (final l in labels) {
+      final w = l.text.length * fontSize * _charW;
+      if (w > widest) widest = w;
+    }
+
+    // Upright labels need only their line height horizontally.
+    final rotated = widest > slotWidth - 2;
+    final needed = rotated ? fontSize + 3 : widest + 2;
+    // When even the rotated form can't fit, print every `step`-th label.
+    final step = needed > slotWidth ? (needed / slotWidth).ceil() : 1;
+
+    return LayoutBuilder(builder: (context, c) {
+      final plotW = (c.maxWidth - leftPad).clamp(1.0, double.infinity);
+      final plotH = (c.maxHeight - bottomPad).clamp(1.0, double.infinity);
+      // Height a rotated label occupies vertically — it must clear the bar top.
+      final labelH = rotated ? widest : fontSize + 2;
+
+      return Stack(
+        clipBehavior: Clip.none,
+        children: [
+          for (var i = 0; i < labels.length; i++)
+            if (i % step == 0) _one(labels[i], plotW, plotH, labelH, rotated),
+        ],
+      );
+    });
+  }
+
+  Widget _one(
+    MisPlotLabel l,
+    double plotW,
+    double plotH,
+    double labelH,
+    bool rotated,
+  ) {
+    final cx = leftPad + l.xFrac * plotW;
+    // Sit just above the bar top; clamped so a full-height bar's label stays on
+    // the canvas instead of being clipped off the top.
+    final topOfBar = (1 - l.yFrac.clamp(0.0, 1.0)) * plotH;
+    final top = (topOfBar - labelH - 3).clamp(0.0, plotH);
+
+    final text = Text(
+      l.text,
+      maxLines: 1,
+      softWrap: false,
+      overflow: TextOverflow.visible,
+      style: TextStyle(
+        fontSize: fontSize,
+        fontWeight: FontWeight.w700,
+        color: l.color,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+    );
+
+    return Positioned(
+      left: cx - 60,
+      top: top,
+      width: 120,
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: rotated
+            ? RotatedBox(quarterTurns: 3, child: text)
+            : text,
+      ),
+    );
+  }
+}
+
+/// Grouped bar chart — several series side by side per category (e.g. Demand vs
+/// Collection per branch). Ports BarChartCard's multi-series form.
+class MisGroupedBarChart extends StatelessWidget {
+  const MisGroupedBarChart({
+    super.key,
+    required this.groups,
+    required this.seriesNames,
+    required this.seriesColors,
+    this.money = false,
+    this.height = 230,
+  });
+
+  final List<MisBarGroup> groups;
+  final List<String> seriesNames;
+  final List<Color> seriesColors;
+  final bool money;
+  final double height;
+
+  static const double _leftPad = 42;
+  static const double _bottomPad = 30;
+
+  @override
+  Widget build(BuildContext context) {
+    if (groups.isEmpty) {
+      return SizedBox(
+        height: height,
+        child: const Center(
+          child: Text('No data', style: TextStyle(color: AppColors.muted)),
+        ),
+      );
+    }
+    var maxV = 0.0;
+    for (final g in groups) {
+      for (final v in g.values) {
+        if (v > maxV) maxV = v;
+      }
+    }
+    // Headroom above the tallest bar so its printed value has somewhere to sit.
+    final top = maxV <= 0 ? 1.0 : maxV * 1.28;
+    final step = (groups.length / 6).ceil();
+    // Bars thin out as categories pile up so a 30-branch drill stays readable.
+    final barW = groups.length > 14
+        ? 4.0
+        : groups.length > 8
+            ? 6.0
+            : 10.0;
+    const barsSpace = 2.0;
+    final seriesCount =
+        groups.isEmpty ? 1 : groups.first.values.length.clamp(1, 99);
+    String fmt(double v) => money ? misRupees(v) : misNum(v);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          height: height,
+          child: LayoutBuilder(builder: (context, c) {
+            final plotW = (c.maxWidth - _leftPad).clamp(1.0, double.infinity);
+            // Each rod gets its own label, so the crowding budget is per ROD,
+            // not per category.
+            final slot = plotW / (groups.length * seriesCount);
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: BarChart(
+                    BarChartData(
+                      maxY: top,
+                      minY: 0,
+                      barGroups: [
+                        for (var i = 0; i < groups.length; i++)
+                          BarChartGroupData(
+                            x: i,
+                            barsSpace: barsSpace,
+                            barRods: [
+                              for (var s = 0;
+                                  s < groups[i].values.length;
+                                  s++)
+                                BarChartRodData(
+                                  toY: groups[i].values[s],
+                                  color:
+                                      seriesColors[s % seriesColors.length],
+                                  width: barW,
+                                  borderRadius: const BorderRadius.vertical(
+                                      top: Radius.circular(3)),
+                                ),
+                            ],
+                          ),
+                      ],
+                      titlesData: FlTitlesData(
+                        leftTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: _leftPad,
+                            getTitlesWidget: (v, _) => Text(
+                              v.abs() >= 1000
+                                  ? misNum(v.round())
+                                  : v.toStringAsFixed(0),
+                              style: const TextStyle(
+                                  fontSize: 9, color: AppColors.muted),
+                            ),
+                          ),
+                        ),
+                        bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: _bottomPad,
+                            getTitlesWidget: (v, _) {
+                              final i = v.toInt();
+                              if (i < 0 || i >= groups.length) {
+                                return const SizedBox.shrink();
+                              }
+                              if (groups.length > 7 && i % step != 0) {
+                                return const SizedBox.shrink();
+                              }
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(
+                                  groups[i].label.length > 8
+                                      ? '${groups[i].label.substring(0, 8)}…'
+                                      : groups[i].label,
+                                  style: const TextStyle(
+                                      fontSize: 8.5, color: AppColors.muted),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        topTitles: const AxisTitles(),
+                        rightTitles: const AxisTitles(),
+                      ),
+                      gridData: FlGridData(
+                        show: true,
+                        drawVerticalLine: false,
+                        horizontalInterval: top / 4,
+                        getDrawingHorizontalLine: (_) => const FlLine(
+                            color: AppColors.hairline, strokeWidth: 0.6),
+                      ),
+                      borderData: FlBorderData(show: false),
+                      // Values are printed on the chart — nothing to reveal.
+                      barTouchData: BarTouchData(enabled: false),
+                    ),
+                  ),
+                ),
+                Positioned.fill(
+                  child: MisValueLabels(
+                    leftPad: _leftPad,
+                    bottomPad: _bottomPad,
+                    slotWidth: slot,
+                    labels: [
+                      for (var i = 0; i < groups.length; i++)
+                        for (var s = 0; s < groups[i].values.length; s++)
+                          MisPlotLabel(
+                            // Centre of category i, offset to rod s within it.
+                            xFrac: ((i + 0.5) / groups.length) +
+                                ((s - (groups[i].values.length - 1) / 2) *
+                                        (barW + barsSpace)) /
+                                    plotW,
+                            yFrac: groups[i].values[s] / top,
+                            text: fmt(groups[i].values[s]),
+                            color: seriesColors[s % seriesColors.length],
+                          ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          }),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 14,
+          children: [
+            for (var s = 0; s < seriesNames.length; s++)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                      color: seriesColors[s % seriesColors.length],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(seriesNames[s],
+                      style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.inkSoft)),
+                ],
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 /// Compact single-series vertical bar chart (e.g. daily disbursement by day).
 class MisBarChart extends StatelessWidget {
   const MisBarChart({
@@ -191,11 +524,19 @@ class MisBarChart extends StatelessWidget {
     this.color = MisPalette.warning,
     this.money = false,
     this.height = 190,
+    this.showValues = false,
   });
   final List<MisBar> bars;
   final Color color;
   final bool money;
   final double height;
+
+  /// Retained for call-site compatibility. Values are ALWAYS printed now, so
+  /// this no longer gates anything.
+  final bool showValues;
+
+  static const double _leftPad = 38;
+  static const double _bottomPad = 26;
 
   @override
   Widget build(BuildContext context) {
@@ -208,81 +549,109 @@ class MisBarChart extends StatelessWidget {
       );
     }
     final maxV = bars.map((b) => b.value).fold<double>(0, (a, b) => b > a ? b : a);
-    final top = maxV <= 0 ? 1.0 : maxV * 1.15;
+    // Headroom above the tallest bar so its printed value has somewhere to sit.
+    final top = maxV <= 0 ? 1.0 : maxV * 1.28;
     final step = (bars.length / 6).ceil();
+    String fmt(double v) => money ? misRupees(v) : misNum(v);
 
     return SizedBox(
       height: height,
-      child: BarChart(
-        BarChartData(
-          maxY: top,
-          minY: 0,
-          barGroups: [
-            for (var i = 0; i < bars.length; i++)
-              BarChartGroupData(x: i, barRods: [
-                BarChartRodData(
-                  toY: bars[i].value,
-                  color: color,
-                  width: bars.length > 12 ? 6 : 12,
-                  borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(3)),
+      child: LayoutBuilder(builder: (context, c) {
+        final plotW = (c.maxWidth - _leftPad).clamp(1.0, double.infinity);
+        final slot = plotW / bars.length;
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: BarChart(
+                BarChartData(
+                  maxY: top,
+                  minY: 0,
+                  barGroups: [
+                    for (var i = 0; i < bars.length; i++)
+                      BarChartGroupData(
+                        x: i,
+                        barRods: [
+                          BarChartRodData(
+                            toY: bars[i].value,
+                            color: color,
+                            width: bars.length > 12 ? 6 : 12,
+                            borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(3)),
+                          ),
+                        ],
+                      ),
+                  ],
+                  titlesData: FlTitlesData(
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: _leftPad,
+                        getTitlesWidget: (v, _) => Text(
+                          v.abs() >= 1000
+                              ? misNum(v.round())
+                              : v.toStringAsFixed(0),
+                          style: const TextStyle(
+                              fontSize: 9, color: AppColors.muted),
+                        ),
+                      ),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: _bottomPad,
+                        getTitlesWidget: (v, _) {
+                          final i = v.toInt();
+                          if (i < 0 || i >= bars.length) {
+                            return const SizedBox.shrink();
+                          }
+                          if (bars.length > 7 && i % step != 0) {
+                            return const SizedBox.shrink();
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(bars[i].label,
+                                style: const TextStyle(
+                                    fontSize: 9, color: AppColors.muted)),
+                          );
+                        },
+                      ),
+                    ),
+                    topTitles: const AxisTitles(),
+                    rightTitles: const AxisTitles(),
+                  ),
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    horizontalInterval: top / 4,
+                    getDrawingHorizontalLine: (_) => const FlLine(
+                        color: AppColors.hairline, strokeWidth: 0.6),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  // Values are printed on the chart, so there is nothing left
+                  // for a tooltip to reveal.
+                  barTouchData: BarTouchData(enabled: false),
                 ),
-              ]),
+              ),
+            ),
+            Positioned.fill(
+              child: MisValueLabels(
+                leftPad: _leftPad,
+                bottomPad: _bottomPad,
+                slotWidth: slot,
+                labels: [
+                  for (var i = 0; i < bars.length; i++)
+                    MisPlotLabel(
+                      xFrac: (i + 0.5) / bars.length,
+                      yFrac: bars[i].value / top,
+                      text: fmt(bars[i].value),
+                      color: AppColors.ink,
+                    ),
+                ],
+              ),
+            ),
           ],
-          titlesData: FlTitlesData(
-            leftTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 38,
-                getTitlesWidget: (v, _) => Text(
-                  v.abs() >= 1000 ? misNum(v.round()) : v.toStringAsFixed(0),
-                  style: const TextStyle(fontSize: 9, color: AppColors.muted),
-                ),
-              ),
-            ),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 26,
-                getTitlesWidget: (v, _) {
-                  final i = v.toInt();
-                  if (i < 0 || i >= bars.length) return const SizedBox.shrink();
-                  if (bars.length > 7 && i % step != 0) {
-                    return const SizedBox.shrink();
-                  }
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(bars[i].label,
-                        style: const TextStyle(
-                            fontSize: 9, color: AppColors.muted)),
-                  );
-                },
-              ),
-            ),
-            topTitles: const AxisTitles(),
-            rightTitles: const AxisTitles(),
-          ),
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: false,
-            horizontalInterval: top / 4,
-            getDrawingHorizontalLine: (_) =>
-                const FlLine(color: AppColors.hairline, strokeWidth: 0.6),
-          ),
-          borderData: FlBorderData(show: false),
-          barTouchData: BarTouchData(
-            touchTooltipData: BarTouchTooltipData(
-              getTooltipItem: (group, _, rod, __) => BarTooltipItem(
-                money ? misRupees(rod.toY) : misNum(rod.toY),
-                const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 11.5),
-              ),
-            ),
-          ),
-        ),
-      ),
+        );
+      }),
     );
   }
 }

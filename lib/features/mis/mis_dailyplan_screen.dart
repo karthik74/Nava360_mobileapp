@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_auth.dart';
+import 'mis_dailyplan_report.dart';
 import 'mis_models.dart';
 import 'mis_repository.dart';
 import 'mis_widgets.dart';
@@ -268,6 +269,34 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
     }
   }
 
+  /// The manager (AM and above) surface: read what the branches filed. An Area
+  /// Manager's table auto-loads — their job here is to review today's uploads,
+  /// so making them tap Generate on every visit is friction with no decision
+  /// behind it. Wider roles build a report explicitly.
+  Widget _managerView(String role) {
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(title: const Text('Daily Reports')),
+      body: ListView(
+        padding: EdgeInsets.fromLTRB(
+            16, 14, 16, MediaQuery.of(context).padding.bottom + 32),
+        children: [
+          Text(
+            role == 'AM'
+                ? 'Plans & achievements filed by the branches in your area — '
+                    "today's load automatically; use the date controls to "
+                    'review previous days.'
+                : 'Branch-level daily planning & achievement reports — build a '
+                    'custom report by date and level.',
+            style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+          ),
+          const SizedBox(height: 14),
+          MisDailyPlanReport(role: role, autoLoad: role == 'AM'),
+        ],
+      ),
+    );
+  }
+
   bool get _chainWarn =>
       _type == 'plan' &&
       _date == _todayIso() &&
@@ -291,6 +320,18 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final session = ref.watch(misSessionProvider);
+    final role = misRoleFromScope(
+      session?.scope?.tier,
+      session?.user?.role ?? '',
+    );
+    // Uploading is Branch-Manager-only — the API 403s every non-branch writer,
+    // so an AM and above get the READ surfaces (report builder + branches
+    // pending) instead of a form they could never submit. Mirrors the web.
+    if (role != 'BM' && role != 'FO') {
+      return _managerView(role);
+    }
+
     final planDone = _plan?.exists ?? false;
     final achDone = _ach?.exists ?? false;
 

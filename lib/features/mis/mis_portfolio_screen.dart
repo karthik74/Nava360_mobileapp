@@ -9,7 +9,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_charts.dart';
+import 'mis_clients_screen.dart';
 import 'mis_format.dart';
+import 'mis_matrix_table.dart';
 import 'mis_models.dart';
 import 'mis_repository.dart';
 import 'mis_widgets.dart';
@@ -42,7 +44,6 @@ class MisPortfolioScreen extends ConsumerStatefulWidget {
 class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
   String? _month;
   String _product = '';
-  bool _table = false;
   String? _region, _division, _area, _branch;
   // An opened field officer (leaf). `_empRow` carries that FO's bucket-wise
   // portfolio, since `/portfolio/summary` cannot scope to an individual officer.
@@ -148,19 +149,12 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
         padding: EdgeInsets.fromLTRB(
             16, 12, 16, MediaQuery.of(context).padding.bottom + 24),
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: MisMonthPicker(
-                  value: activeMonth,
-                  available: months,
-                  onChanged: (v) => setState(() => _month = v),
-                ),
-              ),
-              const SizedBox(width: 10),
-              MisViewToggle(
-                  table: _table, onChanged: (t) => setState(() => _table = t)),
-            ],
+          // No cards/table toggle, matching the web: the drill is always the
+          // table, so units line up for comparison down a column.
+          MisMonthPicker(
+            value: activeMonth,
+            available: months,
+            onChanged: (v) => setState(() => _month = v),
           ),
           const SizedBox(height: 12),
           Align(
@@ -177,7 +171,7 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
           if (_empRow != null)
             // An opened field officer is a leaf: show that FO's bucket-wise
             // portfolio (built from the drill row) and no further drill grid.
-            _summary(_empRow!.toSummary())
+            _summary(_empRow!.toSummary(), activeMonth)
           else ...[
             summaryAsync.when(
               loading: () => const AppLoadingBlock(height: 200),
@@ -185,7 +179,7 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
                 message: e.toString(),
                 onRetry: () => ref.invalidate(misPortfolioSummaryProvider(q)),
               ),
-              data: (s) => _summary(s),
+              data: (s) => _summary(s, activeMonth),
             ),
             const SizedBox(height: 18),
             MisSectionTitle('By ${_levelLabel[q.level]!.toLowerCase()}'),
@@ -196,7 +190,47 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
     );
   }
 
-  Widget _summary(PortfolioSummary s) {
+  /// Breadcrumb-style label for the open scope, reused by the client-details
+  /// screen so the export filename and header say what was actually listed.
+  String get _scopeLabel {
+    final parts = [_region, _division, _area, _branch, _empName]
+        .where((s) => s != null && s.isNotEmpty)
+        .join(' › ');
+    return parts.isEmpty ? 'All regions' : parts;
+  }
+
+  /// Open the client-level detail behind one DPD bucket, for the current scope.
+  void _openClients(
+    String bucketKey,
+    String bucketLabel,
+    String? activeMonth,
+    double? accounts,
+  ) {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => MisClientsScreen(
+        bucketKey: bucketKey,
+        bucketLabel: bucketLabel,
+        scopeLabel: _scopeLabel,
+        bucketAccounts: accounts,
+        baseQuery: ClientsQuery(
+          // /clients takes YYYY-MM; the picker's months are period dates
+          // (YYYY-MM-01), so trim to the month.
+          month: (activeMonth != null && activeMonth.length >= 7)
+              ? activeMonth.substring(0, 7)
+              : activeMonth,
+          product: _product,
+          region: _region,
+          division: _division,
+          area: _area,
+          branch: _branch,
+          // The report's OfficerID is a source-system code, passed through as-is.
+          officer: _emp,
+        ),
+      ),
+    ));
+  }
+
+  Widget _summary(PortfolioSummary s, String? activeMonth) {
     double amt(String k) => s.amt(k);
     final total = amt('total');
     // ignore: unused_local_variable  (used by the hidden Total Account card)
@@ -239,45 +273,73 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
         //       value: misRupees(total)),
         // ]),
         const SizedBox(height: 18),
-        const MisSectionTitle('Bucket-wise Portfolio'),
-        MisTable<(String, String)>(
-          columns: [
-            MisColumn('Bucket', (r) {
-              final k = r.$1;
-              return Row(
-                children: [
-                  Container(
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(
-                        color: MisPalette.risk(k), shape: BoxShape.circle),
+        MisCcTitle(_empName != null
+            ? 'Bucket-wise Portfolio — $_empName'
+            : 'Bucket-wise Portfolio'),
+        MisMatrixTable(
+          stubHeader: 'Bucket',
+          headers: const ['Accounts', 'POS (Amount)', '% Contrib'],
+          rows: [
+            for (final st in _status)
+              MisMatrixRow(
+                kind: st.$1 == 'total' ? MisRowKind.total : MisRowKind.normal,
+                lead: MisLead(st.$2, chip: MisPalette.risk(st.$1)),
+                cells: [
+                  MisCell(hasAcc
+                      ? misNum(st.$1 == 'total'
+                          ? bucketAccTotal
+                          : bucketAcc(st.$1))
+                      : '—'),
+                  MisCell(misRupees(amt(st.$1))),
+                  MisCell(
+                    st.$1 == 'total' ? '100%' : pctContrib(amt(st.$1)),
+                    color: MisPalette.risk(st.$1),
+                    weight: FontWeight.w800,
                   ),
-                  const SizedBox(width: 8),
-                  Text(r.$2,
-                      style: TextStyle(
-                          fontWeight: k == 'total'
-                              ? FontWeight.w800
-                              : FontWeight.w500,
-                          color: AppColors.ink)),
                 ],
-              );
-            }),
-            MisColumn('Accounts', (r) {
-              final acc = r.$1 == 'total' ? bucketAccTotal : bucketAcc(r.$1);
-              return Text(hasAcc ? misNum(acc) : '—');
-            }, right: true),
-            MisColumn(
-                'POS', (r) => Text(misRupees(amt(r.$1))),
-                right: true),
-            MisColumn('% Contrib', (r) {
-              final pct = r.$1 == 'total' ? '100%' : pctContrib(amt(r.$1));
-              return Text(pct,
-                  style: TextStyle(
-                      color: MisPalette.risk(r.$1),
-                      fontWeight: FontWeight.w700));
-            }, right: true),
+              ),
           ],
-          rows: _status,
+        ),
+        const SizedBox(height: 10),
+        // Every bucket — Grand Total included — carries a "Customer details"
+        // button that opens the individual clients (loan accounts) in it, for
+        // whatever scope is currently open. Mirrors the web's per-row button;
+        // on a phone they sit under the table so the table stays readable.
+        const Text(
+          'Customer details',
+          style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              color: AppColors.muted),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final st in _status)
+              OutlinedButton.icon(
+                onPressed: () => _openClients(
+                  st.$1,
+                  st.$2,
+                  activeMonth,
+                  hasAcc
+                      ? (st.$1 == 'total'
+                          ? bucketAccTotal
+                          : bucketAcc(st.$1))
+                      : null,
+                ),
+                icon: Icon(Icons.groups_rounded,
+                    size: 15, color: MisPalette.risk(st.$1)),
+                label: Text(st.$2, style: const TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  foregroundColor: AppColors.inkSoft,
+                  side: const BorderSide(color: AppColors.hairline),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+              ),
+          ],
         ),
       ],
     );
@@ -298,40 +360,79 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
         if (rows.isEmpty) {
           return const MisInlineEmpty('No portfolio at this level.');
         }
-        if (_table) {
-          return MisTable<PortfolioUnitRow>(
-            onRowTap: _drill,
-            columns: [
-              MisColumn(_levelLabel[q.level]!, (r) => Text(r.unit)),
-              MisColumn(
-                  'Active',
-                  (r) => Text(r.totalAcc > 0 ? misNum(r.activeAcc) : '—'),
-                  right: true),
-              MisColumn('POS', (r) => Text(misRupees(r.total)), right: true),
-              MisColumn('NPA', (r) => Text(misRupees(r.npa)), right: true),
-            ],
-            rows: rows,
-          );
+        // Per-bucket account counts come from the PAR load and only exist for
+        // months whose PAR was ingested. When the whole grid has none, show "—"
+        // rather than a column of zeros that reads as "no loans".
+        final hasAcc = rows.any((r) => r.totalAcc > 0);
+
+        // Three POS bands plus the total, each showing Accounts and POS side by
+        // side. 1-90 DPD = SMA-0 + SMA-1 + SMA-2/PNPA, so Reg.POS + 1-90 + NPA
+        // reconstitute the book and Total is the backend's own figure.
+        double regAcc(PortfolioUnitRow r) => r.regularAcc;
+        double dpdAcc(PortfolioUnitRow r) =>
+            r.sma0Acc + r.sma1Acc + r.pnpaAcc;
+        double dpdPos(PortfolioUnitRow r) =>
+            (r.pos['sma0'] ?? 0) + (r.pos['sma1'] ?? 0) + (r.pos['pnpa'] ?? 0);
+
+        var tRegA = 0.0, tRegP = 0.0, tDpdA = 0.0, tDpdP = 0.0;
+        var tNpaA = 0.0, tNpaP = 0.0, tTotP = 0.0;
+        for (final r in rows) {
+          tRegA += regAcc(r);
+          tRegP += r.pos['regular'] ?? 0;
+          tDpdA += dpdAcc(r);
+          tDpdP += dpdPos(r);
+          tNpaA += r.npaAcc;
+          tNpaP += r.npa;
+          tTotP += r.total;
         }
-        return Column(
-          children: [
-            for (final r in rows) ...[
-              MisMetricColumnsCard(
-                title: r.unit,
-                subtitle: isEmp ? r.empId : null,
-                badge: StatusPill(
-                  label: 'NPA ${r.npaPct.toStringAsFixed(1)}%',
-                  color: r.npaPct > 20 ? AppColors.danger : AppColors.muted,
-                ),
-                columns: [
-                  if (r.totalAcc > 0) ('Active Acc', misNum(r.activeAcc)),
-                  ('POS', misRupees(r.total)),
-                  ('NPA', misRupees(r.npa)),
-                ],
+
+        List<MisCell> bandCells(
+          double ra, double rp, double da, double dp,
+          double na, double np, double tp,
+        ) =>
+            [
+              MisCell(hasAcc ? misNum(ra) : '—'),
+              MisCell(misRupees(rp), color: const Color(0xFF059669)),
+              MisCell(hasAcc ? misNum(da) : '—'),
+              MisCell(misRupees(dp), color: const Color(0xFF059669)),
+              MisCell(hasAcc ? misNum(na) : '—'),
+              MisCell(misRupees(np), color: const Color(0xFF059669)),
+              MisCell(hasAcc ? misNum(ra + da + na) : '—'),
+              MisCell(misRupees(tp), weight: FontWeight.w800),
+            ];
+
+        return MisMatrixTable(
+          stubHeader: _levelLabel[q.level]!,
+          groups: const [
+            MisGroup('Reg.POS', 2),
+            MisGroup('1-90 DPD', 2),
+            MisGroup('NPA', 2),
+            MisGroup('Total', 2),
+          ],
+          headers: const [
+            'Accounts', 'POS',
+            'Accounts', 'POS',
+            'Accounts', 'POS',
+            'Accounts', 'POS',
+          ],
+          rows: [
+            for (final r in rows)
+              MisMatrixRow(
+                lead: MisLead(r.unit, note: isEmp ? r.empId : null),
                 onTap: () => _drill(r),
+                cells: bandCells(
+                  regAcc(r), r.pos['regular'] ?? 0,
+                  dpdAcc(r), dpdPos(r),
+                  r.npaAcc, r.npa,
+                  r.total,
+                ),
               ),
-              const SizedBox(height: 8),
-            ],
+            MisMatrixRow(
+              kind: MisRowKind.total,
+              lead: const MisLead('Total'),
+              cells: bandCells(
+                  tRegA, tRegP, tDpdA, tDpdP, tNpaA, tNpaP, tTotP),
+            ),
           ],
         );
       },
