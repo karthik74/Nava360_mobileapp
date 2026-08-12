@@ -11,7 +11,9 @@ class Env {
 
   /// One backend deployment per company; the flavor picks it at build time.
   static const Map<String, String> _flavorBaseUrls = {
-    'livelihoods': 'http://hrms.navachetanalivelihoods.com/',
+    // HTTPS only — port 80 on this host serves nginx's default vhost, which
+    // 404s every `/api/**` path (login included).
+    'livelihoods': 'https://hrms.navachetanalivelihoods.com/',
     'souhardha': 'https://hrms.navachetanasouhardha.com/',
     'laxmi': 'https://hrms.laxmimultistate.com/',
     // Origin ROOT only — every request path already carries the `/api/` prefix
