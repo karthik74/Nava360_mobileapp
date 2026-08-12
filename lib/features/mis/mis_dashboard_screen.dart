@@ -17,6 +17,8 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import 'mis_auth.dart';
+import 'mis_charts.dart';
+import 'mis_export.dart';
 import 'mis_format.dart';
 import 'mis_models.dart';
 import 'mis_repository.dart';
@@ -329,6 +331,28 @@ class _MisDashboardBodyState extends ConsumerState<_MisDashboardBody> {
         ),
         const SizedBox(height: 14),
 
+        // The table renders only the two compared columns; the export is the
+        // full picture — every month of an FY the user ticks.
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Month Highlights',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.ink),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: () => _openExport(table, allKeys, activeFy),
+              icon: const Icon(Icons.download_rounded, size: 17),
+              label: const Text('Export'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+
         // Month Highlights table (Parameter | Month 1 | Month 2).
         _HighlightsTable(table: table, left: left, right: right),
 
@@ -481,6 +505,35 @@ class _MisDashboardBodyState extends ConsumerState<_MisDashboardBody> {
     });
   }
 
+  /// Download panel for the Month Highlights table: pick a FINANCIAL YEAR, tick
+  /// the months, take it as CSV. FY (not calendar year) because the table and
+  /// its dropdown are already FY-based — a calendar year here would export a
+  /// different span from the one on screen and quietly disagree with it.
+  void _openExport(OverviewTable table, List<String> allKeys, int activeFy) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _OverviewExportSheet(
+        table: table,
+        allKeys: allKeys,
+        initialFy: activeFy,
+        scopeLabel: _scopeLabel,
+      ),
+    );
+  }
+
+  /// The drill currently applied to the dashboard, for the export header.
+  String get _scopeLabel {
+    final parts = [_region?.name, _division?.name, _area?.name, _branch?.name]
+        .where((s) => s != null && s.isNotEmpty)
+        .join(' › ');
+    return parts.isEmpty ? 'All regions' : parts;
+  }
+
   Widget _hierDropdown(String label, HierOption? value,
       AsyncValue<List<HierOption>> opts, ValueChanged<HierOption?> onChanged) {
     final list = opts.asData?.value ?? const <HierOption>[];
@@ -520,18 +573,193 @@ class _MisGroup {
   final Set<String> keys;
 }
 
-class _HighlightsTable extends StatelessWidget {
-  const _HighlightsTable({
-    required this.table,
-    required this.left,
-    required this.right,
-  });
-  final OverviewTable table;
-  final String left;
-  final String right;
+/// Unit column of the CSV, matched to the row type the API declares.
+const Map<String, String> _overviewUnits = {
+  'count': 'Count',
+  'cr': 'Rs Cr',
+  'pct': '%',
+  'na': '',
+};
 
-  // Row-key → category, in report order. Keys come verbatim from `/overview`.
-  static const List<_MisGroup> _groups = [
+/// Excel wants a bare number — keep the precision the unit deserves, no symbols.
+String _csvNum(String type, double? v) {
+  if (v == null || v.isNaN) return '';
+  if (type == 'count') return v.round().toString();
+  return v.toStringAsFixed(2);
+}
+
+/// FY picker + month tick-list over the Month Highlights table, exported as CSV.
+class _OverviewExportSheet extends StatefulWidget {
+  const _OverviewExportSheet({
+    required this.table,
+    required this.allKeys,
+    required this.initialFy,
+    required this.scopeLabel,
+  });
+
+  final OverviewTable table;
+
+  /// Every month key the API returned, "YYYY-MM-DD", ascending.
+  final List<String> allKeys;
+  final int initialFy;
+  final String scopeLabel;
+
+  @override
+  State<_OverviewExportSheet> createState() => _OverviewExportSheetState();
+}
+
+class _OverviewExportSheetState extends State<_OverviewExportSheet> {
+  late int _fy = widget.initialFy;
+  late Set<String> _selected = _monthsOf(_fy).toSet();
+  bool _busy = false;
+
+  List<String> _monthsOf(int fy) =>
+      widget.allKeys.where((k) => misFyStart(k) == fy).toList();
+
+  List<int> get _fys {
+    final s = widget.allKeys.map(misFyStart).toSet().toList()
+      ..sort((a, b) => b.compareTo(a));
+    return s;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final months = _monthsOf(_fy);
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.hairline,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text('Export Month Highlights',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.ink)),
+            const SizedBox(height: 2),
+            Text(widget.scopeLabel,
+                style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+            const SizedBox(height: 14),
+            if (_fys.length > 1)
+              _LabeledDropdown<int>(
+                label: 'Financial year',
+                value: _fy,
+                items: [
+                  for (final s in _fys)
+                    DropdownMenuItem(value: s, child: Text(misFyLabel(s))),
+                ],
+                onChanged: (v) => setState(() {
+                  _fy = v ?? _fy;
+                  // The month list is rebuilt per FY, so it only ever offers
+                  // months that actually have data.
+                  _selected = _monthsOf(_fy).toSet();
+                }),
+              ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                const Text('Months',
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.muted)),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => setState(() => _selected = _selected.length ==
+                          months.length
+                      ? <String>{}
+                      : months.toSet()),
+                  child: Text(
+                      _selected.length == months.length ? 'None' : 'All',
+                      style: const TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final k in months)
+                  FilterChip(
+                    label: Text(misMonthLabel(k),
+                        style: const TextStyle(fontSize: 12)),
+                    selected: _selected.contains(k),
+                    onSelected: (on) => setState(() {
+                      if (on) {
+                        _selected.add(k);
+                      } else {
+                        _selected.remove(k);
+                      }
+                    }),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _selected.isEmpty || _busy ? null : _export,
+                icon: const Icon(Icons.download_rounded, size: 18),
+                label: Text(_busy ? 'Exporting…' : 'Export CSV'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _export() async {
+    setState(() => _busy = true);
+    try {
+      // Selected months in the table's own ascending order.
+      final cols = _monthsOf(_fy).where(_selected.contains).toList();
+      final lines = <List<Object?>>[
+        ['Scope', widget.scopeLabel],
+        ['Financial year', misFyLabel(_fy)],
+        const [],
+        [
+          'Category',
+          'Parameter',
+          'Unit',
+          for (final k in cols) misMonthLabel(k),
+        ],
+        for (final row in widget.table.rows)
+          [
+            _groupFor(row.key).title,
+            row.label,
+            _overviewUnits[row.type] ?? '',
+            for (final k in cols)
+              _csvNum(row.type, widget.table.cell(k, row.key)),
+          ],
+      ];
+      final name =
+          'month-highlights_${misSlug(widget.scopeLabel)}_${misFyLabel(_fy)}'
+              .replaceAll(' ', '-');
+      final ok = await misSaveCsv(context, '$name.csv', misCsvDocument(lines));
+      if (ok && mounted) Navigator.pop(context);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+}
+
+// Row-key → category, in report order. Keys come verbatim from `/overview`.
+// File-level so the export sheet can label rows with the same categories the
+// table shows — one definition, one source of truth.
+const List<_MisGroup> _overviewGroups = [
     _MisGroup('NETWORK OVERVIEW', Color(0xFF0F9AA0),
         {'state', 'branch', 'foCount', 'totalStaff'}),
     _MisGroup('DISBURSEMENT & ACCOUNTS', Color(0xFF2563EB),
@@ -555,15 +783,25 @@ class _HighlightsTable extends StatelessWidget {
       'avgLoanDisb',
       'avgLoanOs',
     }),
-  ];
-  static const _MisGroup _other = _MisGroup('OTHER', AppColors.muted, {});
+];
+const _MisGroup _overviewOther = _MisGroup('OTHER', AppColors.muted, {});
 
-  _MisGroup _groupFor(String key) {
-    for (final g in _groups) {
-      if (g.keys.contains(key)) return g;
-    }
-    return _other;
+_MisGroup _groupFor(String key) {
+  for (final g in _overviewGroups) {
+    if (g.keys.contains(key)) return g;
   }
+  return _overviewOther;
+}
+
+class _HighlightsTable extends StatelessWidget {
+  const _HighlightsTable({
+    required this.table,
+    required this.left,
+    required this.right,
+  });
+  final OverviewTable table;
+  final String left;
+  final String right;
 
   @override
   Widget build(BuildContext context) {
@@ -1105,12 +1343,10 @@ class _MisMetricChart extends StatelessWidget {
       bottom = dataMin < 0 ? dataMin * 1.18 : 0.0;
     }
     final range = (top - bottom) <= 0 ? 1.0 : top - bottom;
-    // Value-label sizing shrinks as months pile up so the pills never merge.
+    // Printed-value sizing shrinks as months pile up; MisValueLabels then
+    // rotates or thins them so no two can ever merge.
     final dense = points.length > 6;
-    final veryDense = points.length > 9;
-    final labelFont = veryDense ? 8.5 : (dense ? 9.5 : 11.0);
-    final labelStyle = TextStyle(
-        color: Colors.white, fontWeight: FontWeight.w700, fontSize: labelFont);
+    final labelFont = points.length > 9 ? 8.5 : (dense ? 9.5 : 11.0);
 
     final bottomTitles = AxisTitles(
       sideTitles: SideTitles(
@@ -1153,50 +1389,68 @@ class _MisMetricChart extends StatelessWidget {
     final border = FlBorderData(show: false);
 
     if (bar) {
-      return BarChart(
-        BarChartData(
-          maxY: top,
-          minY: bottom,
-          barGroups: [
-            for (var i = 0; i < points.length; i++)
-              BarChartGroupData(
-                x: i,
-                // Force the value label to render without a hover.
-                showingTooltipIndicators: const [0],
-                barRods: [
-                  BarChartRodData(
-                    toY: points[i].value,
-                    color: AppColors.primary,
-                    width: points.length > 8 ? 8 : 14,
-                    borderRadius:
-                        const BorderRadius.vertical(top: Radius.circular(3)),
+      // Values are printed over the chart rather than drawn as fl_chart's
+      // floating tooltip pills — with a full financial year of months those
+      // pills overlap into an unreadable smear. MisValueLabels rotates or thins
+      // the labels instead, so they never merge.
+      return LayoutBuilder(builder: (context, c) {
+        const leftPad = 40.0;
+        const bottomPad = 24.0;
+        final plotW = (c.maxWidth - leftPad).clamp(1.0, double.infinity);
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: BarChart(
+                BarChartData(
+                  maxY: top,
+                  minY: bottom,
+                  barGroups: [
+                    for (var i = 0; i < points.length; i++)
+                      BarChartGroupData(
+                        x: i,
+                        barRods: [
+                          BarChartRodData(
+                            toY: points[i].value,
+                            color: AppColors.primary,
+                            width: points.length > 8 ? 8 : 14,
+                            borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(3)),
+                          ),
+                        ],
+                      ),
+                  ],
+                  titlesData: FlTitlesData(
+                    bottomTitles: bottomTitles,
+                    leftTitles: leftTitles,
+                    topTitles: const AxisTitles(),
+                    rightTitles: const AxisTitles(),
                   ),
+                  gridData: grid,
+                  borderData: border,
+                  barTouchData: BarTouchData(enabled: false),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: MisValueLabels(
+                leftPad: leftPad,
+                bottomPad: bottomPad,
+                fontSize: labelFont,
+                slotWidth: plotW / points.length,
+                labels: [
+                  for (var i = 0; i < points.length; i++)
+                    MisPlotLabel(
+                      xFrac: (i + 0.5) / points.length,
+                      yFrac: (points[i].value - bottom) / range,
+                      text: _fmt(points[i].value),
+                      color: AppColors.ink,
+                    ),
                 ],
               ),
-          ],
-          titlesData: FlTitlesData(
-            bottomTitles: bottomTitles,
-            leftTitles: leftTitles,
-            topTitles: const AxisTitles(),
-            rightTitles: const AxisTitles(),
-          ),
-          gridData: grid,
-          borderData: border,
-          barTouchData: BarTouchData(
-            enabled: true,
-            touchTooltipData: BarTouchTooltipData(
-              getTooltipColor: (_) => AppColors.primary,
-              fitInsideHorizontally: true,
-              fitInsideVertically: true,
-              tooltipMargin: 2,
-              tooltipPadding:
-                  const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              getTooltipItem: (group, _, rod, __) =>
-                  BarTooltipItem(_fmt(rod.toY), labelStyle),
             ),
-          ),
-        ),
-      );
+          ],
+        );
+      });
     }
 
     final lineBar = LineChartBarData(
@@ -1222,19 +1476,17 @@ class _MisMetricChart extends StatelessWidget {
       ),
     );
 
-    // fl_chart 0.68 does not reliably paint permanent tooltips on a line, so
-    // draw the value labels ourselves as pills positioned over each point —
-    // giving the line the always-visible labels the Bar chart already shows.
+    // fl_chart 0.68 does not paint permanent tooltips on a line, and its
+    // floating pills overlap once a full financial year is on screen — so the
+    // values are drawn over the chart by MisValueLabels, which rotates or thins
+    // them rather than letting any two merge.
     return LayoutBuilder(
       builder: (context, constraints) {
-        final w = constraints.maxWidth;
-        final h = constraints.maxHeight;
         const leftPad = 40.0; // == leftTitles.reservedSize
         const bottomPad = 24.0; // == bottomTitles.reservedSize
-        final plotW = (w - leftPad).clamp(1.0, double.infinity);
-        final plotH = (h - bottomPad).clamp(1.0, double.infinity);
+        final plotW =
+            (constraints.maxWidth - leftPad).clamp(1.0, double.infinity);
         final n = points.length;
-        final boxW = veryDense ? 54.0 : (dense ? 66.0 : 100.0);
         return Stack(
           clipBehavior: Clip.none,
           children: [
@@ -1256,68 +1508,29 @@ class _MisMetricChart extends StatelessWidget {
                 ),
               ),
             ),
-            for (var i = 0; i < n; i++)
-              _pointLabel(
-                i: i,
-                n: n,
+            Positioned.fill(
+              child: MisValueLabels(
                 leftPad: leftPad,
-                plotW: plotW,
-                plotH: plotH,
-                width: w,
-                boxW: boxW,
-                range: range,
-                bottom: bottom,
-                labelStyle: labelStyle,
-                stagger: dense,
+                bottomPad: bottomPad,
+                fontSize: labelFont,
+                // Line points sit ON the edges, so the gap between neighbours
+                // is plotW/(n-1), not plotW/n.
+                slotWidth: n > 1 ? plotW / (n - 1) : plotW,
+                labels: [
+                  for (var i = 0; i < n; i++)
+                    MisPlotLabel(
+                      xFrac: n == 1 ? 0.5 : i / (n - 1),
+                      yFrac: ((points[i].value - bottom) / range)
+                          .clamp(0.0, 1.0),
+                      text: _fmt(points[i].value),
+                      color: AppColors.ink,
+                    ),
+                ],
               ),
+            ),
           ],
         );
       },
-    );
-  }
-
-  // A permanently-visible value pill centred over line point [i]. Mirrors the
-  // Bar chart's always-on labels, since fl_chart 0.68 won't paint permanent
-  // line tooltips.
-  Widget _pointLabel({
-    required int i,
-    required int n,
-    required double leftPad,
-    required double plotW,
-    required double plotH,
-    required double width,
-    required double boxW,
-    required double range,
-    required double bottom,
-    required TextStyle labelStyle,
-    required bool stagger,
-  }) {
-    final xFrac = n == 1 ? 0.5 : i / (n - 1);
-    final px = leftPad + xFrac * plotW;
-    final yFrac = ((points[i].value - bottom) / range).clamp(0.0, 1.0);
-    final py = (1 - yFrac) * plotH;
-    // When crowded, lift alternate labels to a second tier so neighbouring
-    // pills sit at different heights and never overlap horizontally.
-    final tier = stagger ? (i % 2) : 0;
-    final left =
-        (px - boxW / 2).clamp(0.0, (width - boxW).clamp(0.0, double.infinity));
-    final top = (py - 28 - tier * 20).clamp(0.0, plotH);
-    return Positioned(
-      left: left,
-      top: top,
-      width: boxW,
-      height: 22,
-      child: Center(
-        child: Container(
-          padding: EdgeInsets.symmetric(
-              horizontal: stagger ? 4 : 6, vertical: 2),
-          decoration: BoxDecoration(
-            color: AppColors.primary,
-            borderRadius: BorderRadius.circular(5),
-          ),
-          child: Text(_fmt(points[i].value), maxLines: 1, style: labelStyle),
-        ),
-      ),
     );
   }
 }

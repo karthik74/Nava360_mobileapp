@@ -13,6 +13,7 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_charts.dart';
 import 'mis_format.dart';
+import 'mis_matrix_table.dart';
 import 'mis_models.dart';
 import 'mis_repository.dart';
 import 'mis_widgets.dart';
@@ -51,7 +52,6 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
   String? _month;
   String _product = '';
   bool _money = true; // amount | count
-  bool _table = false;
   bool _daily = false; // Overview | Daily tab
   String? _region, _division, _area, _branch;
 
@@ -144,18 +144,16 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
       padding: EdgeInsets.fromLTRB(
           16, 12, 16, MediaQuery.of(context).padding.bottom + 24),
       children: [
-        // Tab + (overview only) month picker + view toggle
-        Row(
-          children: [
-            MisSegmented<bool>(
-              options: const [(false, 'Overview'), (true, 'Daily')],
-              value: _daily,
-              onChanged: (v) => setState(() => _daily = v),
-            ),
-            const Spacer(),
-            MisViewToggle(
-                table: _table, onChanged: (t) => setState(() => _table = t)),
-          ],
+        // Tab + (overview only) month picker. Like the web there is no
+        // cards/table toggle: the drill is always the table, because Accounts,
+        // Amount and ATS only mean something read side by side.
+        Align(
+          alignment: Alignment.centerLeft,
+          child: MisSegmented<bool>(
+            options: const [(false, 'Overview'), (true, 'Daily')],
+            value: _daily,
+            onChanged: (v) => setState(() => _daily = v),
+          ),
         ),
         const SizedBox(height: 12),
         if (!_daily)
@@ -535,41 +533,80 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
           return const MisInlineEmpty('No disbursement at this level.');
         }
         final isEmp = _level == 'employee';
-        if (_table) {
-          return MisTable<DisbUnitRow>(
-            onRowTap: _canDrill ? (r) => _drillUnit(r.unit) : null,
-            columns: [
-              MisColumn(_levelLabel[_level]!, (r) => Text(r.unit)),
-              MisColumn('Accounts', (r) => Text(misNum(r.count)), right: true),
-              MisColumn('Amount', (r) => Text(misRupees(r.amount)),
-                  right: true),
-            ],
-            rows: rows,
-          );
-        }
-        return Column(
-          children: [
-            for (final r in rows) ...[
-              MisMetricColumnsCard(
-                accent: 'amber',
-                title: r.unit,
-                subtitle: isEmp ? r.empId : r.managerName,
-                badge: (isEmp && _callHref(r.mobile) != null)
-                    ? IconButton(
-                        onPressed: () => _call(r.mobile),
-                        icon: const Icon(Icons.phone_rounded,
-                            size: 18, color: AppColors.success),
-                        tooltip: 'Call ${r.unit}',
-                      )
-                    : null,
-                columns: [
-                  ('A/C', misNum(r.count)),
-                  ('Amount', misRupees(r.amount)),
-                ],
+
+        // Unlike Collection, Accounts and Amount show TOGETHER — they are not
+        // alternatives here: ATS (average ticket size) is amount ÷ accounts, so
+        // comparing branches needs both in front of you for it to mean anything.
+        // That is also why this screen carries no Accounts/Amount switch.
+        final totCount = rows.fold<double>(0, (s, r) => s + r.count);
+        final totAmount = rows.fold<double>(0, (s, r) => s + r.amount);
+        // ATS is computed from the TOTALS, never averaged across rows — that
+        // would weight a 3-account branch like a 300-account one.
+        double ats(double amt, double cnt) => cnt > 0 ? amt / cnt : 0;
+        String share(double v) => totAmount > 0
+            ? '${(v / totAmount * 100).toStringAsFixed(1)}%'
+            : '—';
+
+        return MisMatrixTable(
+          stubHeader: _levelLabel[_level]!,
+          headers: [
+            if (!isEmp) 'Manager',
+            'Accounts',
+            'Amount',
+            'ATS',
+            'Share',
+          ],
+          rows: [
+            for (final r in rows)
+              MisMatrixRow(
+                lead: MisLead(
+                  r.unit,
+                  note: isEmp ? r.empId : null,
+                  trailing: (isEmp && _callHref(r.mobile) != null)
+                      ? IconButton(
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: () => _call(r.mobile),
+                          icon: const Icon(Icons.phone_rounded,
+                              size: 16, color: AppColors.success),
+                          tooltip: 'Call ${r.unit}',
+                        )
+                      : null,
+                ),
                 onTap: _canDrill ? () => _drillUnit(r.unit) : null,
+                cells: [
+                  if (!isEmp)
+                    MisCell(r.managerName ?? '—', muted: true),
+                  MisCell(misNum(r.count)),
+                  MisCell(misRupees(r.amount),
+                      color: const Color(0xFF059669),
+                      weight: FontWeight.w700),
+                  MisCell(misRupees(ats(r.amount, r.count))),
+                  // Share is BY AMOUNT, disbursement's reporting unit. Accounts
+                  // stay on the row, so a branch disbursing many small loans is
+                  // visible as a low share against a high count.
+                  MisCell(
+                    share(r.amount),
+                    weight: FontWeight.w700,
+                    track: totAmount > 0
+                        ? (r.amount / totAmount).clamp(0.0, 1.0)
+                        : 0,
+                    trackColor: AppColors.warning,
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-            ],
+            MisMatrixRow(
+              kind: MisRowKind.total,
+              lead: const MisLead('Total'),
+              cells: [
+                if (!isEmp) const MisCell(''),
+                MisCell(misNum(totCount)),
+                MisCell(misRupees(totAmount)),
+                MisCell(misRupees(ats(totAmount, totCount))),
+                const MisCell('100.0%'),
+              ],
+            ),
           ],
         );
       },

@@ -3,8 +3,9 @@
 //  current, day by day. Collection pairs days by weekday-occurrence (1st Mon ↔
 //  1st Mon), de-cumulates the cumulative MTD figures into daily contributions
 //  and re-accumulates per label; Disbursement pairs by day-of-month. Ports
-//  ComparisonScreen.tsx (card views; the web's sortable tables are omitted on
-//  mobile — the card comparison carries the same numbers).
+//  ComparisonScreen.tsx — the card view walks one paired day at a time, the
+//  table view (toggle, top right) shows the whole month like the web's tables,
+//  with the same sortable Day / date columns.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import 'mis_comparison_tables.dart';
 import 'mis_format.dart';
 import 'mis_models.dart';
 import 'mis_repository.dart';
@@ -171,8 +173,17 @@ class _CollModel {
   final List<_LabeledDay> curDays;
   final Map<String, _LabeledDay> prevLabelMap;
   final Map<String, Map<String, double>> prevCumMap, curCumMap;
+
+  /// Every weekday-occurrence label in the two months ("1 - Mon" … "5 - Sun"),
+  /// in occurrence order — the table's row set (the cards walk `curDays`).
+  final List<String> allLabels;
+
+  /// Day-of-month of the newest current-month day that has data. Labels past it
+  /// are "future": the previous month's figures show dimmed, not as a comparison.
+  final int latestCurDayNum;
+
   const _CollModel(this.months, this.curDays, this.prevLabelMap,
-      this.prevCumMap, this.curCumMap);
+      this.prevCumMap, this.curCumMap, this.allLabels, this.latestCurDayNum);
 }
 
 _CollModel? _buildCollectionModel(Map<String, Map<String, dynamic>> dateMap) {
@@ -241,7 +252,8 @@ _CollModel? _buildCollectionModel(Map<String, Map<String, dynamic>> dateMap) {
     }
   }
 
-  return _CollModel(months, curDays, prevLabelMap, prevCumMap, curCumMap);
+  return _CollModel(months, curDays, prevLabelMap, prevCumMap, curCumMap,
+      allLabels, latestCurDayNum);
 }
 
 // Disbursement -----------------------------------------------------------------
@@ -355,6 +367,8 @@ class MisComparisonScreen extends ConsumerStatefulWidget {
 class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
   bool _disb = false; // Collection | Disbursement sub-tab
   int _dayIdx = -1; // -1 ⇒ default to latest
+  // Cards walk one paired day at a time; the table shows the whole month.
+  bool _table = false;
 
   // Cascading scope filter (Region → Division → Area → Branch). The `id` loads
   // the next level; the NAMES are sent to the comparison endpoints.
@@ -384,15 +398,30 @@ class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
           // Scope filter (above the sub-tabs).
           _scopeFilter(),
           const SizedBox(height: 12),
-          Center(
-            child: MisSegmented<bool>(
-              options: const [(false, 'Collection'), (true, 'Disbursement')],
-              value: _disb,
-              onChanged: (v) => setState(() {
-                _disb = v;
-                _dayIdx = -1;
-              }),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: MisSegmented<bool>(
+                    options: const [
+                      (false, 'Collection'),
+                      (true, 'Disbursement')
+                    ],
+                    value: _disb,
+                    onChanged: (v) => setState(() {
+                      _disb = v;
+                      _dayIdx = -1;
+                    }),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              MisViewToggle(
+                table: _table,
+                onChanged: (t) => setState(() => _table = t),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
           if (_disb) _disbursement() else _collection(),
@@ -550,6 +579,7 @@ class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
         if (model == null || model.curDays.isEmpty) {
           return const MisInlineEmpty('No daily collection data available.');
         }
+        if (_table) return _collectionTable(model);
         final lastIdx = model.curDays.length - 1;
         final idx = _dayIdx < 0 ? lastIdx : _dayIdx.clamp(0, lastIdx);
         final curDay = model.curDays[idx];
@@ -601,6 +631,123 @@ class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
     );
   }
 
+  /// The whole month at once: every weekday-occurrence label, each month's date
+  /// and cumulative regular demand / collection. Sortable by Day or either date.
+  Widget _collectionTable(_CollModel model) {
+    const dowOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final m = model.months;
+    final rows = <MisCompareCollRow>[];
+
+    for (final label in model.allLabels) {
+      final parts = label.split(' - ');
+      final occ = int.tryParse(parts[0]) ?? 0;
+      final dayName = parts.length > 1 ? parts[1] : '';
+      final prevNum =
+          _getDateForLabel(m.prev.year, m.prev.month, dayName, occ);
+      final curNum = _getDateForLabel(m.cur.year, m.cur.month, dayName, occ);
+      final future = curNum == null || curNum > model.latestCurDayNum;
+
+      final prevCum = model.prevCumMap[label];
+      final curCum = model.curCumMap[label];
+      // A label neither month reached is noise — the web skips it too, since
+      // both sides render as dashes.
+      if (prevCum == null && curCum == null && prevNum == null && curNum == null) {
+        continue;
+      }
+
+      rows.add(MisCompareCollRow(
+        label: label,
+        occurrence: occ,
+        dayIndex: dowOrder.indexOf(dayName),
+        prevDateLabel: prevNum != null
+            ? '${_ordinal(prevNum)} ${_monthNames[m.prev.month]}'
+            : '-',
+        curDateLabel: curNum != null
+            ? '${_ordinal(curNum)} ${_monthNames[m.cur.month]}'
+            : '-',
+        prevDateNum: prevNum ?? 99,
+        curDateNum: curNum ?? 99,
+        prev: prevCum == null
+            ? null
+            : (
+                demand: prevCum['regular_demand'] ?? 0,
+                collection: prevCum['regular_collection'] ?? 0
+              ),
+        cur: curCum == null
+            ? null
+            : (
+                demand: curCum['regular_demand'] ?? 0,
+                collection: curCum['regular_collection'] ?? 0
+              ),
+        future: future,
+      ));
+    }
+
+    if (rows.isEmpty) {
+      return const MisInlineEmpty('No daily collection data available.');
+    }
+    return MisCompareCollectionTable(
+      rows: rows,
+      prevMonth: m.prev.name,
+      curMonth: m.cur.name,
+      numberFormat: _fmtNum,
+    );
+  }
+
+  /// Day-of-month rows with each month's accounts and CUMULATIVE amount, so the
+  /// last row doubles as the month-to-date total, plus a month-over-month diff.
+  Widget _disbursementTable(_DisbModel model) {
+    final m = model.months;
+    var prevLastDay = 0, curLastDay = 0;
+    for (final d in model.prevMap.keys) {
+      if (d > prevLastDay) prevLastDay = d;
+    }
+    for (final d in model.curMap.keys) {
+      if (d > curLastDay) curLastDay = d;
+    }
+
+    var prevCum = 0.0, curCum = 0.0;
+    var totPAcc = 0.0, totCAcc = 0.0, totPAmt = 0.0, totCAmt = 0.0;
+    final rows = <MisCompareDisbRow>[];
+
+    for (final day in model.days) {
+      final p = model.prevMap[day];
+      final c = model.curMap[day];
+      if (p != null) {
+        totPAcc += p.accounts;
+        totPAmt += p.amount;
+        prevCum += p.amount;
+      }
+      if (c != null) {
+        totCAcc += c.accounts;
+        totCAmt += c.amount;
+        curCum += c.amount;
+      }
+      rows.add(MisCompareDisbRow(
+        day: day,
+        prevDateLabel: '${_ordinal(day)} ${_monthNames[m.prev.month]}',
+        curDateLabel: '${_ordinal(day)} ${_monthNames[m.cur.month]}',
+        prevAccounts: p?.accounts,
+        curAccounts: c?.accounts,
+        prevAmount: day <= prevLastDay ? prevCum : null,
+        curAmount: day <= curLastDay ? curCum : null,
+        beyondCurrent: day > curLastDay,
+      ));
+    }
+
+    return MisCompareDisbursementTable(
+      rows: rows,
+      prevMonth: m.prev.name,
+      curMonth: m.cur.name,
+      totalPrevAccounts: totPAcc,
+      totalCurAccounts: totCAcc,
+      totalPrevAmount: totPAmt,
+      totalCurAmount: totCAmt,
+      numberFormat: _fmtNum,
+      croreFormat: _fmtCr,
+    );
+  }
+
   // Disbursement ---------------------------------------------------------------
 
   Widget _disbursement() {
@@ -615,6 +762,7 @@ class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
         if (model == null || model.days.isEmpty) {
           return const MisInlineEmpty('No disbursement data available.');
         }
+        if (_table) return _disbursementTable(model);
         // Default to the latest current-month day with data.
         var def = model.days.length - 1;
         for (var i = model.days.length - 1; i >= 0; i--) {

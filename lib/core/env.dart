@@ -13,6 +13,8 @@ class Env {
   static const Map<String, String> _flavorBaseUrls = {
     // HTTPS only — port 80 on this host serves nginx's default vhost, which
     // 404s every `/api/**` path (login included).
+    // TLS now — the host serves the API on https only; plain http returns a
+    // bare nginx 404 (no redirect), which failed every request in the app.
     'livelihoods': 'https://hrms.navachetanalivelihoods.com/',
     'souhardha': 'https://hrms.navachetanasouhardha.com/',
     'laxmi': 'https://hrms.laxmimultistate.com/',

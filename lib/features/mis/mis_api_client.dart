@@ -5,11 +5,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/env.dart';
 import 'mis_storage.dart';
 
-/// Thrown for any non-2xx MIS response. Carries the server's `error`/`message`.
+/// Thrown for any non-2xx MIS response. Carries the server's `error`/`message`,
+/// the HTTP status, and the decoded body — some endpoints answer a non-2xx with
+/// actionable detail rather than a failure (e.g. `/clients/list` 409 names the
+/// months that DO have client-level rows).
 class MisApiException implements Exception {
   final int? statusCode;
   final String message;
-  MisApiException(this.message, {this.statusCode});
+  final Map<String, dynamic> payload;
+  MisApiException(this.message, {this.statusCode, this.payload = const {}});
+
+  /// A string list off the payload (e.g. `detail_months`), never null.
+  List<String> payloadList(String key) {
+    final v = payload[key];
+    return v is List ? v.map((e) => e.toString()).toList() : const [];
+  }
 
   @override
   String toString() => message;
@@ -140,7 +150,9 @@ class MisApiClient {
   MisApiException _mapError(DioException e) {
     String? msg;
     final data = e.response?.data;
+    var payload = const <String, dynamic>{};
     if (data is Map) {
+      payload = data.cast<String, dynamic>();
       if (data['error'] is String) {
         msg = data['error'] as String;
       } else if (data['message'] is String) {
@@ -148,9 +160,20 @@ class MisApiClient {
       }
     }
     if (e.response != null) {
+      final status = e.response!.statusCode;
+      // 5xx bodies are usually a gateway page, not something to show a user —
+      // mirror the web wrapper and give a clean "server unavailable" message.
+      if (status != null && status >= 500) {
+        return MisApiException(
+          'The server is temporarily unavailable. Please try again in a moment.',
+          statusCode: status,
+          payload: payload,
+        );
+      }
       return MisApiException(
-        msg ?? 'Request failed (HTTP ${e.response!.statusCode})',
-        statusCode: e.response!.statusCode,
+        msg ?? 'Request failed (HTTP $status)',
+        statusCode: status,
+        payload: payload,
       );
     }
     if (e.type == DioExceptionType.connectionTimeout ||

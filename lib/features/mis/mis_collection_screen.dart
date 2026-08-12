@@ -1,8 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  MIS · Collection (route /mis/collection). Daily collection summary with a
-//  region → division → area → branch → officer drill-down, product filter and
-//  a card / table toggle. Ports CollectionScreen.tsx. Drill is via card taps +
-//  breadcrumb (the web's cascading dropdown ScopeFilter is folded into these).
+//  region → division → area → branch → officer drill-down, product filter and an
+//  Accounts/Amount switch. Ports CollectionScreen.tsx.
+//
+//  Structure, matching the web top to bottom:
+//    scope chip · date · Accounts/Amount · product · breadcrumb
+//    Demand-vs-collection chart + Collection-by-DPD donut
+//    Regular Demand vs Collection (Demand / Collection / FTOD / Coll %)
+//    DPD Buckets matrix
+//    Mode of Collection
+//    the per-unit drill table
+//
+//  Like the web there is NO cards/table toggle: the drill is always a table,
+//  because cards cannot line units up for comparison down a column.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
@@ -10,8 +20,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import 'mis_auth.dart';
 import 'mis_charts.dart';
+import 'mis_collection_widgets.dart';
 import 'mis_format.dart';
+import 'mis_matrix_table.dart';
 import 'mis_models.dart';
 import 'mis_repository.dart';
 import 'mis_widgets.dart';
@@ -39,7 +52,9 @@ class MisCollectionScreen extends ConsumerStatefulWidget {
 class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
   String? _date;
   String _product = '';
-  bool _table = false;
+  /// Accounts (live-site parity, the default) vs rupee Amount. Both ride on the
+  /// SAME /collection/* responses — Amount just reads the `_amt` fields.
+  MisMetric _metric = MisMetric.count;
   String? _region, _division, _area, _branch, _emp, _empName;
 
   void _drill(CollectionRow r) {
@@ -128,8 +143,16 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
       emp: _emp,
     );
     final summaryAsync = ref.watch(misCollectionSummaryProvider(q));
+    final summary = summaryAsync.valueOrNull;
     // The officer level is a leaf — no further drill grid.
     final showGrid = _emp == null;
+
+    // The Amount switch only appears when this date actually HAS rupee figures,
+    // and degrades to counts when it doesn't, so the screen can never render a
+    // page of ₹0.00 Cr.
+    final summaryHasAmounts = summary?.hasAmounts ?? false;
+    final metric = summaryHasAmounts ? _metric : MisMetric.count;
+    final tier = ref.watch(misSessionProvider)?.scope?.tier;
 
     return RefreshIndicator(
       color: AppColors.primary,
@@ -142,21 +165,35 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
         padding: EdgeInsets.fromLTRB(
             16, 12, 16, MediaQuery.of(context).padding.bottom + 24),
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: MisDatePicker(
-                  value: activeDate,
-                  available: dates,
-                  onChanged: (v) => setState(() => _date = v),
-                ),
-              ),
-              const SizedBox(width: 10),
-              MisViewToggle(
-                  table: _table, onChanged: (t) => setState(() => _table = t)),
-            ],
+          if (tier != null && tier.isNotEmpty && tier != 'all') ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: MisScopeChip(tier: tier),
+            ),
+            const SizedBox(height: 10),
+          ],
+          MisDatePicker(
+            value: activeDate,
+            available: dates,
+            onChanged: (v) => setState(() => _date = v),
           ),
           const SizedBox(height: 12),
+          // Accounts vs Amount — shown ONLY when this date carries rupees. No
+          // extra request: both ride on the responses the screen already makes.
+          if (summaryHasAmounts) ...[
+            Align(
+              alignment: Alignment.centerLeft,
+              child: MisSegmented<MisMetric>(
+                options: const [
+                  (MisMetric.count, 'Accounts'),
+                  (MisMetric.amount, '₹ Amount'),
+                ],
+                value: metric,
+                onChanged: (v) => setState(() => _metric = v),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
           Align(
             alignment: Alignment.centerLeft,
             child: MisSegmented<String>(
@@ -174,108 +211,133 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
               message: e.toString(),
               onRetry: () => ref.invalidate(misCollectionSummaryProvider(q)),
             ),
-            data: (s) => _summary(s),
+            data: (s) => _summary(s, metric, q, showGrid),
           ),
           if (showGrid) ...[
             const SizedBox(height: 18),
-            MisSectionTitle('By ${_levelHeader[q.level]!.toLowerCase()}'),
-            _grid(q),
+            MisSectionTitle(_levelHeader[q.level]!),
+            _grid(q, metric),
           ],
         ],
       ),
     );
   }
 
-  Widget _summary(CollectionSummary s) {
-    var d = 0.0, c = 0.0;
-    for (final b in s.dpd) {
-      if (_partition.contains(b.bucketName)) {
-        d += b.demandCount;
-        c += b.collectionCount;
-      }
-    }
-    // ignore: unused_local_variable  (used by the hidden snapshot cards below)
-    final demand = d + s.npaCases;
-    // ignore: unused_local_variable  (used by the hidden snapshot cards below)
-    final collection = c + (s.npa.isNotEmpty ? s.npa.first.accounts : 0);
-
+  /// Everything driven by `/collection/summary`, in the web's order: the two
+  /// charts, the Regular headline card, the DPD matrix, then Mode of Collection.
+  Widget _summary(
+    CollectionSummary s,
+    MisMetric metric,
+    CollectionQuery q,
+    bool showCharts,
+  ) {
+    final isAmount = metric == MisMetric.amount;
+    // Legend % is each bucket's Collection % (collection ÷ demand) — the SAME
+    // figure the DPD table shows, not the slice's share of total collection.
     final donut = [
       for (final b in s.dpd)
         if (_partition.contains(b.bucketName))
-          MisSlice(misBucketLabel(b.bucketName), b.collectionCount,
+          MisSlice(misBucketLabel(b.bucketName), b.collection(metric),
               MisPalette.risk(b.bucketName)),
-    ];
-
-    // DPD bucket detail cards (on_date → pnpa), plus a synthetic NPA bucket.
-    final act = s.action('activation')?.accounts ?? 0;
-    final clo = s.action('closure')?.accounts ?? 0;
-    final order = ['on_date', 'regular', '1_30', '31_60', '61_90', 'pnpa'];
-    final buckets = [
-      for (final name in order)
-        if (s.bucket(name) != null) s.bucket(name)!,
     ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Top three snapshot cards — hidden for now (commented per request).
-        // Uncomment to restore.
-        // MisSnapshotGrid(cards: [
-        //   MisSnapshotCard(
-        //       accent: 'indigo',
-        //       icon: Icons.layers_rounded,
-        //       label: 'Total regular demand',
-        //       value: misNum(demand),
-        //       sub: 'Regular + buckets + NPA'),
-        //   MisSnapshotCard(
-        //       accent: 'emerald',
-        //       icon: Icons.trending_up_rounded,
-        //       label: 'Collection',
-        //       value: misNum(collection)),
-        //   MisSnapshotCard(
-        //       accent: 'sky',
-        //       icon: Icons.percent_rounded,
-        //       label: 'Collection %',
-        //       value: misPct(collection, demand)),
-        // ]),
-        if (donut.any((s) => s.value > 0)) ...[
-          const SizedBox(height: 14),
-          GlassCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Collection by DPD bucket',
-                    style: TextStyle(
+        if (showCharts) ...[
+          _demandVsCollectionChart(q, metric),
+          if (donut.any((x) => x.value > 0)) ...[
+            const SizedBox(height: 12),
+            GlassCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Collection ${isAmount ? "amount" : "accounts"} by DPD bucket',
+                    style: const TextStyle(
                         fontSize: 13.5,
                         fontWeight: FontWeight.w700,
-                        color: AppColors.ink)),
-                const SizedBox(height: 12),
-                MisDonutChart(data: donut),
-              ],
+                        color: AppColors.ink),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Slice size = share of total collection',
+                    style: TextStyle(fontSize: 10.5, color: AppColors.muted),
+                  ),
+                  const SizedBox(height: 12),
+                  MisDonutChart(data: donut, money: isAmount),
+                ],
+              ),
             ),
-          ),
+          ],
+          const SizedBox(height: 16),
         ],
+        MisRegularCollectionCard(summary: s, metric: metric),
         const SizedBox(height: 16),
-        const MisSectionTitle('DPD Buckets'),
-        for (final b in buckets) ...[
-          MisUnitCard(
-            title: misBucketLabel(b.bucketName),
-            demand: b.demandCount,
-            collection: b.collectionCount,
-          ),
-          const SizedBox(height: 8),
-        ],
-        MisUnitCard(
-          title: 'NPA',
-          subtitle: 'Activation ${misNum(act)} · Closure ${misNum(clo)}',
-          demand: s.npaCases,
-          collection: act,
-        ),
+        MisBucketMatrix(summary: s, metric: metric),
+        const SizedBox(height: 16),
+        // Mode of Collection — live from /collection/summary's `modes`, scoped
+        // and drilled by the same filters as everything above. Renders nothing
+        // when no channel file has been uploaded for this date.
+        MisCollectionModeTable(summary: s),
       ],
     );
   }
 
-  Widget _grid(CollectionQuery q) {
+  /// Demand vs collection per sub-unit, in the active metric.
+  Widget _demandVsCollectionChart(CollectionQuery q, MisMetric metric) {
+    final rows = ref.watch(misCollectionListProvider(q)).valueOrNull ?? const [];
+    if (rows.isEmpty) return const SizedBox.shrink();
+    final level = q.level;
+    final isAmount = metric == MisMetric.amount &&
+        rows.any((r) => r.hasAmount);
+    final m = isAmount ? MisMetric.amount : MisMetric.count;
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Demand vs collection ${isAmount ? "amount" : "accounts"} by '
+            '${level == 'employee' ? 'officer' : level}',
+            style: const TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink),
+          ),
+          const SizedBox(height: 12),
+          MisGroupedBarChart(
+            groups: [
+              for (final r in rows)
+                MisBarGroup(_unitOf(r, level), [
+                  r.demand(m),
+                  r.collection(m),
+                ]),
+            ],
+            seriesNames: const ['Demand', 'Collection'],
+            seriesColors: const [
+              MisPalette.seriesDemand,
+              MisPalette.seriesCollection,
+            ],
+            money: isAmount,
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _unitOf(CollectionRow r, String level) =>
+      (level == 'region'
+          ? r.region
+          : level == 'division'
+              ? r.division
+              : level == 'area'
+                  ? r.area
+                  : level == 'branch'
+                      ? r.branch
+                      : (r.name ?? r.empId)) ??
+      '—';
+
+  Widget _grid(CollectionQuery q, MisMetric metric) {
     final listAsync = ref.watch(misCollectionListProvider(q));
     return listAsync.when(
       loading: () => const AppLoadingBlock(height: 160),
@@ -285,59 +347,44 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
       ),
       data: (rows) {
         if (rows.isEmpty) return const MisInlineEmpty('No data at this level.');
-        String unitOf(CollectionRow r) => (q.level == 'region'
+
+        // The by-<level> feed can lack amounts even when /summary has them, so
+        // the drill table keeps showing counts instead of a page of ₹0.00 Cr —
+        // and says why the Amount view is unavailable at this level.
+        final rowsHaveAmounts = rows.any((r) => r.hasAmount);
+        final unitMetric =
+            (metric == MisMetric.amount && rowsHaveAmounts)
+                ? MisMetric.amount
+                : MisMetric.count;
+
+        String? subOf(CollectionRow r) => q.level == 'employee'
+            ? r.empId
+            : q.level == 'division'
                 ? r.region
-                : q.level == 'division'
+                : q.level == 'area'
                     ? r.division
-                    : q.level == 'area'
+                    : q.level == 'branch'
                         ? r.area
-                        : q.level == 'branch'
-                            ? r.branch
-                            : (r.name ?? r.empId)) ??
-            '—';
-        String? subOf(CollectionRow r) =>
-            q.level == 'employee' ? r.empId : null;
-        String? parentOf(CollectionRow r) => q.level == 'division'
-            ? r.region
-            : q.level == 'area'
-                ? r.division
-                : q.level == 'branch'
-                    ? r.area
-                    : q.level == 'employee'
-                        ? r.branch
                         : null;
 
-        if (_table) {
-          return MisTable<CollectionRow>(
-            onRowTap: _drill,
-            columns: [
-              MisColumn(_levelHeader[q.level]!, (r) => Text(unitOf(r))),
-              MisColumn('Demand', (r) => Text(misNum(r.demandCount)),
-                  right: true),
-              MisColumn('Collection', (r) => Text(misNum(r.collectionCount)),
-                  right: true),
-              MisColumn('Balance', (r) => Text(misNum(r.balance)), right: true),
-              MisColumn(
-                  'Coll %',
-                  (r) => Text(misPct(r.collectionCount, r.demandCount)),
-                  right: true),
-            ],
-            rows: rows,
-          );
-        }
         return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final r in rows) ...[
-              MisUnitCard(
-                title: unitOf(r),
-                subtitle: subOf(r),
-                parent: parentOf(r),
-                demand: r.demandCount,
-                collection: r.collectionCount,
-                onTap: () => _drill(r),
+            if (metric == MisMetric.amount && !rowsHaveAmounts)
+              MisWarnBanner(
+                'The /collection/by-${q.level} feed returned no demand_amt / '
+                'collection_amt for this date, so the table below stays on '
+                'Accounts. Re-sync this date to load its rupee figures. The '
+                'bucket table above is unaffected.',
               ),
-              const SizedBox(height: 8),
-            ],
+            MisCollectionUnitTable(
+              rows: rows,
+              levelLabel: _levelHeader[q.level]!,
+              metric: unitMetric,
+              unitOf: (r) => _unitOf(r, q.level),
+              subOf: subOf,
+              onRowTap: _drill,
+            ),
           ],
         );
       },

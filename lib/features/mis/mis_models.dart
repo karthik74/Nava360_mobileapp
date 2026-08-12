@@ -179,32 +179,74 @@ class OverviewTable {
 
 // ── Collection ───────────────────────────────────────────────────────────────
 
-/// One DPD bucket of the collection summary (account counts, not rupees).
+/// Which figure the collection views show: account counts or rupee amounts.
+enum MisMetric { count, amount }
+
+/// One DPD bucket of the collection summary. Account counts and their rupee
+/// twins ride together on the SAME payload — amount mode reads `demand_amt` /
+/// `collection_amt` instead of the `_count` fields, with no extra request.
 class MisBucket {
   final String bucketName; // regular | on_date | 1_30 | 31_60 | 61_90 | pnpa | npa
   final double demandCount;
   final double collectionCount;
+  final double demandAmt;
+  final double collectionAmt;
+
   const MisBucket({
     required this.bucketName,
     this.demandCount = 0,
     this.collectionCount = 0,
+    this.demandAmt = 0,
+    this.collectionAmt = 0,
   });
 
   factory MisBucket.fromJson(Map<String, dynamic> j) => MisBucket(
         bucketName: misToStr(j['bucket_name']) ?? '',
         demandCount: misToDouble(j['demand_count']) ?? 0,
         collectionCount: misToDouble(j['collection_count']) ?? 0,
+        demandAmt: misToDouble(j['demand_amt']) ?? 0,
+        collectionAmt: misToDouble(j['collection_amt']) ?? 0,
       );
+
+  double demand(MisMetric m) =>
+      m == MisMetric.amount ? demandAmt : demandCount;
+  double collection(MisMetric m) =>
+      m == MisMetric.amount ? collectionAmt : collectionCount;
 }
 
 class MisNpaAction {
   final String actionName; // activation | closure
   final double accounts;
-  const MisNpaAction({required this.actionName, this.accounts = 0});
+  final double amount;
+  const MisNpaAction({
+    required this.actionName,
+    this.accounts = 0,
+    this.amount = 0,
+  });
 
   factory MisNpaAction.fromJson(Map<String, dynamic> j) => MisNpaAction(
         actionName: misToStr(j['action_name']) ?? '',
         accounts: misToDouble(j['accounts']) ?? 0,
+        amount: misToDouble(j['amount']) ?? 0,
+      );
+}
+
+/// One `/collection/summary` `modes[]` row — a payment channel's slice of the
+/// day's collection.
+class MisModeRow {
+  final String channel; // raw CollectionChannel value, uppercased
+  final double accounts;
+  final double amount;
+  const MisModeRow({
+    required this.channel,
+    this.accounts = 0,
+    this.amount = 0,
+  });
+
+  factory MisModeRow.fromJson(Map<String, dynamic> j) => MisModeRow(
+        channel: (misToStr(j['channel']) ?? '').trim().toUpperCase(),
+        accounts: misToDouble(j['accounts']) ?? 0,
+        amount: misToDouble(j['amount']) ?? 0,
       );
 }
 
@@ -215,15 +257,30 @@ class CollectionSummary {
   final double npaCases;
   final String? date;
 
+  /// Mode of Collection — the payment-channel split, scoped like the rest.
+  final List<MisModeRow> modes;
+
+  /// Collection from officers that couldn't be matched to a branch.
+  final double modesUnmappedAccounts;
+  final double modesUnmappedAmount;
+
+  /// True when a product filter is active but the modes span all products.
+  final bool modesAllProducts;
+
   const CollectionSummary({
     this.dpd = const [],
     this.npa = const [],
     this.npaCases = 0,
     this.date,
+    this.modes = const [],
+    this.modesUnmappedAccounts = 0,
+    this.modesUnmappedAmount = 0,
+    this.modesAllProducts = false,
   });
 
   factory CollectionSummary.fromJson(dynamic raw) {
     final j = _asMap(raw);
+    final unmapped = _asMap(j['modes_unmapped']);
     return CollectionSummary(
       dpd: (j['dpd'] is List)
           ? (j['dpd'] as List)
@@ -239,8 +296,25 @@ class CollectionSummary {
           : const [],
       npaCases: misToDouble(j['npa_cases']) ?? 0,
       date: misToStr(j['date']),
+      modes: (j['modes'] is List)
+          ? (j['modes'] as List)
+              .whereType<Map>()
+              .map((m) => MisModeRow.fromJson(m.cast<String, dynamic>()))
+              .toList()
+          : const [],
+      modesUnmappedAccounts: misToDouble(unmapped['accounts']) ?? 0,
+      modesUnmappedAmount: misToDouble(unmapped['amount']) ?? 0,
+      modesAllProducts: j['modes_all_products'] == true,
     );
   }
+
+  /// True when this date actually carries rupee figures. The Daily Collection
+  /// Report's OverAll sheet stores Demand/Collection as ACCOUNT COUNTS only, so
+  /// dates synced from it hold 0 in every `_amt` — offering an Amount view that
+  /// can only ever render ₹0.00 Cr is worse than not offering it. A null check
+  /// alone would miss this (0 is not null), so test for a non-zero.
+  bool get hasAmounts =>
+      dpd.any((b) => b.demandAmt != 0 || b.collectionAmt != 0);
 
   MisBucket? bucket(String name) {
     for (final b in dpd) {
@@ -268,6 +342,18 @@ class CollectionRow {
   final double demandCount;
   final double collectionCount;
 
+  /// Rupee twins of the count fields, returned by the same `/collection/by-*`
+  /// endpoints. A level can come back counts-only even when the summary has
+  /// amounts, so [hasAmount] gates the Amount view per feed.
+  final double demandAmt;
+  final double collectionAmt;
+  final bool hasAmount;
+
+  /// The untouched source record. The hourly feed carries per-hour collection
+  /// columns whose shape isn't fixed yet (array / map / flat prefixed keys), so
+  /// the raw map is kept and parsed by `misHourSeries` rather than modelled.
+  final Map<String, dynamic> raw;
+
   const CollectionRow({
     this.region,
     this.division,
@@ -277,6 +363,10 @@ class CollectionRow {
     this.empId,
     this.demandCount = 0,
     this.collectionCount = 0,
+    this.demandAmt = 0,
+    this.collectionAmt = 0,
+    this.hasAmount = false,
+    this.raw = const {},
   });
 
   factory CollectionRow.fromJson(Map<String, dynamic> j) => CollectionRow(
@@ -288,9 +378,50 @@ class CollectionRow {
         empId: misToStr(j['emp_id']),
         demandCount: misToDouble(j['demand_count']) ?? 0,
         collectionCount: misToDouble(j['collection_count']) ?? 0,
+        demandAmt: misToDouble(j['demand_amt']) ?? 0,
+        collectionAmt: misToDouble(j['collection_amt']) ?? 0,
+        hasAmount: j['demand_amt'] != null || j['collection_amt'] != null,
+        raw: j,
       );
 
+  double demand(MisMetric m) =>
+      m == MisMetric.amount ? demandAmt : demandCount;
+  double collection(MisMetric m) =>
+      m == MisMetric.amount ? collectionAmt : collectionCount;
+
   double get balance => demandCount - collectionCount;
+}
+
+/// `/hourly/snapshot` — freshness of the live intra-day snapshot. Metadata only:
+/// which period is loaded (date + hour slot) and when it was captured. Carries
+/// no collection data; the figures still come from the summary / by-* feeds.
+class HourlySnapshot {
+  final String periodDate; // "2026-07-11"
+  final String periodHour; // "18" (0–23, as a string)
+  final String? asOf; // "2026-07-16 04:22:58"
+
+  const HourlySnapshot({
+    this.periodDate = '',
+    this.periodHour = '',
+    this.asOf,
+  });
+
+  factory HourlySnapshot.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    return HourlySnapshot(
+      periodDate: misToStr(j['period_date']) ?? '',
+      periodHour: misToStr(j['period_hour']) ?? '',
+      asOf: misToStr(j['as_of']),
+    );
+  }
+
+  /// The snapshot's hour slot as 0–23, or null when the feed didn't carry one.
+  int? get hour {
+    final h = int.tryParse(periodHour.trim());
+    return (h != null && h >= 0 && h <= 23) ? h : null;
+  }
+
+  bool get isEmpty => hour == null;
 }
 
 // ── Portfolio ────────────────────────────────────────────────────────────────
@@ -372,6 +503,121 @@ class PortfolioUnitRow {
   /// This row's bucket breakdown as a PortfolioSummary, so an opened officer
   /// reuses the same summary UI as a branch.
   PortfolioSummary toSummary() => PortfolioSummary(pos: pos);
+}
+
+// ── Clients (the "Active clients details as on <date>" report) ───────────────
+
+/// The as-of block every `/clients` response carries.
+class ClientsAsOn {
+  final String asOnDate;
+  final String label;
+  final String monthLabel;
+  final String periodMonth;
+  final String sourceKind;
+  final int? rowCount;
+
+  const ClientsAsOn({
+    this.asOnDate = '',
+    this.label = '',
+    this.monthLabel = '',
+    this.periodMonth = '',
+    this.sourceKind = '',
+    this.rowCount,
+  });
+
+  factory ClientsAsOn.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    return ClientsAsOn(
+      asOnDate: misToStr(j['as_on_date']) ?? '',
+      label: misToStr(j['label']) ?? '',
+      monthLabel: misToStr(j['month_label']) ?? '',
+      periodMonth: misToStr(j['period_month']) ?? '',
+      sourceKind: misToStr(j['source_kind']) ?? '',
+      rowCount: misToInt(j['row_count']),
+    );
+  }
+}
+
+/// One report row. Keys are the workbook's ORIGINAL column names (spaces and
+/// all), plus the derived `Bucket`, and money fields arrive as decimal strings —
+/// so the raw map is kept and read through named getters.
+class ClientRow {
+  final Map<String, dynamic> raw;
+  const ClientRow(this.raw);
+
+  String? str(String key) {
+    final v = raw[key];
+    if (v == null) return null;
+    final s = v.toString().trim();
+    return s.isEmpty ? null : s;
+  }
+
+  double? number(String key) => misToDouble(raw[key]);
+
+  String? get clientId => str('ClientID');
+  String? get clientName => str('Client Name');
+  String? get mobile => str('Mobile No');
+  String? get accountId => str('AccountID');
+  String? get productName => str('Product Name');
+  String? get branchName => str('BranchName');
+  String? get officerName => str('OfficerName');
+  String? get groupName => str('GroupName');
+  String? get disbursementDate => str('DisbursementDate');
+  String? get loanMaturityDate => str('LoanMaturityDate');
+  String? get dpdDays => str('DPD Days');
+  String? get bucket => str('Bucket');
+  double? get loanAmount => number('LoanAmount');
+  double? get installmentAmount => number('InstallmentAmount');
+  double? get principalOs => number('PrincipalOS');
+  double? get totalArrear => number('TotalArrear');
+  double? get dueDays => number('DueDays');
+
+  /// A stable-ish identity for list keys.
+  String get id => accountId ?? clientId ?? clientName ?? '';
+}
+
+/// `/clients/list` — the report rows for one bucket + scope, server-paged.
+class ClientsListResponse {
+  final ClientsAsOn asOn;
+  final String grain; // account | aggregate
+  final bool detailAvailable;
+  final List<String> headers;
+  final int total;
+  final int limit;
+  final int offset;
+  final List<ClientRow> rows;
+
+  const ClientsListResponse({
+    this.asOn = const ClientsAsOn(),
+    this.grain = '',
+    this.detailAvailable = false,
+    this.headers = const [],
+    this.total = 0,
+    this.limit = 0,
+    this.offset = 0,
+    this.rows = const [],
+  });
+
+  factory ClientsListResponse.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    return ClientsListResponse(
+      asOn: ClientsAsOn.fromJson(j['as_on']),
+      grain: misToStr(j['grain']) ?? '',
+      detailAvailable: j['detail_available'] == true,
+      headers: (j['headers'] is List)
+          ? (j['headers'] as List).map((e) => e.toString()).toList()
+          : const [],
+      total: misToInt(j['total']) ?? 0,
+      limit: misToInt(j['limit']) ?? 0,
+      offset: misToInt(j['offset']) ?? 0,
+      rows: (j['rows'] is List)
+          ? (j['rows'] as List)
+              .whereType<Map>()
+              .map((m) => ClientRow(m.cast<String, dynamic>()))
+              .toList()
+          : const [],
+    );
+  }
 }
 
 // ── Disbursement ─────────────────────────────────────────────────────────────
@@ -592,6 +838,52 @@ class DailyPlanMine {
       npaClosure: misToDouble(npa['closure']) ?? 0,
     );
   }
+}
+
+/// One record of the flat `/daily-plan/rows` report feed (one row per branch,
+/// all columns). The column set is wide and level-dependent, so the raw map is
+/// kept and aggregated by the report table.
+class DailyPlanReportRow {
+  final Map<String, dynamic> raw;
+  const DailyPlanReportRow(this.raw);
+
+  double n(String key) => misToDouble(raw[key]) ?? 0;
+
+  String? get region => misToStr(raw['region']);
+  String? get division => misToStr(raw['division']);
+  String? get area => misToStr(raw['area']);
+  String? get branchName => misToStr(raw['branch_name']);
+
+  /// The grouping value for a report level, blank-safe.
+  String group(String field) {
+    final v = misToStr(raw[field])?.trim();
+    return (v == null || v.isEmpty) ? '—' : v;
+  }
+}
+
+/// A branch that has not yet submitted for a date/type, with the BM's contact
+/// so the caller can follow up (`/daily-plan/pending-branches`).
+class PendingBranch {
+  final String branchName;
+  final String? area, region, bmName, bmPhone;
+  const PendingBranch({
+    this.branchName = '—',
+    this.area,
+    this.region,
+    this.bmName,
+    this.bmPhone,
+  });
+
+  factory PendingBranch.fromJson(Map<String, dynamic> j) => PendingBranch(
+        branchName: misToStr(j['branch_name']) ?? '—',
+        area: misToStr(j['area']),
+        region: misToStr(j['region']),
+        bmName: misToStr(j['bm_name']),
+        bmPhone: misToStr(j['bm_phone']),
+      );
+
+  String get crumb =>
+      [area, region].where((s) => s != null && s.isNotEmpty).join(' · ');
 }
 
 // ── Feedback ─────────────────────────────────────────────────────────────────
