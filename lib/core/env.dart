@@ -11,7 +11,9 @@ class Env {
 
   /// One backend deployment per company; the flavor picks it at build time.
   static const Map<String, String> _flavorBaseUrls = {
-    'livelihoods': 'http://hrms.navachetanalivelihoods.com/',
+    // TLS now — the host serves the API on https only; plain http returns a
+    // bare nginx 404 (no redirect), which failed every request in the app.
+    'livelihoods': 'https://hrms.navachetanalivelihoods.com/',
     'souhardha': 'https://hrms.navachetanasouhardha.com/',
     'laxmi': 'https://hrms.laxmimultistate.com/',
     // Origin ROOT only — every request path already carries the `/api/` prefix
