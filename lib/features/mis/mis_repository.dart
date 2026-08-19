@@ -60,6 +60,10 @@ class CollectionQuery {
   final String? area;
   final String? branch;
   final String? emp; // emp_id of an opened officer
+
+  /// Hourly only: replay a stored hour slot ("14"). Null reads the live grain
+  /// (latest push) — an older backend that ignores the param still works.
+  final String? hour;
   const CollectionQuery({
     this.date,
     this.product = '',
@@ -68,6 +72,7 @@ class CollectionQuery {
     this.area,
     this.branch,
     this.emp,
+    this.hour,
   });
 
   /// The drill grid level (one below the deepest set parent).
@@ -90,11 +95,29 @@ class CollectionQuery {
       other.division == division &&
       other.area == area &&
       other.branch == branch &&
-      other.emp == emp;
+      other.emp == emp &&
+      other.hour == hour;
 
   @override
   int get hashCode =>
-      Object.hash(date, product, region, division, area, branch, emp);
+      Object.hash(date, product, region, division, area, branch, emp, hour);
+}
+
+// ── Branch Report ────────────────────────────────────────────────────────────
+
+class BranchReportQuery {
+  final String? branch; // null → the server resolves the caller's own branch
+  final String? month; // "YYYY-MM-01"; null → the branch's latest month
+  const BranchReportQuery({this.branch, this.month});
+
+  @override
+  bool operator ==(Object other) =>
+      other is BranchReportQuery &&
+      other.branch == branch &&
+      other.month == month;
+
+  @override
+  int get hashCode => Object.hash(branch, month);
 }
 
 // ── Portfolio ────────────────────────────────────────────────────────────────
@@ -620,6 +643,7 @@ class MisRepository {
         '/hourly/summary',
         query: {
           'date': q.date,
+          'hour': q.hour,
           'product': _p(q.product),
           'region': q.region,
           'division': q.division,
@@ -631,27 +655,48 @@ class MisRepository {
 
   Future<List<CollectionRow>> hourlyList(CollectionQuery q) {
     final product = _p(q.product);
+    final hour = q.hour;
     switch (q.level) {
       case 'division':
         return _api.get('/hourly/by-division',
-            query: {'date': q.date, 'region': q.region, 'product': product},
+            query: {
+              'date': q.date,
+              'region': q.region,
+              'product': product,
+              'hour': hour,
+            },
             parse: (d) => _list(d, CollectionRow.fromJson));
       case 'area':
         return _api.get('/hourly/by-area',
-            query: {'date': q.date, 'division': q.division, 'product': product},
+            query: {
+              'date': q.date,
+              'division': q.division,
+              'product': product,
+              'hour': hour,
+            },
             parse: (d) => _list(d, CollectionRow.fromJson));
       case 'branch':
         return _api.get('/hourly/by-branch',
-            query: {'date': q.date, 'area': q.area, 'product': product},
+            query: {
+              'date': q.date,
+              'area': q.area,
+              'product': product,
+              'hour': hour,
+            },
             parse: (d) => _list(d, CollectionRow.fromJson));
       case 'employee':
         return _api.get('/hourly/by-employee',
-            query: {'date': q.date, 'branch': q.branch, 'product': product},
+            query: {
+              'date': q.date,
+              'branch': q.branch,
+              'product': product,
+              'hour': hour,
+            },
             parse: (d) => _list(d, CollectionRow.fromJson));
       case 'region':
       default:
         return _api.get('/hourly/by-region',
-            query: {'date': q.date, 'product': product},
+            query: {'date': q.date, 'product': product, 'hour': hour},
             parse: (d) => _list(d, CollectionRow.fromJson));
     }
   }
@@ -662,6 +707,25 @@ class MisRepository {
         '/hourly/snapshot',
         query: {'date': date},
         parse: HourlySnapshot.fromJson,
+      );
+
+  /// The hour slots stored for a date — drives the ?hour= replay switcher.
+  /// Older API builds don't have /hourly/hours; the screen treats the error as
+  /// "no switcher" and stays on the live path.
+  Future<HourlyHoursMeta> hourlyHours(String? date) => _api.get(
+        '/hourly/hours',
+        query: {'date': date},
+        parse: HourlyHoursMeta.fromJson,
+      );
+
+  // Branch Report (per-branch Report Card) --------------------------------------
+  /// One call returns the whole card: scoped branch list, month-end portfolio,
+  /// monthly performance and the projection seed. Branch/month omitted → the
+  /// server resolves the caller's own branch and its latest month.
+  Future<BranchReportResponse> branchReport(BranchReportQuery q) => _api.get(
+        '/branch-report',
+        query: {'branch': q.branch, 'month': q.month, 'months': '4'},
+        parse: BranchReportResponse.fromJson,
       );
 
   // Clients (customer detail behind a portfolio bucket) -------------------------
@@ -976,6 +1040,17 @@ final misHourlyListProvider =
 final misHourlySnapshotProvider =
     FutureProvider.autoDispose.family<HourlySnapshot, String?>(
   (ref, date) => ref.watch(misRepositoryProvider).hourlySnapshot(date),
+);
+
+/// Stored hour slots for the Hourly replay switcher, keyed by date.
+final misHourlyHoursProvider =
+    FutureProvider.autoDispose.family<HourlyHoursMeta, String?>(
+  (ref, date) => ref.watch(misRepositoryProvider).hourlyHours(date),
+);
+
+final misBranchReportProvider =
+    FutureProvider.autoDispose.family<BranchReportResponse, BranchReportQuery>(
+  (ref, q) => ref.watch(misRepositoryProvider).branchReport(q),
 );
 
 final misClientsProvider =

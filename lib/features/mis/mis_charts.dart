@@ -199,9 +199,9 @@ class MisBarGroup {
 // explicitly:
 //
 //   1. horizontal, if every label fits inside its bar's slot;
-//   2. otherwise rotated upright, which needs only a line-height of width;
-//   3. and if even that won't fit, every Nth label is dropped, so the ones that
-//      remain stay legible and correctly positioned — never merged or overlapping.
+//   2. otherwise every Nth label is dropped, so the ones that remain stay
+//      legible and correctly positioned — never rotated, merged or overlapping
+//      (vertical labels proved unreadable in the field).
 
 /// One value to print, positioned in plot-relative fractions.
 class MisPlotLabel {
@@ -255,23 +255,23 @@ class MisValueLabels extends StatelessWidget {
       if (w > widest) widest = w;
     }
 
-    // Upright labels need only their line height horizontally.
-    final rotated = widest > slotWidth - 2;
-    final needed = rotated ? fontSize + 3 : widest + 2;
-    // When even the rotated form can't fit, print every `step`-th label.
+    // Labels are ALWAYS horizontal — rotated (vertical) numbers proved
+    // unreadable on the intra-day chart. When a label can't fit its bar's
+    // slot, every `step`-th label is printed instead, so the ones that remain
+    // stay legible — never rotated, merged or overlapping.
+    final needed = widest + 2;
     final step = needed > slotWidth ? (needed / slotWidth).ceil() : 1;
 
     return LayoutBuilder(builder: (context, c) {
       final plotW = (c.maxWidth - leftPad).clamp(1.0, double.infinity);
       final plotH = (c.maxHeight - bottomPad).clamp(1.0, double.infinity);
-      // Height a rotated label occupies vertically — it must clear the bar top.
-      final labelH = rotated ? widest : fontSize + 2;
+      final labelH = fontSize + 2;
 
       return Stack(
         clipBehavior: Clip.none,
         children: [
           for (var i = 0; i < labels.length; i++)
-            if (i % step == 0) _one(labels[i], plotW, plotH, labelH, rotated),
+            if (i % step == 0) _one(labels[i], plotW, plotH, labelH),
         ],
       );
     });
@@ -282,7 +282,6 @@ class MisValueLabels extends StatelessWidget {
     double plotW,
     double plotH,
     double labelH,
-    bool rotated,
   ) {
     final cx = leftPad + l.xFrac * plotW;
     // Sit just above the bar top; clamped so a full-height bar's label stays on
@@ -307,12 +306,7 @@ class MisValueLabels extends StatelessWidget {
       left: cx - 60,
       top: top,
       width: 120,
-      child: Align(
-        alignment: Alignment.bottomCenter,
-        child: rotated
-            ? RotatedBox(quarterTurns: 3, child: text)
-            : text,
-      ),
+      child: Align(alignment: Alignment.bottomCenter, child: text),
     );
   }
 }

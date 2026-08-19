@@ -65,6 +65,7 @@ import 'features/mis/mis_feedback_screen.dart';
 import 'features/mis/mis_employees_screen.dart';
 import 'features/mis/mis_employee_detail_screen.dart';
 import 'features/mis/mis_locations_screen.dart';
+import 'features/mis/mis_branch_report_screen.dart';
 import 'features/mis/mis_api_client.dart';
 import 'features/mis/mis_auth.dart';
 import 'features/audit/my_audits_screen.dart';
@@ -298,6 +299,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '/mis/locations',
         builder: (_, __) => const MisLocationsScreen(),
       ),
+      GoRoute(
+        path: '/mis/branch-report',
+        builder: (_, __) => const MisBranchReportScreen(),
+      ),
       // Static /mis/employees before the ':id' param route.
       GoRoute(
         path: '/mis/employees',
@@ -453,19 +458,28 @@ class HrmsApp extends ConsumerWidget {
     };
     // Eagerly mirror the nava360 login into the MIS (Grow With Me) session so any
     // MIS screen works from anywhere in the app's nav — not just the MIS
-    // dashboard gate. No-ops when already signed in as the same user.
+    // dashboard gate. No-ops when already signed in as the same user. The emp id
+    // is resolved from the login response (username OR email — a few accounts
+    // carry an email/lowercased code as username, which broke the derivation).
     ref.listen(authUserProvider, (_, next) {
-      final u = next?.username;
-      if (u != null && u.isNotEmpty) {
-        ref.read(misAuthControllerProvider.notifier).ensureAutoLogin(u);
+      final id = misEmpIdFromIdentity(
+        username: next?.username,
+        email: next?.email,
+      );
+      if (id.isNotEmpty) {
+        ref.read(misAuthControllerProvider.notifier).ensureAutoLogin(id);
       }
     });
-    final misUser = ref.read(authUserProvider)?.username;
-    if (misUser != null && misUser.isNotEmpty) {
+    final misIdentity = ref.read(authUserProvider);
+    final misEmpId = misEmpIdFromIdentity(
+      username: misIdentity?.username,
+      email: misIdentity?.email,
+    );
+    if (misEmpId.isNotEmpty) {
       // Deferred: ensureAutoLogin mutates provider state, which is not allowed
       // synchronously from build.
       Future(() {
-        ref.read(misAuthControllerProvider.notifier).ensureAutoLogin(misUser);
+        ref.read(misAuthControllerProvider.notifier).ensureAutoLogin(misEmpId);
       });
     }
     // Let push-notification taps deep-link into a chat thread.

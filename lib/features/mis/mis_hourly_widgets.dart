@@ -16,13 +16,23 @@ import 'mis_hourly_series.dart';
 /// already in the picker). Re-key on the hour so the roll replays whenever a
 /// fresh snapshot loads. Ports SnapshotClock.tsx.
 class MisSnapshotClock extends StatefulWidget {
-  const MisSnapshotClock({super.key, required this.periodHour, this.asOf});
+  const MisSnapshotClock({
+    super.key,
+    required this.periodHour,
+    this.asOf,
+    this.live = true,
+  });
 
   /// The snapshot's hour slot, 0–23.
   final int periodHour;
 
   /// Capture time as the API reported it, e.g. "2026-07-16 04:22:58".
   final String? asOf;
+
+  /// False when replaying an archived hour (the ?hour= switcher): the chip
+  /// reads REPLAY in amber with a static dot, and the meta line says
+  /// "Snapshot replay". Ports SnapshotClock's live/replay variants.
+  final bool live;
 
   @override
   State<MisSnapshotClock> createState() => _MisSnapshotClockState();
@@ -39,6 +49,22 @@ class _MisSnapshotClockState extends State<MisSnapshotClock>
   int get _hero =>
       widget.periodHour % 12 == 0 ? 12 : widget.periodHour % 12;
   String get _ampm => widget.periodHour < 12 ? 'AM' : 'PM';
+
+  /// "2026-08-19 05:39:36" → "19 Aug 2026 · 5:39 AM" — the capture DATE and
+  /// TIME spelled out, formatted the way the Collection screen prints its
+  /// dates, instead of the raw database timestamp.
+  String? get _asOfPretty {
+    final raw = widget.asOf;
+    if (raw == null || raw.isEmpty) return null;
+    final date = misPrettyDate(raw);
+    final t = raw.length > 10
+        ? RegExp(r'(\d{1,2}):(\d{2})').firstMatch(raw.substring(10))
+        : null;
+    if (t == null) return date;
+    final h = int.tryParse(t.group(1)!) ?? 0;
+    final hh = h % 12 == 0 ? 12 : h % 12;
+    return '$date · $hh:${t.group(2)} ${h < 12 ? 'AM' : 'PM'}';
+  }
 
   @override
   void initState() {
@@ -67,7 +93,8 @@ class _MisSnapshotClockState extends State<MisSnapshotClock>
   Widget build(BuildContext context) {
     return Semantics(
       liveRegion: true,
-      label: 'Live hourly snapshot for $_hero $_ampm',
+      label:
+          '${widget.live ? 'Live' : 'Replayed'} hourly snapshot for $_hero $_ampm',
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
@@ -147,21 +174,23 @@ class _MisSnapshotClockState extends State<MisSnapshotClock>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    'Hourly snapshot',
-                    style: TextStyle(
+                  Text(
+                    widget.live ? 'Hourly snapshot' : 'Snapshot replay',
+                    style: const TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w700,
                       color: AppColors.inkSoft,
                     ),
                   ),
-                  if (widget.asOf != null && widget.asOf!.isNotEmpty)
+                  if (_asOfPretty != null)
                     Text(
-                      'as of ${widget.asOf}',
+                      'as of $_asOfPretty',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontSize: 10.5, color: AppColors.muted),
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.muted),
                     ),
                 ],
               ),
@@ -173,33 +202,38 @@ class _MisSnapshotClockState extends State<MisSnapshotClock>
   }
 
   Widget _liveChip() {
+    final color = widget.live ? AppColors.success : AppColors.warning;
+    final dot = Container(
+      width: 7,
+      height: 7,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.success.withValues(alpha: 0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: AppColors.success.withValues(alpha: 0.28)),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          FadeTransition(
-            opacity: Tween<double>(begin: 1, end: 0.25).animate(_pulse),
-            child: Container(
-              width: 7,
-              height: 7,
-              decoration: const BoxDecoration(
-                  color: AppColors.success, shape: BoxShape.circle),
-            ),
-          ),
+          // The dot pulses only when live — a replay is a still photograph.
+          if (widget.live)
+            FadeTransition(
+              opacity: Tween<double>(begin: 1, end: 0.25).animate(_pulse),
+              child: dot,
+            )
+          else
+            dot,
           const SizedBox(width: 5),
-          const Text(
-            'LIVE',
+          Text(
+            widget.live ? 'LIVE' : 'REPLAY',
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w800,
               letterSpacing: 0.6,
-              color: AppColors.success,
+              color: color,
             ),
           ),
         ],

@@ -2,7 +2,7 @@
 //  MIS · Grow With Me — dashboard entry (route /mis).
 //
 //  Auto-logs into the GWM backend using the nava360 identity (emp id = the app
-//  username, password derived NL13465 → NL@13465), then shows the NLPL Overview
+//  username, password derived XY12345 → XY@12345), then shows the NLPL Overview
 //  "Month Highlights" dashboard. There is NO manual MIS login: if auto-login
 //  fails or there is no nava360 identity, the gate navigates BACK (only a spinner
 //  shows while the attempt is in flight). Mirrors the web MisModule.tsx gate.
@@ -36,6 +36,13 @@ class _MisScreenState extends ConsumerState<MisScreen> {
   bool _triggered = false;
   bool _left = false; // guard so we only navigate back once
 
+  /// True once THIS screen's auto-login attempt has fully completed. Until
+  /// then a stale error / signed-out state from an earlier attempt (e.g. a
+  /// network blip during the app-root eager login) must NOT bounce the user —
+  /// that was the "MIS sometimes doesn't open" bug: the gate navigated back on
+  /// the leftover state before the fresh attempt ever ran.
+  bool _attemptFinished = false;
+
   @override
   void initState() {
     super.initState();
@@ -43,16 +50,27 @@ class _MisScreenState extends ConsumerState<MisScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _autoLogin());
   }
 
-  void _autoLogin() {
+  Future<void> _autoLogin() async {
     if (_triggered) return;
     _triggered = true;
-    final empId = ref.read(authUserProvider)?.username ?? '';
+    final identity = ref.read(authUserProvider);
+    // The emp id comes from the nava360 login response, normalised — the raw
+    // username can be an email or a lowercased code (see misEmpIdFromIdentity).
+    final empId = misEmpIdFromIdentity(
+      username: identity?.username,
+      email: identity?.email,
+    );
     if (empId.isEmpty) {
       // No nava360 identity to derive MIS credentials from → go back.
       _goBack();
       return;
     }
-    ref.read(misAuthControllerProvider.notifier).ensureAutoLogin(empId);
+    // Awaits the restore + retries inside; completes with a session or a
+    // final error.
+    await ref.read(misAuthControllerProvider.notifier).ensureAutoLogin(empId);
+    if (!mounted) return;
+    setState(() => _attemptFinished = true);
+    if (ref.read(misSessionProvider)?.user == null) _goBack();
   }
 
   /// Auto-login failed / unavailable → leave MIS. Never show a manual login.
@@ -78,14 +96,15 @@ class _MisScreenState extends ConsumerState<MisScreen> {
       appBar: AppBar(title: const Text('MIS · Grow With Me')),
       body: auth.when(
         loading: () => const _MisCenterLoader(label: 'Signing in to MIS…'),
-        // Auto-login failed → bounce back, only a spinner in the meantime.
+        // Bounce only after THIS screen's attempt (with its retries) is done —
+        // a stale error from an earlier background attempt keeps the spinner.
         error: (e, _) {
-          _goBack();
+          if (_attemptFinished) _goBack();
           return const _MisCenterLoader(label: 'Signing in to MIS…');
         },
         data: (session) {
           if (session?.user == null) {
-            _goBack();
+            if (_attemptFinished) _goBack();
             return const _MisCenterLoader(label: 'Signing in to MIS…');
           }
           return _MisDashboardBody(session: session!);
@@ -1211,6 +1230,8 @@ class _MisNavRow extends StatelessWidget {
           AppColors.danger),
       ('Daily Plan', Icons.edit_note_rounded, '/mis/daily-plan',
           AppColors.primary),
+      ('Branch Report', Icons.assessment_rounded, '/mis/branch-report',
+          AppColors.warning),
       ('Directory', Icons.contacts_rounded, '/mis/employees', AppColors.accent),
       ('Locations', Icons.map_rounded, '/mis/locations', AppColors.success),
       ('Feedback', Icons.forum_rounded, '/mis/feedback', AppColors.success),

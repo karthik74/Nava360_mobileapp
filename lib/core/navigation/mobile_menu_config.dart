@@ -158,8 +158,11 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'mis.analytical', label: 'Analytical', route: '/mis/analytical', icon: Icons.query_stats_rounded, module: MobileModule.mis, order: 7),
   MobileMenuItem(key: 'mis.dailyPlan', label: 'Daily Plan', route: '/mis/daily-plan', icon: Icons.edit_note_rounded, module: MobileModule.mis, order: 8),
   MobileMenuItem(key: 'mis.feedback', label: 'Feedback', route: '/mis/feedback', icon: Icons.forum_rounded, module: MobileModule.mis, order: 9),
-  MobileMenuItem(key: 'mis.employees', label: 'Directory', route: '/mis/employees', icon: Icons.contacts_rounded, module: MobileModule.mis, order: 10),
-  MobileMenuItem(key: 'mis.locations', label: 'Locations', route: '/mis/locations', icon: Icons.map_rounded, module: MobileModule.mis, order: 11),
+  // Per-branch report card — auto-scoped by the API: a BM/FO only ever sees
+  // their own branch here (mirrors the web sidebar's Branch Report entry).
+  MobileMenuItem(key: 'mis.branchReport', label: 'Branch Report', route: '/mis/branch-report', icon: Icons.assessment_rounded, module: MobileModule.mis, order: 10),
+  MobileMenuItem(key: 'mis.employees', label: 'Directory', route: '/mis/employees', icon: Icons.contacts_rounded, module: MobileModule.mis, order: 11),
+  MobileMenuItem(key: 'mis.locations', label: 'Locations', route: '/mis/locations', icon: Icons.map_rounded, module: MobileModule.mis, order: 12),
 
   // ── Payroll module cards (self-service only) ──
   MobileMenuItem(key: 'pay.payslips', label: 'My Payslips', route: '/my-payslips', icon: Icons.receipt_long_rounded, module: MobileModule.payroll, order: 1),

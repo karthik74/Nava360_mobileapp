@@ -424,6 +424,47 @@ class HourlySnapshot {
   bool get isEmpty => hour == null;
 }
 
+/// One archived hour slot from `/hourly/hours`.
+class HourlyHourInfo {
+  final String hour; // "14" (0–23, as a string)
+  final String? capturedAt;
+
+  const HourlyHourInfo({required this.hour, this.capturedAt});
+
+  factory HourlyHourInfo.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    return HourlyHourInfo(
+      hour: misToStr(j['hour']) ?? '',
+      capturedAt: misToStr(j['captured_at']),
+    );
+  }
+}
+
+/// `/hourly/hours` — the hour slots stored for a date, driving the replay
+/// switcher. `liveHour` is the slot the live grain currently holds. An older
+/// API build without this endpoint errors out; the screen treats that as "no
+/// switcher" and stays on the live path.
+class HourlyHoursMeta {
+  final String? date;
+  final String? liveHour; // "18"
+  final List<HourlyHourInfo> hours;
+
+  const HourlyHoursMeta({this.date, this.liveHour, this.hours = const []});
+
+  factory HourlyHoursMeta.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    final list = j['hours'];
+    return HourlyHoursMeta(
+      date: misToStr(j['date']),
+      liveHour: misToStr(j['live_hour']),
+      hours: [
+        if (list is List)
+          for (final h in list) HourlyHourInfo.fromJson(h),
+      ],
+    );
+  }
+}
+
 // ── Portfolio ────────────────────────────────────────────────────────────────
 
 /// `/portfolio/summary` — POS amounts keyed by status_name.
@@ -1094,4 +1135,226 @@ class BranchLocationRow {
       );
 
   bool get hasCoords => lat != 0 && lng != 0;
+}
+
+// ── Branch Report ────────────────────────────────────────────────────────────
+
+/// One branch the caller may open (already scope-limited by the server).
+class BranchOption {
+  final String branch;
+  final String? area;
+  final String? division;
+  final String? region;
+
+  const BranchOption({
+    required this.branch,
+    this.area,
+    this.division,
+    this.region,
+  });
+
+  factory BranchOption.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    return BranchOption(
+      branch: misToStr(j['branch']) ?? '',
+      area: misToStr(j['area']),
+      division: misToStr(j['division']),
+      region: misToStr(j['region']),
+    );
+  }
+}
+
+/// An accounts + amount pair on the portfolio row. `accounts` is null when the
+/// month's PAR carries no bucket split — rendered as "—", never a zero.
+class BrPortfolioCell {
+  final double? accounts;
+  final double amount;
+  const BrPortfolioCell({this.accounts, this.amount = 0});
+
+  factory BrPortfolioCell.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    return BrPortfolioCell(
+      accounts: misToDouble(j['accounts']),
+      amount: misToDouble(j['amount']) ?? 0,
+    );
+  }
+}
+
+/// The month-end POS snapshot block of `/branch-report`.
+class BranchPortfolio {
+  final String month; // "2026-07-01"
+  final String label; // "Jul"
+  final bool hasBucketAccounts;
+  final BrPortfolioCell total;
+  final BrPortfolioCell regular;
+  final BrPortfolioCell od1To90;
+  final BrPortfolioCell npa;
+  final double? regCustPerFo;
+  final double? odCustPerFo;
+
+  const BranchPortfolio({
+    this.month = '',
+    this.label = '',
+    this.hasBucketAccounts = false,
+    this.total = const BrPortfolioCell(),
+    this.regular = const BrPortfolioCell(),
+    this.od1To90 = const BrPortfolioCell(),
+    this.npa = const BrPortfolioCell(),
+    this.regCustPerFo,
+    this.odCustPerFo,
+  });
+
+  factory BranchPortfolio.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    return BranchPortfolio(
+      month: misToStr(j['month']) ?? '',
+      label: misToStr(j['label']) ?? '',
+      hasBucketAccounts: j['has_bucket_accounts'] == true,
+      total: BrPortfolioCell.fromJson(j['total']),
+      regular: BrPortfolioCell.fromJson(j['regular']),
+      od1To90: BrPortfolioCell.fromJson(j['od_1_90']),
+      npa: BrPortfolioCell.fromJson(j['npa']),
+      regCustPerFo: misToDouble(j['reg_cust_per_fo']),
+      odCustPerFo: misToDouble(j['od_cust_per_fo']),
+    );
+  }
+}
+
+/// One month's column of the Collection Performance table.
+class BranchPerformance {
+  final String month;
+  final String label;
+  final double? ftod;
+  final double? regularCollectionPct;
+  final double? npaPct;
+  final double? npaCollectionAmount;
+  final double? npaCollectionPct;
+  final String? lastDate; // "2026-08-11" — set with monthComplete=false on a part month
+  final bool monthComplete;
+
+  const BranchPerformance({
+    this.month = '',
+    this.label = '',
+    this.ftod,
+    this.regularCollectionPct,
+    this.npaPct,
+    this.npaCollectionAmount,
+    this.npaCollectionPct,
+    this.lastDate,
+    this.monthComplete = true,
+  });
+
+  factory BranchPerformance.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    return BranchPerformance(
+      month: misToStr(j['month']) ?? '',
+      label: misToStr(j['label']) ?? '',
+      ftod: misToDouble(j['ftod']),
+      regularCollectionPct: misToDouble(j['regular_collection_pct']),
+      npaPct: misToDouble(j['npa_pct']),
+      npaCollectionAmount: misToDouble(j['npa_collection_amount']),
+      npaCollectionPct: misToDouble(j['npa_collection_pct']),
+      lastDate: misToStr(j['last_date']),
+      monthComplete: j['month_complete'] != false,
+    );
+  }
+}
+
+/// Server-supplied opening figures + published assumption rates for the
+/// business projection. The rates are read-only on every client.
+class BranchProjectionSeed {
+  final String fromMonth;
+  final double? openingAccounts;
+  final double openingPos;
+  final double closureAccPct;
+  final double closurePosPct;
+  final double disbAccounts;
+  final double disbAmount;
+  final int disbBasisMonths;
+
+  const BranchProjectionSeed({
+    this.fromMonth = '',
+    this.openingAccounts,
+    this.openingPos = 0,
+    this.closureAccPct = 0,
+    this.closurePosPct = 0,
+    this.disbAccounts = 0,
+    this.disbAmount = 0,
+    this.disbBasisMonths = 0,
+  });
+
+  factory BranchProjectionSeed.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    final d = _asMap(j['defaults']);
+    return BranchProjectionSeed(
+      fromMonth: misToStr(j['from_month']) ?? '',
+      openingAccounts: misToDouble(j['opening_accounts']),
+      openingPos: misToDouble(j['opening_pos']) ?? 0,
+      closureAccPct: misToDouble(d['closure_acc_pct']) ?? 0,
+      closurePosPct: misToDouble(d['closure_pos_pct']) ?? 0,
+      disbAccounts: misToDouble(d['disb_accounts']) ?? 0,
+      disbAmount: misToDouble(d['disb_amount']) ?? 0,
+      disbBasisMonths: misToDouble(j['disb_basis_months'])?.round() ?? 0,
+    );
+  }
+}
+
+/// `/branch-report` — the whole per-branch Report Card in one call, already
+/// scoped: `branches` only lists what the caller may open, and the server
+/// resolves the caller's own branch when none is requested.
+class BranchReportResponse {
+  final String tier;
+  final List<BranchOption> branches;
+  final String? branch;
+  final String? bmName;
+  final int foCount;
+  final String? month;
+  final List<String> months; // newest first
+  final BranchPortfolio? portfolio;
+  final List<BranchPerformance> performance;
+  final BranchProjectionSeed? projection;
+
+  const BranchReportResponse({
+    this.tier = 'all',
+    this.branches = const [],
+    this.branch,
+    this.bmName,
+    this.foCount = 0,
+    this.month,
+    this.months = const [],
+    this.portfolio,
+    this.performance = const [],
+    this.projection,
+  });
+
+  factory BranchReportResponse.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    final bm = _asMap(j['bm']);
+    return BranchReportResponse(
+      tier: misToStr(j['tier']) ?? 'all',
+      branches: [
+        if (j['branches'] is List)
+          for (final b in j['branches'] as List) BranchOption.fromJson(b),
+      ],
+      branch: misToStr(j['branch']),
+      bmName: misToStr(bm['name']),
+      foCount: misToDouble(j['fo_count'])?.round() ?? 0,
+      month: misToStr(j['month']),
+      months: [
+        if (j['months'] is List)
+          for (final m in j['months'] as List)
+            if (misToStr(m) != null) misToStr(m)!,
+      ],
+      portfolio:
+          j['portfolio'] == null ? null : BranchPortfolio.fromJson(j['portfolio']),
+      performance: [
+        if (j['performance'] is List)
+          for (final p in j['performance'] as List)
+            BranchPerformance.fromJson(p),
+      ],
+      projection: j['projection'] == null
+          ? null
+          : BranchProjectionSeed.fromJson(j['projection']),
+    );
+  }
 }

@@ -31,10 +31,17 @@ class MisRegularCollectionCard extends StatelessWidget {
     super.key,
     required this.summary,
     required this.metric,
+    this.titleLabel,
   });
 
   final CollectionSummary summary;
   final MisMetric metric;
+
+  /// Title prefix. Null → 'Regular' (the Collection screen). '' drops the
+  /// prefix entirely — the Hourly screen's heading is just "Demand vs
+  /// Collection (Accounts)", because its regular bucket is labelled
+  /// "Regular as FTOD" elsewhere on that screen.
+  final String? titleLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -52,8 +59,11 @@ class MisRegularCollectionCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         MisCcTitle(
-          'Regular Demand vs Collection '
-          '${metric == MisMetric.amount ? "(Amount)" : "(Accounts)"}',
+          [
+            titleLabel ?? 'Regular',
+            'Demand vs Collection',
+            metric == MisMetric.amount ? '(Amount)' : '(Accounts)',
+          ].where((s) => s.isNotEmpty).join(' '),
         ),
         GlassCard(
           child: Column(
@@ -139,10 +149,21 @@ class MisBucketMatrix extends StatelessWidget {
     super.key,
     required this.summary,
     required this.metric,
+    this.regularLabel,
+    this.regularShortLabel,
   });
 
   final CollectionSummary summary;
   final MisMetric metric;
+
+  /// Override for the regular bucket's row name — the Hourly screen names it
+  /// "Regular as FTOD" (the same figure IS the day's FTOD until the evening
+  /// postings land). Null keeps the standard "Regular".
+  final String? regularLabel;
+
+  /// Short form used in the footnote's overlap sentence ("On-date overlaps
+  /// FTOD"). Defaults to "Regular".
+  final String? regularShortLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -156,7 +177,9 @@ class MisBucketMatrix extends StatelessWidget {
       if (b == null) continue;
       rows.add(_row(
         key: name,
-        label: misBucketLabel(name),
+        label: name == 'regular' && regularLabel != null
+            ? regularLabel!
+            : misBucketLabel(name),
         note: name == 'on_date' ? misPrettyDate(summary.date) : null,
         demand: b.demand(metric),
         collection: b.collection(metric),
@@ -198,11 +221,11 @@ class MisBucketMatrix extends StatelessWidget {
               ? 'NPA row shows recovered rupees only — the schema has no NPA '
                   'demand amount. Activation ${misRupees(act?.amount ?? 0)} · '
                   'Closure ${misRupees(clo?.amount ?? 0)}. On-date overlaps '
-                  'Regular, so the rows are not additive.'
+                  '${regularShortLabel ?? 'Regular'}, so the rows are not additive.'
               : 'NPA Demand is the open case count; Collection is activation '
                   'accounts. Activation ${misNum(act?.accounts ?? 0)} · '
                   'Closure ${misNum(clo?.accounts ?? 0)}. On-date overlaps '
-                  'Regular, so the rows are not additive.',
+                  '${regularShortLabel ?? 'Regular'}, so the rows are not additive.',
         ),
       ],
     );
@@ -511,6 +534,7 @@ class MisCollectionUnitTable extends StatelessWidget {
     required this.unitOf,
     this.subOf,
     this.onRowTap,
+    this.balanceLabel = 'Balance',
   });
 
   final List<CollectionRow> rows;
@@ -519,6 +543,15 @@ class MisCollectionUnitTable extends StatelessWidget {
   final String Function(CollectionRow) unitOf;
   final String? Function(CollectionRow)? subOf;
   final void Function(CollectionRow)? onRowTap;
+
+  /// Header of the shortfall column — the Hourly screen names it "FTOD"
+  /// (mirrors the web's balanceLabel="Regular as FTOD").
+  final String balanceLabel;
+
+  // The shortfall floors at zero: collection can legitimately exceed demand (a
+  // borrower clearing arrears with the current instalment) and the raw
+  // subtraction then prints a negative, which reads as a bug.
+  static double _short(double d, double c) => (d - c) < 0 ? 0 : d - c;
 
   @override
   Widget build(BuildContext context) {
@@ -530,7 +563,7 @@ class MisCollectionUnitTable extends StatelessWidget {
 
     return MisMatrixTable(
       stubHeader: levelLabel,
-      headers: const ['Demand', 'Collection', 'Balance', 'Coll %'],
+      headers: ['Demand', 'Collection', balanceLabel, 'Coll %'],
       rows: [
         for (final r in rows) _row(r),
         if (rows.isNotEmpty)
@@ -540,7 +573,7 @@ class MisCollectionUnitTable extends StatelessWidget {
             cells: [
               MisCell(_fmt(metric, totDem), bgColor: const Color(0xFFFCE4D6)),
               MisCell(_fmt(metric, totCol), bgColor: const Color(0xFFE2EFDA)),
-              MisCell(_fmt(metric, totDem - totCol), bgColor: const Color(0xFFFCE4D6)),
+              MisCell(_fmt(metric, _short(totDem, totCol)), bgColor: const Color(0xFFFCE4D6)),
               MisCell(misPct2(totCol, totDem), bgColor: const Color(0xFFFFFFCC)),
             ],
           ),
@@ -558,7 +591,7 @@ class MisCollectionUnitTable extends StatelessWidget {
         MisCell(_fmt(metric, d), bgColor: const Color(0xFFFCE4D6)),
         MisCell(_fmt(metric, c),
             color: const Color(0xFF059669), weight: FontWeight.w700, bgColor: const Color(0xFFE2EFDA)),
-        MisCell(_fmt(metric, d - c), bgColor: const Color(0xFFFCE4D6)),
+        MisCell(_fmt(metric, _short(d, c)), bgColor: const Color(0xFFFCE4D6)),
         MisCell(
           misPct2(c, d),
           weight: FontWeight.w700,
