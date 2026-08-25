@@ -47,6 +47,14 @@ StatusTone planStatusTone(String status) {
 /// A claim header is editable by its owner only while DRAFT or SENT_BACK.
 bool claimIsEditable(String status) => status == 'DRAFT' || status == 'SENT_BACK';
 
+/// Whether the claimant may delete their own claim in this status.
+///
+/// SUBMITTED is deletable so a claim sent by mistake can be withdrawn from the
+/// approver's inbox; once a level has been approved the claim carries somebody
+/// else's decision and only the approval path can end it. Mirrors the backend's
+/// DELETABLE_STATUSES guard, which is what actually enforces this.
+bool claimIsDeletable(String status) => status == 'DRAFT' || status == 'SUBMITTED';
+
 /// Icon for a `TravelExpenseCategory`.
 IconData expenseCategoryIcon(String category) {
   switch (category) {

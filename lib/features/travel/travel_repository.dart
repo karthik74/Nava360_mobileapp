@@ -312,7 +312,7 @@ class TravelRepository {
     );
   }
 
-  /// Delete own DRAFT claim.
+  /// Delete own claim while it is still DRAFT or SUBMITTED.
   Future<void> deleteClaim(int id) {
     return _api.raw.delete('$_claims/$id');
   }

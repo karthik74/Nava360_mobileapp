@@ -68,6 +68,7 @@ class TravelClaimDetailScreen extends ConsumerWidget {
             final isOwner =
                 user?.employeeId != null && claim.employeeId == user!.employeeId;
             final canEdit = isOwner && claimIsEditable(claim.status);
+            final canDelete = isOwner && claimIsDeletable(claim.status);
             final tone = claimStatusTone(claim.status);
 
             return RefreshIndicator(
@@ -305,11 +306,11 @@ class TravelClaimDetailScreen extends ConsumerWidget {
                             label: const Text('Edit'),
                           ),
                         ),
-                        if (claim.status == 'DRAFT') ...[
+                        if (canDelete) ...[
                           const SizedBox(width: 10),
                           Expanded(
                             child: OutlinedButton.icon(
-                              onPressed: () => _deleteClaim(context, ref, claim.id),
+                              onPressed: () => _deleteClaim(context, ref, claim),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: AppColors.danger,
                                 side: BorderSide(color: AppColors.danger.withOpacity(0.4)),
@@ -339,6 +340,22 @@ class TravelClaimDetailScreen extends ConsumerWidget {
                       const Text('Add at least one expense before submitting.',
                           style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
                     ],
+                  ] else if (canDelete) ...[
+                    // Awaiting approval: nothing here is editable any more, but the
+                    // claimant can still withdraw a claim nobody has acted on.
+                    const SizedBox(height: 22),
+                    SizedBox(
+                      height: 50,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _deleteClaim(context, ref, claim),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.danger,
+                          side: BorderSide(color: AppColors.danger.withOpacity(0.4)),
+                        ),
+                        icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                        label: const Text('Delete claim'),
+                      ),
+                    ),
                   ],
                   const SizedBox(height: 24),
                 ],
@@ -472,12 +489,15 @@ class TravelClaimDetailScreen extends ConsumerWidget {
     if (done == true) _refresh(ref);
   }
 
-  Future<void> _deleteClaim(BuildContext context, WidgetRef ref, int claimId) async {
+  Future<void> _deleteClaim(BuildContext context, WidgetRef ref, TravelClaim claim) async {
+    final claimId = claim.id;
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Delete claim?'),
-        content: const Text('This draft claim will be permanently deleted.'),
+        content: Text(claim.status == 'SUBMITTED'
+            ? 'This claim will be withdrawn from the approver and permanently deleted.'
+            : 'This draft claim will be permanently deleted.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
