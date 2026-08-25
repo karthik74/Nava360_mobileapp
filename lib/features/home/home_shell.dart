@@ -11,6 +11,7 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../announcements/announcements_repository.dart';
 import '../policies/policies_repository.dart';
+import '../attendance/sign_out_guard.dart';
 import '../auth/auth_controller.dart';
 import '../chat/chat_controller.dart';
 import '../leaves/leave_repository.dart';
@@ -657,16 +658,22 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
                       name: user?.username ?? 'User',
                       email: user?.email ?? '',
                       role: user?.role ?? 'EMPLOYEE',
-                      onSignOut: () {
-                        // Capture the notifier BEFORE popping the drawer — once
-                        // the drawer is popped this State (and its `ref`) is
-                        // disposed, so reading `ref` later would throw. The
-                        // notifier itself lives in the ProviderContainer and is
-                        // safe to use afterwards.
+                      onSignOut: () async {
+                        // The check-in guard reads providers, so it has to run
+                        // while the drawer — and this State's `ref` — is still
+                        // alive. Same reason the notifier is captured here.
+                        final checkedIn = await isCheckedInNow(ref);
                         final auth =
                             ref.read(authControllerProvider.notifier);
+                        if (!context.mounted) return;
                         Navigator.pop(context);
-                        _showLogoutDialog(context, auth);
+                        if (checkedIn) {
+                          await showCheckOutRequiredDialog(context);
+                          return;
+                        }
+                        if (context.mounted) {
+                          _showLogoutDialog(context, auth);
+                        }
                       },
                     ),
                   ),

@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../attendance/sign_out_guard.dart';
 import '../auth/auth_controller.dart';
 import '../auth/auth_models.dart';
 import '../auth/biometric/biometric_controller.dart';
@@ -352,6 +353,10 @@ Future<void> _toggleBiometric(
 
 /// Sign out. When biometric is enabled, offer to keep it or disable it (spec §6).
 Future<void> _handleLogout(BuildContext context, WidgetRef ref) async {
+  // Guarded before either dialog: being asked to keep biometric login on, only
+  // to be refused afterwards, would read as the app losing track of itself.
+  if (!await ensureCheckedOutBeforeSignOut(context, ref)) return;
+  if (!context.mounted) return;
   final biometricEnabled = ref.read(biometricControllerProvider).enabled;
 
   if (!biometricEnabled) {
