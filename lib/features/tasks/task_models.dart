@@ -261,52 +261,226 @@ class TaskDashboard {
 // ---------------- Form schema (mirrors web FormBuilder JSON) ----------------
 
 /// Supported field types. Unknown types fall back to plain text.
+/// Every field type the task form builder can author.
+///
+/// This list is the mirror of the backend's `TaskFormFieldType`: one value per
+/// `fieldKey` it defines. Keeping it complete is the point — anything missing
+/// used to fall through to [FieldType.text], so a form asking for a GPS reading,
+/// a signature or a rating quietly became a box to type into.
 enum FieldType {
-  text, textarea, number, mobile, email, date, time, day,
-  daterange, select, radio, checkbox, file, multiimage,
-  // Media-capture types authored in the web form builder.
-  image, webcam, video, audio;
+  // ── Basic ────────────────────────────────────────────────────────────────
+  text,
+  textarea,
+  number,
+  decimal,
+  mobile,
+  email,
+  url,
+  password,
+  otp,
 
+  // ── Date & time ──────────────────────────────────────────────────────────
+  date,
+  time,
+  datetime,
+  daterange,
+  day,
+  month,
+  year,
+  dateofbirth,
+  duration,
+
+  // ── Selection ────────────────────────────────────────────────────────────
+  select,
+  multiselect,
+  radio,
+  checkbox,
+  toggle,
+  buttongroup,
+  likert,
+
+  // ── File & media ─────────────────────────────────────────────────────────
+  file,
+  multiimage,
+  image,
+  video,
+  audio,
+  signature,
+  drawing,
+  webcam,
+
+  // ── HRMS master data ─────────────────────────────────────────────────────
+  employeeSelector,
+  departmentSelector,
+  branchSelector,
+  designationSelector,
+  roleSelector,
+  leaveTypeSelector,
+  shiftSelector,
+  locationSelector,
+
+  // ── Task ─────────────────────────────────────────────────────────────────
+  taskSelector,
+  taskStatusField,
+  taskPriorityField,
+  taskCategoryField,
+
+  // ── Approval ─────────────────────────────────────────────────────────────
+  approval,
+  esignature,
+  witness,
+  checklistApproval,
+
+  // ── Layout (renders itself, stores nothing) ──────────────────────────────
+  section,
+  divider,
+  heading,
+  paragraph,
+  spacer,
+
+  // ── Table / repeatable ───────────────────────────────────────────────────
+  table,
+  repeatableSection,
+  matrix,
+
+  // ── Calculation & system (filled for the user, not by them) ──────────────
+  formula,
+  hidden,
+  readOnly,
+  sequenceNumber,
+  timestampField,
+  currentUserField,
+  currentBranchField,
+
+  // ── Location & scanner ───────────────────────────────────────────────────
+  gpsLocation,
+  mapPoint,
+  qrScanner,
+  barcodeScanner,
+  nfcTag,
+
+  // ── Rating & feedback ────────────────────────────────────────────────────
+  starRating,
+  npsScore,
+  emojiRating,
+  sliderRating,
+  ranking,
+
+  // ── Finance & business ───────────────────────────────────────────────────
+  currency,
+  percentage,
+  quantity,
+  uomSelector,
+  bankAccount,
+  ifscLookup,
+  panNumber,
+  aadhaarNumber,
+  gstNumber;
+
+  /// Field types that draw their own block: no label, no value, no validation.
+  bool get isLayout =>
+      this == section ||
+      this == divider ||
+      this == heading ||
+      this == paragraph ||
+      this == spacer;
+
+  /// Field types the server or the form fills in — the user never types them.
+  bool get isSystem =>
+      this == formula ||
+      this == hidden ||
+      this == readOnly ||
+      this == sequenceNumber ||
+      this == timestampField ||
+      this == currentUserField ||
+      this == currentBranchField;
+
+  /// Whether an answer is a free-length string that character limits shouldn't
+  /// police (a captured coordinate, a scanned code, an uploaded signature).
+  bool get isCaptured =>
+      this == gpsLocation ||
+      this == mapPoint ||
+      this == qrScanner ||
+      this == barcodeScanner ||
+      this == nfcTag;
+
+  /// Resolves a `formSchema` type key onto a value.
+  ///
+  /// Matching ignores case and separators, so `gps_location`, `GPS_LOCATION` and
+  /// `gpsLocation` all land on the same type. Legacy and web-only keys are then
+  /// mapped by hand, and only after all of that does an unrecognised key fall
+  /// back to a text box.
   static FieldType from(String s) {
     final v = s.trim().toLowerCase();
+    final squashed = v.replaceAll(RegExp(r'[^a-z0-9]'), '');
     for (final t in values) {
-      if (t.name == v) return t;
+      if (t.name.toLowerCase() == squashed) return t;
     }
-    // Aliases for media-capture fields built in the web form builder so they
-    // render an uploader (camera/gallery/file) instead of a text box.
-    switch (v) {
+
+    switch (squashed) {
+      // Media-capture aliases authored by older versions of the web builder.
       case 'photo':
       case 'camera':
       case 'imagecapture':
-      case 'image_capture':
       case 'singleimage':
-      case 'single_image':
         return FieldType.image;
       case 'images':
-      case 'multi_image':
       case 'multiimages':
         return FieldType.multiimage;
       case 'attachment':
       case 'document':
       case 'fileupload':
-      case 'file_upload':
         return FieldType.file;
+      // Location capture.
+      case 'gps':
+      case 'geolocation':
+      case 'geo':
+        return FieldType.gpsLocation;
+      case 'map':
+      case 'mappicker':
+        return FieldType.mapPoint;
+      case 'qr':
+      case 'qrcode':
+      case 'scanner':
+        return FieldType.qrScanner;
+      case 'barcode':
+        return FieldType.barcodeScanner;
+      case 'nfc':
+        return FieldType.nfcTag;
+      // Date keys the web renderer accepts but the backend enum does not list.
+      case 'taskduedate':
+      case 'taskstartdate':
+      case 'taskcompletiondate':
+        return FieldType.date;
+      case 'dob':
+        return FieldType.dateofbirth;
+      case 'rating':
+        return FieldType.starRating;
+      case 'dropdown':
+        return FieldType.select;
+      case 'switch':
+        return FieldType.toggle;
+      case 'signaturepad':
+        return FieldType.signature;
     }
-    // Last resort: an unrecognised type whose key still indicates a media field
-    // (e.g. a suffixed/variant key) should render an uploader, not a text box.
-    if (v.contains('multiimage') || v.contains('multi_image')) {
-      return FieldType.multiimage;
-    }
-    if (v.contains('image') ||
-        v.contains('photo') ||
-        v.contains('camera') ||
-        v.contains('webcam') ||
-        v.contains('picture')) {
+
+    // Last resort: a variant key that still names a media field should open an
+    // uploader rather than a text box.
+    if (squashed.contains('multiimage')) return FieldType.multiimage;
+    if (squashed.contains('image') ||
+        squashed.contains('photo') ||
+        squashed.contains('camera') ||
+        squashed.contains('webcam') ||
+        squashed.contains('picture')) {
       return FieldType.image;
     }
-    if (v.contains('video')) return FieldType.video;
-    if (v.contains('audio') || v.contains('voice')) return FieldType.audio;
-    if (v.contains('file') || v.contains('attach') || v.contains('upload')) {
+    if (squashed.contains('video')) return FieldType.video;
+    if (squashed.contains('audio') || squashed.contains('voice')) {
+      return FieldType.audio;
+    }
+    if (squashed.contains('file') ||
+        squashed.contains('attach') ||
+        squashed.contains('upload')) {
       return FieldType.file;
     }
     return FieldType.text;
@@ -339,6 +513,11 @@ class FormFieldDef {
   final int? minLength;
   final num? min;
   final num? max;
+  /// Currency code for a `currency` field (e.g. "INR"). Null = the app default.
+  final String? currencyCode;
+  /// The expression behind a `formula` field, shown so the user knows what is
+  /// being computed for them.
+  final String? expression;
   final List<FieldCondition> visibleWhen;
   final String visibleWhenLogic; // "all" | "any"
   /// True when the assigner pre-fills this field at task-creation time.
@@ -358,6 +537,8 @@ class FormFieldDef {
     this.minLength,
     this.min,
     this.max,
+    this.currencyCode,
+    this.expression,
     this.visibleWhen = const [],
     this.visibleWhenLogic = 'all',
     this.assigned = false,
@@ -382,6 +563,8 @@ class FormFieldDef {
       minLength: (j['minLength'] as num?)?.toInt(),
       min: j['min'] as num?,
       max: j['max'] as num?,
+      currencyCode: j['currencyCode'] as String?,
+      expression: j['expression'] as String?,
       visibleWhen: conds,
       visibleWhenLogic: (j['visibleWhenLogic'] as String?) ?? 'all',
       assigned: j['assigned'] == true,
