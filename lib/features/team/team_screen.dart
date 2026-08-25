@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../../core/approvals.dart';
 import '../../core/text_formatters.dart';
@@ -8,6 +9,8 @@ import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import '../leaves/leave_models.dart';
 import '../leaves/leave_repository.dart';
+import '../resignation/resignation_models.dart';
+import '../resignation/resignation_repository.dart';
 import 'employee_detail_screen.dart';
 import 'team_models.dart';
 import 'team_repository.dart';
@@ -25,7 +28,7 @@ class TeamScreen extends ConsumerStatefulWidget {
 }
 
 class _TeamScreenState extends ConsumerState<TeamScreen> {
-  int _tab = 0; // 0 = Members, 1 = Leaves, 2 = Attendance
+  int _tab = 0; // 0 = Members, 1 = Leaves, 2 = Attendance, 3 = Exits
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +40,7 @@ class _TeamScreenState extends ConsumerState<TeamScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: _SegmentBar(
             value: _tab,
-            labels: const ['Members', 'Leaves', 'Attendance'],
+            labels: const ['Members', 'Leaves', 'Attendance', 'Exits'],
             onChanged: (v) => setState(() => _tab = v),
           ),
         ),
@@ -49,6 +52,7 @@ class _TeamScreenState extends ConsumerState<TeamScreen> {
               _MembersView(),
               _LeavesView(),
               _AttendanceView(),
+              _ExitsView(),
             ],
           ),
         ),
@@ -1558,6 +1562,311 @@ class _ActionButton extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+
+// -------------------------------------------------------------------
+// Exits tab - resignation approvals assigned to this manager
+// -------------------------------------------------------------------
+
+/// The manager's resignation inbox. The steps come from the configurable
+/// resignation approval workflow (Reporting Manager level N), so this needs no
+/// HR resignation permission - only the steps assigned to this user are listed.
+class _ExitsView extends ConsumerStatefulWidget {
+  const _ExitsView();
+
+  @override
+  ConsumerState<_ExitsView> createState() => _ExitsViewState();
+}
+
+class _ExitsViewState extends ConsumerState<_ExitsView> {
+  String _filter = 'ALL';
+
+  @override
+  Widget build(BuildContext context) {
+    final approvals = ref.watch(myResignationApprovalsProvider);
+    final mq = MediaQuery.of(context);
+    final pad = EdgeInsets.fromLTRB(
+      16,
+      4,
+      16,
+      mq.padding.bottom + AppChrome.bottomNavHeight + 16,
+    );
+
+    return RefreshIndicator(
+      color: AppColors.primary,
+      onRefresh: () async => ref.invalidate(myResignationApprovalsProvider),
+      child: approvals.when(
+        loading: () => const _CenterLoader(),
+        error: (e, _) => _ErrorList(
+          message: e.toString(),
+          padding: pad,
+          onRetry: () => ref.invalidate(myResignationApprovalsProvider),
+        ),
+        data: (rows) {
+          final pending = rows.where((r) => r.step.isPending).length;
+          final approved =
+              rows.where((r) => r.step.stepStatus == 'APPROVED').length;
+          final rejected =
+              rows.where((r) => r.step.stepStatus == 'REJECTED').length;
+          final filtered = _filter == 'ALL'
+              ? rows
+              : rows.where((r) => r.step.stepStatus == _filter).toList();
+
+          return ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: pad,
+            children: [
+              _TeamSummary(
+                total: rows.length,
+                pending: pending,
+                approved: approved,
+                rejected: rejected,
+              ),
+              const SizedBox(height: 16),
+              _FilterBar(
+                value: _filter,
+                onChanged: (v) => setState(() => _filter = v),
+                counts: {
+                  'ALL': rows.length,
+                  'PENDING': pending,
+                  'APPROVED': approved,
+                  'REJECTED': rejected,
+                },
+              ),
+              const SizedBox(height: 14),
+              if (filtered.isEmpty)
+                const AppEmptyState(
+                  icon: Icons.logout_rounded,
+                  message: 'No resignation approvals are assigned to you.',
+                )
+              else
+                for (final a in filtered)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _ResignationApprovalCard(
+                      a: a,
+                      onReviewed: () =>
+                          ref.invalidate(myResignationApprovalsProvider),
+                    ),
+                  ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ResignationApprovalCard extends ConsumerStatefulWidget {
+  const _ResignationApprovalCard({required this.a, required this.onReviewed});
+  final ResignationApproval a;
+  final VoidCallback onReviewed;
+
+  @override
+  ConsumerState<_ResignationApprovalCard> createState() =>
+      _ResignationApprovalCardState();
+}
+
+class _ResignationApprovalCardState
+    extends ConsumerState<_ResignationApprovalCard> {
+  bool _busy = false;
+
+  String _fmt(DateTime? d) => d == null ? '-' : DateFormat('d MMM y').format(d);
+
+  Future<void> _act(bool approve) async {
+    final remarks = await _promptRemarks(approve);
+    if (remarks == null) return;
+    setState(() => _busy = true);
+    try {
+      final repo = ref.read(resignationRepositoryProvider);
+      final id = widget.a.resignation.id;
+      if (approve) {
+        await repo.approve(id, remarks: remarks);
+      } else {
+        await repo.reject(id, remarks: remarks);
+      }
+      widget.onReviewed();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<String?> _promptRemarks(bool approve) async {
+    final c = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(approve ? 'Approve resignation' : 'Reject resignation'),
+        content: TextField(
+          controller: c,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            hintText: 'Add remarks (optional)',
+          ),
+          maxLines: 2,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: approve ? AppColors.success : AppColors.danger,
+            ),
+            onPressed: () => Navigator.pop(ctx, c.text),
+            child: Text(approve ? 'Approve' : 'Reject'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.a.resignation;
+    final step = widget.a.step;
+    final tone = StatusTone.forLeave(step.stepStatus);
+    final name = r.employeeName ?? 'Employee';
+
+    return GlassCard(
+      padding: const EdgeInsets.all(14),
+      shadow: AppShadows.soft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              UserAvatar(name: name, size: 36, radius: 11),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      [
+                        if (r.employeeCode != null) r.employeeCode!,
+                        if (r.designation != null) r.designation!,
+                        step.levelName,
+                      ].join(' \u00b7 '),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              StatusPill(label: tone.label, color: tone.color),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              border: Border.all(color: AppColors.hairline),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.event_busy_rounded,
+                    size: 13, color: AppColors.primary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Resigned ${_fmt(r.resignationDate)}   Last day ${_fmt(r.lastWorkingDay)}',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (r.reason != null && r.reason!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.format_quote_rounded,
+                    size: 13, color: AppColors.muted),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    r.reason!,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.inkSoft,
+                      fontStyle: FontStyle.italic,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (!step.isPending &&
+              step.remarks != null &&
+              step.remarks!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Your remarks: ${step.remarks!}',
+              style: const TextStyle(
+                fontSize: 11.5,
+                color: AppColors.inkSoft,
+                height: 1.4,
+              ),
+            ),
+          ],
+          if (step.isPending) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _ActionButton(
+                    icon: Icons.check_rounded,
+                    label: 'Approve',
+                    color: AppColors.success,
+                    onTap: _busy ? null : () => _act(true),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _ActionButton(
+                    icon: Icons.close_rounded,
+                    label: 'Reject',
+                    color: AppColors.danger,
+                    outlined: true,
+                    onTap: _busy ? null : () => _act(false),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }

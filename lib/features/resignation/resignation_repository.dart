@@ -49,6 +49,37 @@ class ResignationRepository {
     );
   }
 
+  /// The approver's inbox: every resignation approval step assigned to the
+  /// logged-in employee. Reporting managers are approvers by workflow
+  /// configuration, so this needs no HR permission.
+  Future<List<ResignationApproval>> myApprovals({bool pendingOnly = false}) {
+    return _api.get<List<ResignationApproval>>(
+      '/api/resignations/my-approvals',
+      query: {'pendingOnly': '$pendingOnly'},
+      parse: (d) => (d as List<dynamic>)
+          .map((e) => ResignationApproval.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  /// Approve the caller's pending step on a resignation.
+  Future<Resignation> approve(int id, {String? remarks}) {
+    return _api.post<Resignation>(
+      '/api/resignations/$id/approve',
+      body: {if (remarks != null && remarks.isNotEmpty) 'remarks': remarks},
+      parse: (d) => Resignation.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
+  /// Reject the caller's pending step on a resignation.
+  Future<Resignation> reject(int id, {String? remarks}) {
+    return _api.post<Resignation>(
+      '/api/resignations/$id/reject',
+      body: {if (remarks != null && remarks.isNotEmpty) 'remarks': remarks},
+      parse: (d) => Resignation.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
   /// Withdraw one of the employee's own resignations.
   Future<Resignation> withdraw(int id, {String? comment}) {
     return _api.post<Resignation>(
@@ -62,3 +93,9 @@ class ResignationRepository {
 final resignationRepositoryProvider = Provider<ResignationRepository>(
   (ref) => ResignationRepository(ref.watch(apiClientProvider)),
 );
+
+/// Resignation approvals assigned to the logged-in employee (pending + history).
+final myResignationApprovalsProvider =
+    FutureProvider.autoDispose<List<ResignationApproval>>((ref) {
+  return ref.watch(resignationRepositoryProvider).myApprovals();
+});
