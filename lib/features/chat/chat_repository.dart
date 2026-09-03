@@ -11,10 +11,12 @@ class ChatRepository {
 
   // ── Contacts ──────────────────────────────────────────────────────────────
 
-  Future<List<ChatContact>> searchContacts(String query) {
+  /// [scoped] limits results to the caller's reporting hierarchy / assigned
+  /// branches (server-side) — used when picking group members.
+  Future<List<ChatContact>> searchContacts(String query, {bool scoped = false}) {
     return _api.get<List<ChatContact>>(
       '/api/chat/contacts',
-      query: {'q': query},
+      query: {'q': query, if (scoped) 'scoped': 'true'},
       parse: (d) => (d as List)
           .map((e) => ChatContact.fromJson(e as Map<String, dynamic>))
           .toList(),
@@ -83,6 +85,20 @@ class ChatRepository {
     );
   }
 
+  /// Rename a group (group admins only).
+  Future<Conversation> renameGroup(int conversationId, String name) {
+    return _api.patch<Conversation>(
+      '/api/chat/conversations/$conversationId',
+      body: {'name': name},
+      parse: (d) => Conversation.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
+  /// Delete a group for everyone (group admins only). Soft delete — history kept server-side.
+  Future<void> deleteGroup(int conversationId) async {
+    await _api.raw.delete('/api/chat/conversations/$conversationId');
+  }
+
   // ── Messages ──────────────────────────────────────────────────────────────
 
   Future<List<ChatMessage>> loadMessages(
@@ -102,6 +118,51 @@ class ChatRepository {
     );
   }
 
+  /// Forward a message into other chats and/or to colleagues (their direct
+  /// chat is found-or-created).
+  ///
+  /// Mirrors the web: a pure client-side re-send. The copy carries the
+  /// original's text/caption AND its attachment (same stored file id — nothing
+  /// is re-uploaded), flagged `forwarded`, but never its reply-quote or
+  /// reactions. Targets are sent independently; returns the copies that
+  /// succeeded and throws only when none did.
+  Future<List<ChatMessage>> forwardMessage(
+    ChatMessage message, {
+    List<int> conversationIds = const [],
+    List<int> employeeIds = const [],
+  }) async {
+    final targets = <int>{...conversationIds};
+    for (final empId in employeeIds) {
+      targets.add((await getOrCreateDirect(empId)).id);
+    }
+    if (targets.isEmpty) return const [];
+
+    final content = message.content?.trim();
+    final results = await Future.wait(
+      targets.map(
+        (convId) => sendMessage(
+          convId,
+          content: (content == null || content.isEmpty) ? null : content,
+          attachmentFileId: message.attachmentFileId,
+          attachmentName:
+              message.attachmentFileId == null ? null : message.attachmentName,
+          attachmentContentType: message.attachmentFileId == null
+              ? null
+              : message.attachmentContentType,
+          attachmentSizeBytes: message.attachmentFileId == null
+              ? null
+              : message.attachmentSizeBytes,
+          forwarded: true,
+        ).then<ChatMessage?>((m) => m, onError: (Object e) => null),
+      ),
+    );
+    final ok = results.whereType<ChatMessage>().toList();
+    if (ok.isEmpty) {
+      throw Exception('Could not forward the message');
+    }
+    return ok;
+  }
+
   Future<ChatMessage> sendMessage(
     int conversationId, {
     String? content,
@@ -110,6 +171,7 @@ class ChatRepository {
     String? attachmentContentType,
     int? attachmentSizeBytes,
     int? replyToMessageId,
+    bool forwarded = false,
   }) {
     return _api.post<ChatMessage>(
       '/api/chat/conversations/$conversationId/messages',
@@ -122,6 +184,7 @@ class ChatRepository {
         if (attachmentSizeBytes != null)
           'attachmentSizeBytes': attachmentSizeBytes,
         if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
+        if (forwarded) 'forwarded': true,
       },
       parse: (d) => ChatMessage.fromJson(d as Map<String, dynamic>),
     );

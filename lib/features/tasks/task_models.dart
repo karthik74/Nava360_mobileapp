@@ -304,6 +304,7 @@ enum FieldType {
   multiimage,
   image,
   video,
+  videoQa,
   audio,
   signature,
   drawing,
@@ -500,6 +501,74 @@ class FieldCondition {
       );
 }
 
+/// One question a [FieldType.videoQa] recording asks.
+class VideoQaQuestion {
+  const VideoQaQuestion({required this.key, required this.text});
+
+  /// Stable key, so an answer stays attributable when the wording is edited.
+  final String key;
+  final String text;
+
+  factory VideoQaQuestion.fromJson(Map<String, dynamic> j, int index) => VideoQaQuestion(
+        key: (j['key'] as String?)?.trim().isNotEmpty == true
+            ? (j['key'] as String).trim()
+            : 'q${index + 1}',
+        text: (j['text'] as String?) ?? '',
+      );
+}
+
+/// How a [FieldType.videoQa] field wants its recording made. Designed on the web
+/// (Task template → form builder); every value here has a working default so a
+/// half-configured field still records something sensible.
+class VideoQaConfig {
+  const VideoQaConfig({
+    this.questions = const [],
+    this.secondsPerQuestion = defaultSecondsPerQuestion,
+    this.speakQuestions = true,
+    this.language = 'en',
+    this.frontCamera = true,
+    this.allowRetake = true,
+  });
+
+  /// Answer window after each question. Fixed for the whole field by design.
+  static const int defaultSecondsPerQuestion = 7;
+
+  final List<VideoQaQuestion> questions;
+  final int secondsPerQuestion;
+
+  /// Read each question aloud before its timer. Questions are always shown on
+  /// screen, so a phone with no voice for [language] still works.
+  final bool speakQuestions;
+  final String language;
+  final bool frontCamera;
+  final bool allowRetake;
+
+  bool get isUsable => questions.any((q) => q.text.trim().isNotEmpty);
+
+  factory VideoQaConfig.fromJson(Map<String, dynamic> j) {
+    final raw = (j['questions'] as List?) ?? const [];
+    final questions = <VideoQaQuestion>[];
+    for (var i = 0; i < raw.length; i++) {
+      final e = raw[i];
+      if (e is Map<String, dynamic>) {
+        final q = VideoQaQuestion.fromJson(e, i);
+        if (q.text.trim().isNotEmpty) questions.add(q);
+      } else if (e is String && e.trim().isNotEmpty) {
+        questions.add(VideoQaQuestion(key: 'q${i + 1}', text: e));
+      }
+    }
+    final secs = (j['secondsPerQuestion'] as num?)?.toInt() ?? defaultSecondsPerQuestion;
+    return VideoQaConfig(
+      questions: questions,
+      secondsPerQuestion: secs.clamp(3, 60),
+      speakQuestions: j['speakQuestions'] != false,
+      language: (j['language'] as String?) ?? 'en',
+      frontCamera: (j['camera'] as String?) != 'back',
+      allowRetake: j['allowRetake'] != false,
+    );
+  }
+}
+
 class FormFieldDef {
   final String id;
   final FieldType type;
@@ -524,6 +593,9 @@ class FormFieldDef {
   /// The assignee sees the value but cannot edit it.
   final bool assigned;
 
+  /// The question script, for a [FieldType.videoQa] field. Null for every other type.
+  final VideoQaConfig? videoQa;
+
   FormFieldDef({
     required this.id,
     required this.type,
@@ -542,6 +614,7 @@ class FormFieldDef {
     this.visibleWhen = const [],
     this.visibleWhenLogic = 'all',
     this.assigned = false,
+    this.videoQa,
   });
 
   factory FormFieldDef.fromJson(Map<String, dynamic> j) {
@@ -568,6 +641,9 @@ class FormFieldDef {
       visibleWhen: conds,
       visibleWhenLogic: (j['visibleWhenLogic'] as String?) ?? 'all',
       assigned: j['assigned'] == true,
+      videoQa: j['videoQa'] is Map<String, dynamic>
+          ? VideoQaConfig.fromJson(j['videoQa'] as Map<String, dynamic>)
+          : null,
     );
   }
 }
@@ -632,4 +708,96 @@ bool _match(FieldCondition c, dynamic v) {
     case 'not_contains': return !s.toLowerCase().contains(target.toLowerCase());
   }
   return false;
+}
+
+// ── Team task assignment (manager view) ──────────────────────────────────────
+
+/// One row of `GET /api/tasks/team` — a task as assigned to one team member.
+class TeamTaskAssignment {
+  const TeamTaskAssignment({
+    required this.id,
+    required this.taskId,
+    required this.taskTitle,
+    required this.status,
+    this.taskCode,
+    this.taskType,
+    this.taskPriority,
+    this.templateId,
+    this.templateName,
+    this.customerName,
+    this.assigneeId,
+    this.assigneeName,
+    this.assignedByName,
+    this.reviewerName,
+    this.progressPercentage = 0,
+    this.dueDate,
+    this.dueTime,
+    this.rejectionReason,
+    this.lastComment,
+    this.createdAt,
+    this.updatedAt,
+    this.completedAt,
+  });
+
+  final int id;
+  final int? taskId;
+  final String taskTitle;
+  final String status; // TaskStatuses.*
+  final String? taskCode;
+  final String? taskType;
+  final String? taskPriority;
+  final int? templateId;
+  final String? templateName;
+  final String? customerName;
+  final int? assigneeId;
+  final String? assigneeName;
+  final String? assignedByName;
+  final String? reviewerName;
+  final int progressPercentage;
+  final DateTime? dueDate;
+  final String? dueTime;
+  final String? rejectionReason;
+  final String? lastComment;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+  final DateTime? completedAt;
+
+  bool get isOpen =>
+      status != TaskStatuses.done &&
+      status != TaskStatuses.cancelled &&
+      status != TaskStatuses.rejected;
+
+  bool get isOverdue {
+    final d = dueDate;
+    if (d == null || !isOpen) return false;
+    final now = DateTime.now();
+    return DateTime(d.year, d.month, d.day)
+        .isBefore(DateTime(now.year, now.month, now.day));
+  }
+
+  factory TeamTaskAssignment.fromJson(Map<String, dynamic> j) =>
+      TeamTaskAssignment(
+        id: (j['id'] as num).toInt(),
+        taskId: (j['taskId'] as num?)?.toInt(),
+        taskTitle: j['taskTitle'] as String? ?? 'Task',
+        status: (j['status'] as String? ?? TaskStatuses.todo).toUpperCase(),
+        taskCode: j['taskCode'] as String?,
+        taskType: j['taskType'] as String?,
+        taskPriority: j['taskPriority'] as String?,
+        templateId: (j['templateId'] as num?)?.toInt(),
+        templateName: j['templateName'] as String?,
+        customerName: j['customerName'] as String?,
+        assigneeId: (j['assigneeId'] as num?)?.toInt(),
+        assigneeName: j['assigneeName'] as String?,
+        assignedByName: j['assignedByName'] as String?,
+        reviewerName: j['reviewerName'] as String?,
+        progressPercentage: (j['progressPercentage'] as num?)?.toInt() ?? 0,
+        dueDate: DateTime.tryParse(j['dueDate'] as String? ?? ''),
+        dueTime: j['dueTime'] as String?,
+        rejectionReason: j['rejectionReason'] as String?,
+        lastComment: j['lastComment'] as String?,
+        createdAt: DateTime.tryParse(j['createdAt'] as String? ?? ''),
+        updatedAt: DateTime.tryParse(j['updatedAt'] as String? ?? ''),
+        completedAt: DateTime.tryParse(j['completedAt'] as String? ?? ''),
+      );
 }

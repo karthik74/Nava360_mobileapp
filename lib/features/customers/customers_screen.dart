@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../core/navigation/mobile_menu_config.dart';
+import '../auth/auth_controller.dart';
+import '../tasks/team_tasks_screen.dart';
 import '../tasks/tasks_screen.dart';
 import 'customer_detail_screen.dart';
 import 'customer_models.dart';
@@ -33,20 +36,31 @@ class _CustomerTasksHubState extends ConsumerState<CustomerTasksHub> {
 
   @override
   Widget build(BuildContext context) {
+    // Managers holding TASK_VIEW get a third view: their team's tasks.
+    final user = ref.watch(authUserProvider);
+    final showTeam =
+        isManagerUser(user) && (user?.hasPermission('TASK_VIEW') ?? false);
+    final tab = (!showTeam && _tab == 2) ? 1 : _tab;
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: IndexedStack(
-        index: _tab,
+        index: tab,
         children: [
           _CustomersView(
-            header: _HubToggle(current: 0, onChanged: _select),
+            header: _HubToggle(current: 0, showTeam: showTeam, onChanged: _select),
           ),
           TasksScreen(
             header: Padding(
               padding: const EdgeInsets.only(bottom: 2),
-              child: _HubToggle(current: 1, onChanged: _select),
+              child: _HubToggle(current: 1, showTeam: showTeam, onChanged: _select),
             ),
           ),
+          if (showTeam)
+            TeamTasksScreen(
+              header: _HubToggle(current: 2, showTeam: showTeam, onChanged: _select),
+            )
+          else
+            const SizedBox.shrink(),
         ],
       ),
     );
@@ -54,9 +68,15 @@ class _CustomerTasksHubState extends ConsumerState<CustomerTasksHub> {
 }
 
 class _HubToggle extends StatelessWidget {
-  const _HubToggle({required this.current, required this.onChanged});
+  const _HubToggle({
+    required this.current,
+    required this.onChanged,
+    this.showTeam = false,
+  });
   final int current;
   final ValueChanged<int> onChanged;
+  /// Adds the manager-only "Team" segment.
+  final bool showTeam;
 
   @override
   Widget build(BuildContext context) {
@@ -71,6 +91,7 @@ class _HubToggle extends StatelessWidget {
         children: [
           _seg('Customers', Icons.people_alt_rounded, 0),
           _seg('My tasks', Icons.task_alt_rounded, 1),
+          if (showTeam) _seg('Team', Icons.groups_rounded, 2),
         ],
       ),
     );

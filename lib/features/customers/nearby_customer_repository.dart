@@ -87,15 +87,18 @@ class NearbyCustomerRepository {
     }
   }
 
-  /// Suggests a corrected position for a customer (goes to an approver).
-  Future<void> suggestLocation({
+  /// Sends the employee's position as a customer's location. Returns the
+  /// resulting status: `APPROVED` when the customer had no pin and the capture
+  /// was applied at once; `PENDING` when an existing pin is being corrected
+  /// and an approver has to confirm it.
+  Future<String> suggestLocation({
     required int customerId,
     required double latitude,
     required double longitude,
     double? accuracyMeters,
     String? reason,
   }) {
-    return _api.post<void>(
+    return _api.post<String>(
       '/api/customer-location/correction',
       body: {
         'customerId': customerId,
@@ -104,7 +107,8 @@ class NearbyCustomerRepository {
         if (accuracyMeters != null) 'accuracyMeters': accuracyMeters,
         if (reason != null && reason.isNotEmpty) 'reason': reason,
       },
-      parse: (_) {},
+      parse: (d) =>
+          ((d as Map<String, dynamic>?)?['status'] as String?) ?? 'PENDING',
     );
   }
 

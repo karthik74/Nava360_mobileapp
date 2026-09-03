@@ -63,6 +63,87 @@ class TaskRepository {
     );
   }
 
+  /// Manager view: assignments of the caller's team (server scopes to the
+  /// reporting hierarchy / assigned branches). One page, newest-due first;
+  /// the screen buckets by status client-side so counts stay consistent.
+  Future<List<TeamTaskAssignment>> teamTasks({
+    int? employeeId,
+    String? status,
+    int size = 300,
+  }) {
+    return _api.get<List<TeamTaskAssignment>>(
+      '/api/tasks/team',
+      query: {
+        if (employeeId != null) 'employeeId': employeeId,
+        if (status != null) 'status': status,
+        'page': 0,
+        'size': size,
+      },
+      parse: (d) {
+        final content = d is List
+            ? d
+            : ((d as Map<String, dynamic>)['content'] as List<dynamic>? ?? const []);
+        return content
+            .map((e) => TeamTaskAssignment.fromJson(e as Map<String, dynamic>))
+            .toList();
+      },
+    );
+  }
+
+  /// Active INTERNAL task forms a manager may assign to their team. Not the
+  /// self-create list: assign-only templates are included, and targeting rules
+  /// are applied to the caller by the server (template admins see all).
+  Future<List<TaskTemplate>> assignableTemplates({String query = ''}) {
+    return _api.get<List<TaskTemplate>>(
+      '/api/task-templates',
+      query: {
+        'activeOnly': true,
+        'taskType': 'INTERNAL',
+        if (query.trim().isNotEmpty) 'q': query.trim(),
+        'size': 100,
+      },
+      parse: (d) {
+        final content = d is List
+            ? d
+            : ((d as Map<String, dynamic>)['content'] as List<dynamic>? ?? const []);
+        return content
+            .map((e) => TaskTemplate.fromJson(e as Map<String, dynamic>))
+            .where((t) => !t.isCustomer)
+            .toList();
+      },
+    );
+  }
+
+  /// Manager assigns a template to team members: one task per employee, all
+  /// recorded as assigned by the caller (the server enforces that the
+  /// employees sit inside the caller's reporting hierarchy). Returns the
+  /// created tasks.
+  Future<List<Task>> assignTemplate(
+    int templateId, {
+    required List<int> employeeIds,
+    int? assignedById,
+    String? priority,
+    String? dueDate,
+    String? description,
+    String? assignedFieldValues,
+  }) {
+    return _api.post<List<Task>>(
+      '/api/task-templates/$templateId/assign',
+      body: {
+        'employeeIds': employeeIds,
+        if (assignedById != null) 'assignedById': assignedById,
+        if (priority != null) 'priority': priority,
+        if (dueDate != null) 'dueDate': dueDate,
+        if (description != null) 'description': description,
+        if (assignedFieldValues != null)
+          'assignedFieldValues': assignedFieldValues,
+      },
+      parse: (d) => ((d as List?) ?? const [])
+          .map((e) => Task.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
   /// Raise an INTERNAL task for the calling employee from a template. The
   /// backend sets both the assignee and assigner to the current employee, so
   /// the task lands in their own "My Tasks" list (in TODO). Returns the created

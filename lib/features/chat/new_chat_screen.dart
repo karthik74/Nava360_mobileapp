@@ -8,10 +8,12 @@ import '../../core/env.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../auth/auth_controller.dart';
 import 'chat_controller.dart';
 import 'chat_models.dart';
 import 'chat_repository.dart';
 import 'chat_thread_screen.dart';
+import 'create_group_screen.dart';
 
 class NewChatScreen extends ConsumerStatefulWidget {
   const NewChatScreen({super.key});
@@ -76,6 +78,10 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
   Widget build(BuildContext context) {
     final contacts = ref.watch(contactsSearchProvider(_query));
     final mq = MediaQuery.of(context);
+    // Group creation is permission-gated (CHAT_GROUP_CREATE); DMs are open to all.
+    final canCreateGroup =
+        ref.watch(authUserProvider)?.hasPermission('CHAT_GROUP_CREATE') ??
+            false;
 
     return GlassBackdrop(
       child: Scaffold(
@@ -195,6 +201,49 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
               ),
             ),
             const SizedBox(height: 10),
+            if (canCreateGroup)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: GlassCard(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  shadow: const [],
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        gradient: AppColors.heroGradient,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(Icons.group_add_rounded,
+                          color: Colors.white, size: 20),
+                    ),
+                    title: const Text(
+                      'New group',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    subtitle: const Text(
+                      'Start a group chat with colleagues',
+                      style: TextStyle(fontSize: 11, color: AppColors.muted),
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded,
+                        color: AppColors.muted),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.lg),
+                    ),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                          builder: (_) => const CreateGroupScreen()),
+                    ),
+                  ),
+                ),
+              ),
             // Contact list
             Expanded(
               child: contacts.when(

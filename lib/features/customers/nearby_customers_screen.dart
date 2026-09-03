@@ -32,6 +32,8 @@ import '../../core/theme.dart';
 import '../attendance/location_tracker.dart';
 import '../auth/auth_controller.dart';
 import 'customer_detail_screen.dart';
+import 'customer_models.dart';
+import 'customer_repository.dart';
 import 'nearby_customer_models.dart';
 import 'nearby_customer_repository.dart';
 
@@ -58,6 +60,14 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
   String _search = '';
   Timer? _searchDebounce;
 
+  /// "All customers" search — every customer the employee may see, including
+  /// the ones with no location (which can never appear in the nearby list).
+  /// This is how a field employee finds such a customer and captures its pin.
+  List<Customer> _allMatches = const [];
+  bool _searchingAll = false;
+  String _allMatchesFor = '';
+  Timer? _allDebounce;
+
   NearbyCustomersResult? _result;
   bool _loading = true;
   String? _error;
@@ -83,6 +93,7 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
   @override
   void dispose() {
     _searchDebounce?.cancel();
+    _allDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -218,6 +229,54 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
     });
   }
 
+  Future<void> _searchAll(String term) async {
+    if (!mounted) return;
+    setState(() => _searchingAll = true);
+    try {
+      final list =
+          await ref.read(customerRepositoryProvider).search(term, size: 30);
+      if (!mounted || _search.trim() != term) return;
+      setState(() {
+        _allMatches = list;
+        _allMatchesFor = term;
+        _searchingAll = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _allMatches = const [];
+        _allMatchesFor = term;
+        _searchingAll = false;
+      });
+    }
+  }
+
+  /// Metres from the employee to a searched customer's stored pin, if both are known.
+  int? _distanceTo(Customer c) {
+    final p = _position;
+    if (p == null || !c.hasLocation) return null;
+    return Geolocator.distanceBetween(
+            p.latitude, p.longitude, c.latitude!, c.longitude!)
+        .round();
+  }
+
+  /// Lets a searched customer use the same sheet (and location-capture block)
+  /// as a nearby one. Distance is computed here; the server had none to give.
+  NearbyCustomer _asNearby(Customer c) => NearbyCustomer(
+        id: c.id,
+        customerName: c.customerName,
+        category: CustomerCategory.parse(null),
+        distanceMeters: _distanceTo(c) ?? 0,
+        customerCode: c.customerCode,
+        mobileNumber: c.mobileNumber,
+        address: c.address,
+        latitude: c.hasLocation ? c.latitude : null,
+        longitude: c.hasLocation ? c.longitude : null,
+        locationStatus: c.locationStatus,
+        branchId: c.branchId,
+        branchName: c.branchName,
+      );
+
   /// A zoom level that roughly frames the chosen radius.
   double _zoomForRadius(int metres) {
     if (metres <= 1000) return 15;
@@ -251,6 +310,19 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
     _searchDebounce = Timer(const Duration(milliseconds: 250), () {
       if (mounted) setState(() => _search = value);
     });
+    _allDebounce?.cancel();
+    final term = value.trim();
+    if (term.length < 2) {
+      if (_allMatches.isNotEmpty || _searchingAll) {
+        setState(() {
+          _allMatches = const [];
+          _searchingAll = false;
+          _allMatchesFor = '';
+        });
+      }
+      return;
+    }
+    _allDebounce = Timer(const Duration(milliseconds: 450), () => _searchAll(term));
   }
 
   // ── Actions ──────────────────────────────────────────────────────────────
@@ -378,11 +450,122 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
                 _message(_emptyMessage())
               else
                 ...customers.map(_customerTile),
+              ..._allCustomersSection(customers),
             ],
             const SizedBox(height: 24),
           ],
         ),
       ),
+    );
+  }
+
+  /// "All customers" results for the current search: everyone the employee may
+  /// see who is NOT already in the nearby list — outside the radius, or with no
+  /// location at all. Tapping one opens the usual sheet, where a customer with
+  /// no pin can have it captured from where the employee stands.
+  List<Widget> _allCustomersSection(List<NearbyCustomer> nearby) {
+    final term = _search.trim();
+    if (term.length < 2) return const [];
+    final nearbyIds = nearby.map((c) => c.id).toSet();
+    final others =
+        _allMatches.where((c) => !nearbyIds.contains(c.id)).toList();
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 6),
+        child: Row(
+          children: [
+            const Icon(Icons.manage_search_rounded,
+                size: 18, color: AppColors.muted),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'All customers matching "$term"',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.ink,
+                ),
+              ),
+            ),
+            if (_searchingAll)
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+          ],
+        ),
+      ),
+      if (!_searchingAll && _allMatchesFor == term && others.isEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: Text(
+            _allMatches.isEmpty
+                ? 'No other customers match.'
+                : 'Every match is already in the nearby list above.',
+            style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+          ),
+        ),
+      for (final c in others) _searchedCustomerTile(c),
+    ];
+  }
+
+  Widget _searchedCustomerTile(Customer c) {
+    final metres = _distanceTo(c);
+    final String badge;
+    final Color tone;
+    final IconData icon;
+    if (!c.hasLocation) {
+      badge = 'No location';
+      tone = AppColors.warning;
+      icon = Icons.location_off_rounded;
+    } else if (metres == null) {
+      badge = 'Outside radius';
+      tone = AppColors.muted;
+      icon = Icons.location_on_outlined;
+    } else {
+      badge = metres < 1000
+          ? '$metres m away'
+          : '${(metres / 1000).toStringAsFixed(metres < 10000 ? 1 : 0)} km away';
+      tone = AppColors.muted;
+      icon = Icons.location_on_outlined;
+    }
+    final sub = [
+      c.customerCode,
+      c.branchName,
+      c.address,
+    ].where((x) => x != null && x.trim().isNotEmpty).join(' · ');
+
+    return ListTile(
+      onTap: () => _showCustomer(_asNearby(c)),
+      leading: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: tone.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, size: 18, color: tone),
+      ),
+      title: Text(
+        c.customerName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.ink),
+      ),
+      subtitle: Text(
+        sub.isEmpty ? badge : '$badge · $sub',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 12,
+          color: c.hasLocation ? AppColors.muted : tone,
+          fontWeight: c.hasLocation ? FontWeight.w500 : FontWeight.w700,
+        ),
+      ),
+      trailing: !c.hasLocation
+          ? Icon(Icons.add_location_alt_rounded, color: AppColors.primary)
+          : Icon(Icons.chevron_right_rounded, color: AppColors.muted),
     );
   }
 
@@ -515,7 +698,7 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
             onChanged: _onSearchChanged,
             decoration: InputDecoration(
               isDense: true,
-              hintText: 'Search name, ID, mobile or village',
+              hintText: 'Search any customer — name, ID, mobile or village',
               prefixIcon: const Icon(Icons.search_rounded, size: 20),
               suffixIcon: _search.isEmpty
                   ? null
@@ -878,11 +1061,13 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
                           fontWeight: FontWeight.w800,
                           color: AppColors.ink)),
                 ),
-                Text(c.distanceLabel,
+                Text(c.hasLocation ? c.distanceLabel : 'No location',
                     style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
-                        color: AppColors.primary)),
+                        color: c.hasLocation
+                            ? AppColors.primary
+                            : AppColors.warning)),
               ],
             ),
             const SizedBox(height: 6),
@@ -1051,8 +1236,8 @@ class _LocationQualityBlockState extends ConsumerState<_LocationQualityBlock> {
               ? 'Your current position will be sent for approval as the '
                   "customer's real location. It is ${c.distanceLabel} from the "
                   'stored pin.\n\nAccuracy of your fix: ±${pos.accuracy.round()} m.'
-              : 'Your current position will be sent for approval as this '
-                  "customer's location.\n\nAccuracy of your fix: "
+              : "Your current position will be saved as this customer's "
+                  'location.\n\nAccuracy of your fix: '
                   '±${pos.accuracy.round()} m.',
         ),
         actions: [
@@ -1062,7 +1247,7 @@ class _LocationQualityBlockState extends ConsumerState<_LocationQualityBlock> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Send for approval'),
+            child: Text(moving ? 'Send for approval' : 'Save location'),
           ),
         ],
       ),
@@ -1071,18 +1256,23 @@ class _LocationQualityBlockState extends ConsumerState<_LocationQualityBlock> {
 
     setState(() => _busy = true);
     try {
-      await ref.read(nearbyCustomerRepositoryProvider).suggestLocation(
-            customerId: c.id,
-            latitude: pos.latitude,
-            longitude: pos.longitude,
-            accuracyMeters: pos.accuracy,
-            reason: moving
-                ? 'Captured on site; stored pin was ${c.distanceLabel} away'
-                : 'Captured on site (customer had no location)',
-          );
+      final status =
+          await ref.read(nearbyCustomerRepositoryProvider).suggestLocation(
+                customerId: c.id,
+                latitude: pos.latitude,
+                longitude: pos.longitude,
+                accuracyMeters: pos.accuracy,
+                reason: moving
+                    ? 'Captured on site; stored pin was ${c.distanceLabel} away'
+                    : 'Captured on site (customer had no location)',
+              );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sent for approval. Thank you.')),
+        SnackBar(
+          content: Text(status == 'APPROVED'
+              ? 'Location saved for ${c.customerName}.'
+              : 'Sent for approval. Thank you.'),
+        ),
       );
       widget.onSubmitted();
     } catch (e) {

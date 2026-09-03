@@ -278,11 +278,38 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     : null,
                               ),
                             ),
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(6),
+                                onTap: !formEnabled
+                                    ? null
+                                    : () => context.push(
+                                          '/forgot-password',
+                                          extra: _username.text.trim(),
+                                        ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 4,
+                                  ),
+                                  child: Text(
+                                    'Forgot password?',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
                             if (error != null) ...[
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 12),
                               _FlashError(message: error),
                             ],
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 16),
                             _GradientAuthButton(
                               label: 'Sign in',
                               loading: loading,

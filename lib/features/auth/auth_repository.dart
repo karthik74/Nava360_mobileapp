@@ -102,6 +102,36 @@ class AuthRepository {
     );
   }
 
+  /// Forgot password, step 1: send a 6-digit one-time code to the mobile on
+  /// the employee record (WhatsApp). Returns the masked number and TTL.
+  Future<({String? maskedPhone, int expiresInSeconds})> forgotPassword(
+      String username) {
+    return _api.post(
+      '/api/auth/forgot-password',
+      body: {'username': username},
+      parse: (d) {
+        final m = (d as Map<String, dynamic>?) ?? const {};
+        return (
+          maskedPhone: m['maskedPhone'] as String?,
+          expiresInSeconds: (m['expiresInSeconds'] as num?)?.toInt() ?? 0,
+        );
+      },
+    );
+  }
+
+  /// Forgot password, step 2: verify the code and set the new password.
+  Future<void> resetPassword({
+    required String username,
+    required String otp,
+    required String newPassword,
+  }) {
+    return _api.post<void>(
+      '/api/auth/reset-password',
+      body: {'username': username, 'otp': otp, 'newPassword': newPassword},
+      parse: (_) {},
+    );
+  }
+
   Future<void> logout() => SecureStorage.clear();
 
   /// Restore session from secure storage (called on app start).

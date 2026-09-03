@@ -57,6 +57,27 @@ class AttendanceRepository {
     );
   }
 
+  /// Manager/HR override of one employee's attendance for one day (PRESENT,
+  /// HALF_DAY or ABSENT). Marking ABSENT withdraws any approved leave /
+  /// regularization on that date; the returned message says what else changed.
+  Future<String> overrideAttendance({
+    required int employeeId,
+    required String date, // yyyy-MM-dd
+    required String status, // PRESENT | HALF_DAY | ABSENT
+    String? notes,
+  }) async {
+    final res = await _api.raw.post<Map<String, dynamic>>(
+      '/api/attendance/override',
+      data: {
+        'employeeId': employeeId,
+        'date': date,
+        'status': status,
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      },
+    );
+    return (res.data?['message'] as String?) ?? 'Attendance updated';
+  }
+
   /// Submits an attendance regularization request for [date] (yyyy-MM-dd).
   /// [requestedStatus] is an AttendanceStatus name; times are "HH:mm" (optional).
   Future<void> createRegularization({

@@ -8,6 +8,8 @@ import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
+import '../../core/navigation/mobile_menu_config.dart';
+import 'assign_task_screen.dart';
 import 'task_detail_screen.dart';
 import 'task_models.dart';
 import 'task_repository.dart';
@@ -112,6 +114,77 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
     _searchDebounce?.cancel();
     _titleCtrl.dispose();
     super.dispose();
+  }
+
+  /// Managers holding TASK_ASSIGN can also hand a task form to their team.
+  bool get _canAssignToTeam {
+    final user = ref.read(authUserProvider);
+    return isManagerUser(user) && (user?.hasPermission('TASK_ASSIGN') ?? false);
+  }
+
+  /// "New task" FAB: employees go straight to the self-task picker; managers
+  /// first choose between a task for themselves and one for their team.
+  Future<void> _onNewTask() async {
+    if (!_canAssignToTeam) {
+      await _createSelfTask();
+      return;
+    }
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.muted.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: Icon(Icons.person_rounded, color: AppColors.primary),
+              title: const Text('Task for myself',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('Pick a form and fill it now'),
+              onTap: () => Navigator.pop(ctx, 'self'),
+            ),
+            ListTile(
+              leading: Icon(Icons.group_add_rounded, color: AppColors.primary),
+              title: const Text('Assign to my team',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: const Text('Pick a form and the team members who should do it'),
+              onTap: () => Navigator.pop(ctx, 'team'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'self') {
+      await _createSelfTask();
+    } else {
+      await _assignToTeam();
+    }
+  }
+
+  Future<void> _assignToTeam() async {
+    final count = await Navigator.of(context).push<int>(
+      MaterialPageRoute(builder: (_) => const AssignTaskScreen()),
+    );
+    if (!mounted || count == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Assigned $count task${count == 1 ? '' : 's'} to your team')),
+    );
+    _refresh();
   }
 
   /// Self-task creation: pick an INTERNAL template, raise the task assigned to
@@ -290,7 +363,7 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                 ),
                 child: FloatingActionButton.extended(
                   heroTag: 'new_self_task_fab',
-                  onPressed: _creating ? null : _createSelfTask,
+                  onPressed: _creating ? null : _onNewTask,
                   backgroundColor: Colors.transparent,
                   elevation: 0,
                   icon: _creating
@@ -1087,7 +1160,7 @@ class _TaskTemplatePickerSheetState
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (_, i) {
                       final t = templates[i];
-                      return _TaskTemplateTile(
+                      return TaskTemplateTile(
                         template: t,
                         onTap: () => Navigator.pop(context, t),
                       );
@@ -1145,8 +1218,8 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-class _TaskTemplateTile extends StatelessWidget {
-  const _TaskTemplateTile({required this.template, required this.onTap});
+class TaskTemplateTile extends StatelessWidget {
+  const TaskTemplateTile({required this.template, required this.onTap});
   final TaskTemplate template;
   final VoidCallback onTap;
 

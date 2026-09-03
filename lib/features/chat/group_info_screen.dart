@@ -19,6 +19,14 @@ class GroupInfoScreen extends ConsumerWidget {
     final mq = MediaQuery.of(context);
     final user = ref.watch(authUserProvider);
     final myEmpId = user?.employeeId;
+    // Follow the live list copy so a rename / member change made here (or by
+    // another admin) shows without leaving the screen.
+    final conversation = ref
+            .watch(conversationsProvider)
+            .valueOrNull
+            ?.where((c) => c.id == this.conversation.id)
+            .firstOrNull ??
+        this.conversation;
     final isCreator = conversation.createdByEmployeeId == myEmpId;
     final myMember = conversation.members
         .where((m) => m.employeeId == myEmpId)
@@ -113,14 +121,33 @@ class GroupInfoScreen extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Text(
-                    conversation.title,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.ink,
-                      letterSpacing: -0.3,
-                    ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          conversation.title,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.ink,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ),
+                      if (isAdmin) ...[
+                        const SizedBox(width: 4),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          tooltip: 'Rename group',
+                          icon: Icon(Icons.edit_rounded,
+                              size: 18, color: AppColors.primary),
+                          onPressed: () =>
+                              _rename(context, ref, conversation),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -180,8 +207,150 @@ class GroupInfoScreen extends ConsumerWidget {
                 ),
               ),
             ],
+            if (isAdmin) ...[
+              const SizedBox(height: 12),
+              // Delete group (for everyone)
+              GlassCard(
+                padding: EdgeInsets.zero,
+                shadow: AppShadows.soft,
+                border: Border.all(color: AppColors.danger.withOpacity(0.25)),
+                child: ListTile(
+                  leading: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppColors.danger.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.delete_forever_rounded,
+                        size: 18, color: AppColors.danger),
+                  ),
+                  title: const Text(
+                    'Delete group',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.danger,
+                    ),
+                  ),
+                  subtitle: const Text(
+                    'Closes and hides the group for everyone',
+                    style: TextStyle(fontSize: 11, color: AppColors.muted),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.lg),
+                  ),
+                  onTap: () => _confirmDelete(context, ref, conversation),
+                ),
+              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _rename(
+      BuildContext context, WidgetRef ref, Conversation conv) async {
+    final ctrl = TextEditingController(text: conv.title);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white.withOpacity(0.92),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+        ),
+        title: const Text(
+          'Rename group',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        ),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 120,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Group name',
+            counterText: '',
+          ),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    final next = name?.trim() ?? '';
+    if (next.isEmpty || next == conv.title) return;
+    try {
+      await ref.read(chatRepositoryProvider).renameGroup(conv.id, next);
+      ref.read(conversationsProvider.notifier).refresh();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Group renamed')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed: $e')),
+        );
+      }
+    }
+  }
+
+  void _confirmDelete(BuildContext context, WidgetRef ref, Conversation conv) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white.withOpacity(0.92),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+        ),
+        title: const Text(
+          'Delete group?',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        ),
+        content: Text(
+          '"${conv.title}" will be closed and hidden for every participant. '
+          'Nobody will be able to open it or post in it again.',
+          style: const TextStyle(color: AppColors.inkSoft, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              try {
+                await ref.read(chatRepositoryProvider).deleteGroup(conv.id);
+                if (context.mounted) {
+                  Navigator.pop(context); // group info
+                  Navigator.pop(context); // thread
+                  ref.read(conversationsProvider.notifier).refresh();
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed: $e')),
+                  );
+                }
+              }
+            },
+            child: const Text('Delete'),
+          ),
+        ],
       ),
     );
   }

@@ -64,6 +64,23 @@ class ConversationsNotifier extends StateNotifier<AsyncValue<List<Conversation>>
             .compareTo(a.lastMessageAt ?? DateTime(2000)));
         state = AsyncValue.data(updated);
       });
+    } else if (type == 'CONVERSATION_RENAMED') {
+      final convId = (event['conversationId'] as num).toInt();
+      final name = event['name'] as String?;
+      if (name == null) return;
+      state.whenData((list) {
+        final idx = list.indexWhere((c) => c.id == convId);
+        if (idx < 0) return;
+        final updated = List<Conversation>.from(list);
+        updated[idx] = updated[idx].copyWith(title: name);
+        state = AsyncValue.data(updated);
+      });
+    } else if (type == 'CONVERSATION_DELETED') {
+      final convId = (event['conversationId'] as num).toInt();
+      state.whenData((list) {
+        if (!list.any((c) => c.id == convId)) return;
+        state = AsyncValue.data(list.where((c) => c.id != convId).toList());
+      });
     } else if (type == 'READ') {
       final convId = (event['conversationId'] as num).toInt();
       final byEmpId = (event['byEmployeeId'] as num).toInt();
@@ -241,4 +258,13 @@ final chatMessagesProvider = StateNotifierProvider.autoDispose
 final contactsSearchProvider =
     FutureProvider.autoDispose.family<List<ChatContact>, String>((ref, query) {
   return ref.watch(chatRepositoryProvider).searchContacts(query);
+});
+
+/// Colleagues who may be added to a group: the caller's reporting hierarchy /
+/// assigned branches only (DATA_SCOPE_ALL holders see everyone).
+final groupCandidatesProvider =
+    FutureProvider.autoDispose.family<List<ChatContact>, String>((ref, query) {
+  return ref
+      .watch(chatRepositoryProvider)
+      .searchContacts(query, scoped: true);
 });

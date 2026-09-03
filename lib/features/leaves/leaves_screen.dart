@@ -256,7 +256,7 @@ class _BalanceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final idx = b.leaveTypeLabel.hashCode.abs() % _palettes.length;
     final gradient = _palettes[idx];
-    final balanceText = b.balanceDays == null ? '∞' : '${b.balanceDays}';
+    final balanceText = b.balanceDays == null ? '∞' : fmtLeaveDays(b.balanceDays);
     final allowanceText = b.allowanceDays == null ? '∞' : '${b.allowanceDays}';
 
     return Container(
@@ -336,7 +336,7 @@ class _BalanceCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '${b.usedDays} used · $allowanceText total',
+            '${fmtLeaveDays(b.usedDays)} used · $allowanceText total',
             style: TextStyle(
               color: Colors.white.withOpacity(0.85),
               fontSize: 10.5,
@@ -422,7 +422,7 @@ class _ApprovalQueueTileState extends ConsumerState<_ApprovalQueueTile> {
                     ),
                     const SizedBox(height: 1),
                     Text(
-                      '${_humanLeaveType(r.leaveType)} · ${r.numberOfDays ?? "?"} day(s) · ${r.fromDate} → ${r.toDate}',
+                      '${_humanLeaveType(r.leaveType)} · ${r.daysLabel} · ${r.fromDate} → ${r.toDate}',
                       style: const TextStyle(
                         fontSize: 11.5,
                         color: AppColors.muted,
@@ -591,7 +591,7 @@ class _LeaveTileState extends ConsumerState<_LeaveTile> {
                     ),
                     const SizedBox(height: 1),
                     Text(
-                      '${r.numberOfDays ?? "?"} day(s) · ${r.fromDate} → ${r.toDate}',
+                      '${r.daysLabel} · ${r.fromDate} → ${r.toDate}',
                       style: const TextStyle(
                         fontSize: 11.5,
                         color: AppColors.muted,
@@ -734,9 +734,14 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
   String _type = '';
   DateTime _from = DateTime.now();
   DateTime _to = DateTime.now();
+  /// FIRST_HALF | SECOND_HALF for a half-day; null = full day. Only meaningful
+  /// (and only shown) when From and To are the same day.
+  String? _half;
   final _reason = TextEditingController();
   bool _submitting = false;
   String? _err;
+
+  bool get _singleDay => DateUtils.isSameDay(_from, _to);
 
   Future<void> _pick({required bool isFrom}) async {
     final picked = await showDatePicker(
@@ -764,6 +769,7 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
       } else {
         _to = picked;
       }
+      if (!DateUtils.isSameDay(_from, _to)) _half = null;
     });
   }
 
@@ -787,6 +793,7 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
             fromDate: DateFormat('yyyy-MM-dd').format(_from),
             toDate: DateFormat('yyyy-MM-dd').format(_to),
             reason: _reason.text.trim(),
+            halfDaySession: _singleDay ? _half : null,
           ));
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -925,6 +932,49 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
               ),
             ],
           ),
+          if (_singleDay) ...[
+            const SizedBox(height: 14),
+            const Text(
+              'Duration',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _TypeChip(
+                  label: 'Full day',
+                  icon: Icons.today_rounded,
+                  selected: _half == null,
+                  onTap: () => setState(() => _half = null),
+                ),
+                _TypeChip(
+                  label: 'First half',
+                  icon: Icons.wb_twilight_rounded,
+                  selected: _half == 'FIRST_HALF',
+                  onTap: () => setState(() => _half = 'FIRST_HALF'),
+                ),
+                _TypeChip(
+                  label: 'Second half',
+                  icon: Icons.nights_stay_rounded,
+                  selected: _half == 'SECOND_HALF',
+                  onTap: () => setState(() => _half = 'SECOND_HALF'),
+                ),
+              ],
+            ),
+            if (_half != null) ...[
+              const SizedBox(height: 6),
+              const Text(
+                'A half-day leave counts 0.5 day against your balance.',
+                style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+              ),
+            ],
+          ],
           const SizedBox(height: 14),
           const Text(
             'Reason',

@@ -18,6 +18,9 @@ class Customer {
     this.createdAt,
     this.updatedAt,
     this.customFields = const {},
+    this.latitude,
+    this.longitude,
+    this.locationStatus,
   });
 
   final int id;
@@ -39,6 +42,18 @@ class Customer {
   /// Dynamic, admin-configured fields keyed by their field key (insertion order
   /// preserved). Values are returned as strings/numbers by the backend.
   final Map<String, dynamic> customFields;
+
+  /// Stored pin, when the customer has one (0,0 is treated as none server-side).
+  final double? latitude;
+  final double? longitude;
+  /// NOT_CAPTURED | CAPTURED | VERIFIED | NEEDS_CORRECTION | REJECTED
+  final String? locationStatus;
+
+  bool get hasLocation =>
+      latitude != null &&
+      longitude != null &&
+      !(latitude!.abs() < 0.0001 && longitude!.abs() < 0.0001) &&
+      locationStatus != 'REJECTED';
 
   bool get isActive => (status ?? 'ACTIVE').toUpperCase() == 'ACTIVE';
 
@@ -64,5 +79,8 @@ class Customer {
             : null,
         customFields: (j['customFields'] as Map?)?.cast<String, dynamic>() ??
             const {},
+        latitude: (j['latitude'] as num?)?.toDouble(),
+        longitude: (j['longitude'] as num?)?.toDouble(),
+        locationStatus: j['locationStatus'] as String?,
       );
 }

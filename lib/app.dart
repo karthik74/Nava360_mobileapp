@@ -15,6 +15,7 @@ import 'features/auth/biometric/registered_devices_screen.dart';
 import 'features/auth/welcome_seen_controller.dart';
 import 'features/auth/change_password_screen.dart';
 import 'features/auth/first_login_screen.dart';
+import 'features/auth/forgot_password_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/welcome_screen.dart';
 import 'features/assistant/assistant_screen.dart';
@@ -110,6 +111,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         '/welcome',
         '/login',
         '/first-login',
+        '/forgot-password',
       };
 
       // Signed-out users.
@@ -134,6 +136,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           final flash = state.extra is String ? state.extra as String : null;
           return LoginScreen(flash: flash);
         },
+      ),
+      GoRoute(
+        path: '/forgot-password',
+        builder: (_, state) => ForgotPasswordScreen(
+          initialUsername: state.extra is String ? state.extra as String : null,
+        ),
       ),
       GoRoute(
         path: '/first-login',

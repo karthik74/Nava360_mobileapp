@@ -17,6 +17,7 @@ import 'chat_controller.dart';
 import 'chat_models.dart';
 import 'chat_repository.dart';
 import 'chat_socket_service.dart';
+import 'forward_message_screen.dart';
 import 'group_info_screen.dart';
 
 class ChatThreadScreen extends ConsumerStatefulWidget {
@@ -36,6 +37,11 @@ class ChatThreadScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
+  /// Set once the open group vanishes from the live conversation list (an admin
+  /// deleted it, or we were removed). We swap the body for a notice instead of
+  /// popping, so a concurrent pop from Group Info can't over-pop the stack.
+  bool _conversationGone = false;
+
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   bool _sending = false;
@@ -528,6 +534,17 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     }
   }
 
+  /// Open the forward picker; toast once the copies are sent.
+  Future<void> _forward(ChatMessage msg) async {
+    final count = await Navigator.of(context).push<int>(
+      MaterialPageRoute(builder: (_) => ForwardMessageScreen(message: msg)),
+    );
+    if (!mounted || count == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Forwarded to $count chat${count == 1 ? '' : 's'}')),
+    );
+  }
+
   /// "Reply Privately" / "Message": open (or create) the DM with the sender.
   /// A reply-privately quote of the original rides along when [replyPrivately].
   Future<void> _openDirectWithSender(ChatMessage msg,
@@ -630,6 +647,18 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                     setState(() => _replyingTo = msg);
                   },
                 ),
+                if (!msg.deletedForEveryone &&
+                    !msg.isSystem &&
+                    msg.type.name != 'ACTION_CARD')
+                  _SheetAction(
+                    icon: Icons.forward_rounded,
+                    label: 'Forward',
+                    color: AppColors.primary,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _forward(msg);
+                    },
+                  ),
                 if (!isMine) ...[
                   _SheetAction(
                     icon: Icons.person_outline_rounded,
@@ -706,9 +735,68 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     );
   }
 
+  Widget _goneScaffold(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFE5DDD5),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF008069),
+        foregroundColor: Colors.white,
+        title: Text(widget.conversation.title),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.group_off_rounded,
+                  size: 48, color: AppColors.muted),
+              const SizedBox(height: 14),
+              const Text(
+                'This group is no longer available',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.ink,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'It was deleted by a group admin, or you were removed from it.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: AppColors.inkSoft),
+              ),
+              const SizedBox(height: 18),
+              FilledButton(
+                onPressed: () => Navigator.of(context).maybePop(),
+                child: const Text('Back to chats'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final conv = widget.conversation;
+    // Prefer the live list copy (renames / membership changes arrive over the
+    // socket); fall back to the conversation we were opened with (drafts).
+    final convId = widget.conversation.id;
+    ref.listen<AsyncValue<List<Conversation>>>(conversationsProvider, (prev, next) {
+      if (!widget.conversation.isGroup || _conversationGone) return;
+      final was = prev?.valueOrNull?.any((c) => c.id == convId) ?? false;
+      final now = next.valueOrNull?.any((c) => c.id == convId) ?? true;
+      if (was && !now && mounted) setState(() => _conversationGone = true);
+    });
+    if (_conversationGone) return _goneScaffold(context);
+    final conv = ref
+            .watch(conversationsProvider)
+            .valueOrNull
+            ?.where((c) => c.id == convId)
+            .firstOrNull ??
+        widget.conversation;
     final msgs = ref.watch(chatMessagesProvider(conv.id));
     final user = ref.watch(authUserProvider);
     final myEmpId = user?.employeeId;
@@ -1301,6 +1389,29 @@ class _MessageBubble extends StatelessWidget {
                         ],
                       )
                     else ...[
+                      if (msg.forwarded)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 3),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.forward_rounded,
+                                  size: 13,
+                                  color: const Color(0xFF8696A0)
+                                      .withOpacity(0.9)),
+                              const SizedBox(width: 3),
+                              Text(
+                                'Forwarded',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontStyle: FontStyle.italic,
+                                  color: const Color(0xFF8696A0)
+                                      .withOpacity(0.9),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       if (msg.replyToId != null)
                         // Full bubble width, WhatsApp-style quote block.
                         SizedBox(

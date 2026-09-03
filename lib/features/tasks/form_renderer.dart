@@ -12,6 +12,7 @@ import '../../core/theme.dart';
 import '../files/file_repository.dart';
 import 'form_field_widgets.dart';
 import 'task_models.dart';
+import 'video_qa/video_qa_field.dart';
 
 /// Resolves a stored relative file url (`/api/files/{id}`) to an absolute URL.
 String absoluteFileUrl(String url) {
@@ -93,7 +94,11 @@ Map<String, String> validateForm(
     // user has no way to complete.
     if (f.type.isLayout || f.type.isSystem) continue;
     final v = values[f.name];
-    final empty = v == null || v == '' || (v is List && v.isEmpty);
+    // A video Q&A answer counts only once the recording has been uploaded: until
+    // it carries a url there is nothing attached to the task.
+    final empty = f.type == FieldType.videoQa
+        ? !(v is Map && ((v['url'] as String?) ?? '').isNotEmpty)
+        : (v == null || v == '' || (v is List && v.isEmpty));
     if (f.required && empty) {
       out[f.name] = 'Required';
       continue;
@@ -474,6 +479,15 @@ class _FieldInput extends StatelessWidget {
           value: value,
           multi: true,
           imageOnly: true,
+          readOnly: readOnly,
+          onChanged: onChanged,
+        );
+
+      case FieldType.videoQa:
+        return VideoQaField(
+          label: field.label,
+          config: field.videoQa,
+          value: value,
           readOnly: readOnly,
           onChanged: onChanged,
         );
