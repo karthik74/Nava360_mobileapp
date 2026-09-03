@@ -58,27 +58,60 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
     return me != null && task.assignedToId == me && task.assignedById == me;
   }
 
-  /// One-shot GPS fix for geo-tagging a completion. Returns null if location is
-  /// unavailable or denied — completion still proceeds without coordinates.
+  /// Why the last [_captureLatLng] call produced no fix, for the blocking dialog.
+  String? _locationFailure;
+
+  /// One-shot GPS fix for geo-tagging a completion. Completing a task REQUIRES
+  /// a location (the backend refuses a submission without one), so a null here
+  /// aborts the completion and [_locationFailure] explains what to fix.
   Future<({double lat, double lng})?> _captureLatLng() async {
+    _locationFailure = null;
     try {
-      if (!await Geolocator.isLocationServiceEnabled()) return null;
+      if (!await Geolocator.isLocationServiceEnabled()) {
+        _locationFailure =
+            'Location services are turned off. Turn on GPS / location and try again.';
+        return null;
+      }
       var perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied) {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.denied ||
           perm == LocationPermission.deniedForever) {
+        _locationFailure =
+            'Location permission is denied. Allow location access for this app in Settings and try again.';
         return null;
       }
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 10),
+        timeLimit: const Duration(seconds: 20),
       );
       return (lat: pos.latitude, lng: pos.longitude);
     } catch (_) {
+      _locationFailure =
+          'Could not get a GPS fix. Move to open sky, check that GPS is on, and try again.';
       return null;
     }
+  }
+
+  /// Blocking explanation shown when a completion was refused for lack of a fix.
+  Future<void> _showLocationRequired() {
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Location required'),
+        content: Text(
+          'Completing a task must record where you are.\n\n'
+          '${_locationFailure ?? 'Your location could not be determined.'}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _markInProgress(Task task) async {
@@ -128,8 +161,15 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
       final repo = ref.read(taskRepositoryProvider);
 
       // Capture a single GPS fix up front and geo-tag whichever call performs
-      // the completion. Best-effort — completion still proceeds without it.
+      // the completion. Mandatory — the backend refuses a submission without it,
+      // so stop here (before any status change) and tell the employee why.
       final loc = await _captureLatLng();
+      if (loc == null) {
+        if (!mounted) return;
+        setState(() => _submitting = false);
+        await _showLocationRequired();
+        return;
+      }
 
       // From TODO the only legal forward transition is IN_PROGRESS.
       if (task.status == TaskStatuses.todo) {
@@ -149,8 +189,8 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
         result = await repo.submitFormResponse(
           task.id,
           jsonEncode(pruned),
-          lat: loc?.lat,
-          lng: loc?.lng,
+          lat: loc.lat,
+          lng: loc.lng,
         );
       } else {
         final target =
@@ -158,8 +198,8 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
         result = await repo.updateStatus(
           task.id,
           target,
-          lat: loc?.lat,
-          lng: loc?.lng,
+          lat: loc.lat,
+          lng: loc.lng,
         );
       }
 
