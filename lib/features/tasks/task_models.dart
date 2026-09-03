@@ -692,7 +692,7 @@ bool _match(FieldCondition c, dynamic v) {
   if (c.operator == 'is_not_empty') return !isEmpty;
   final target = (c.value ?? '').trim();
   if (v is List) {
-    final list = v.cast<String>();
+    final list = v.map((e) => e.toString().trim()).toList();
     switch (c.operator) {
       case 'equals': return list.length == 1 && list.first == target;
       case 'not_equals': return !(list.length == 1 && list.first == target);
@@ -700,7 +700,7 @@ bool _match(FieldCondition c, dynamic v) {
       case 'not_contains': return !list.contains(target);
     }
   }
-  final s = v == null ? '' : v.toString();
+  final s = v == null ? '' : v.toString().trim();
   switch (c.operator) {
     case 'equals': return s == target;
     case 'not_equals': return s != target;
