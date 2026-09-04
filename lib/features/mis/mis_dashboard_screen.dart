@@ -17,12 +17,20 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import 'mis_auth.dart';
+import 'mis_branch_matrix.dart';
 import 'mis_charts.dart';
 import 'mis_export.dart';
 import 'mis_format.dart';
 import 'mis_models.dart';
 import 'mis_repository.dart';
 import 'mis_widgets.dart';
+
+const _products = [
+  (null, 'All'),
+  ('igl', 'IGL'),
+  ('fig', 'FIG'),
+  ('il', 'IL'),
+];
 
 /// Route entry. Owns the MIS auth gate; renders the dashboard once signed in.
 class MisScreen extends ConsumerStatefulWidget {
@@ -159,12 +167,14 @@ class _MisDashboardBodyState extends ConsumerState<_MisDashboardBody> {
   // Cascading scope filter (Region → Division → Area → Branch). The `id` loads
   // the next level; the NAMES scope the overview via MisDrill.
   HierOption? _region, _division, _area, _branch;
+  String? _product; // null = All; else 'igl' | 'fig' | 'il'
 
   MisDrill get _drill => MisDrill(
         region: _region?.name,
         division: _division?.name,
         area: _area?.name,
         branch: _branch?.name,
+        product: _product,
       );
 
   String _greeting() {
@@ -443,6 +453,10 @@ class _MisDashboardBodyState extends ConsumerState<_MisDashboardBody> {
             ],
           ),
         ),
+
+        // Branch Matrix — full-access (CEO/Director) only; the widget itself
+        // renders nothing for anyone else. Sits last, after the charts.
+        MisBranchMatrix(fullAccess: widget.session.scope?.fullAccess ?? false),
       ],
     );
   }
@@ -494,6 +508,15 @@ class _MisDashboardBodyState extends ConsumerState<_MisDashboardBody> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: MisSegmented<String?>(
+              options: _products,
+              value: _product,
+              onChanged: (v) => setState(() => _product = v),
+            ),
+          ),
+          const SizedBox(height: 10),
           Wrap(
             spacing: gap,
             runSpacing: gap,

@@ -42,15 +42,37 @@ Future<bool> misSaveCsv(
   BuildContext context,
   String fileName,
   String csv,
-) async {
+) =>
+    misSaveBytes(
+      context,
+      fileName,
+      Uint8List.fromList(utf8.encode('﻿$csv')),
+      mimeType: 'text/csv',
+      noun: 'file',
+    );
+
+/// Writes a rasterized PNG (e.g. a `RenderRepaintBoundary.toImage()` capture)
+/// to the device as [fileName] and tells the user where it went. Mirrors the
+/// web's `downloadImage` — a genuine save, same as [misSaveCsv], not a share
+/// sheet.
+Future<bool> misSaveImage(
+  BuildContext context,
+  String fileName,
+  Uint8List bytes,
+) =>
+    misSaveBytes(context, fileName, bytes, mimeType: 'image/png', noun: 'image');
+
+/// Shared save + snackbar plumbing behind [misSaveCsv] and [misSaveImage].
+Future<bool> misSaveBytes(
+  BuildContext context,
+  String fileName,
+  Uint8List bytes, {
+  required String mimeType,
+  required String noun,
+}) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
   try {
-    final bytes = Uint8List.fromList(utf8.encode('﻿$csv'));
-    final saved = await DownloadSaver.save(
-      fileName,
-      bytes,
-      mimeType: 'text/csv',
-    );
+    final saved = await DownloadSaver.save(fileName, bytes, mimeType: mimeType);
     messenger?.showSnackBar(
       SnackBar(
         content: Text('Saved $fileName to ${saved.locationLabel}'),
@@ -68,7 +90,7 @@ Future<bool> misSaveCsv(
   } catch (e) {
     messenger?.showSnackBar(
       SnackBar(
-        content: Text('Could not save the file: $e'),
+        content: Text('Could not save the $noun: $e'),
         backgroundColor: AppColors.danger,
         behavior: SnackBarBehavior.floating,
       ),

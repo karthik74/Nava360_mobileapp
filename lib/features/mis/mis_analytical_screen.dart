@@ -1,8 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  MIS · Analytical Tool (route /mis/analytical). Ranks units "lowest first" —
-//  collection by achievement %, disbursement by amount — and slices to the
-//  lowest 10%, scoped to the caller's role tier, with a level drill-down.
-//  Ports AnalyticalScreen.tsx.
+//  MIS · Analytical Tool (route /mis/analytical). A national leaderboard: Top-5
+//  / Bottom-5 at every level (region/division/area — all-India, unscoped),
+//  plus a searchable full national list for FOs and Branches, and a "your
+//  rank" line for FOs. Collection (MTD-as-of-date, PAR bucket tabs) or
+//  disbursement (by month). Ports AnalyticalScreen.tsx exactly — this
+//  REPLACES the old role-hierarchy drill-down ("Lowest 10%") tool, which the
+//  web app itself moved away from (see analysisApi.ts's header comment).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
@@ -10,74 +13,43 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
-import 'mis_auth.dart';
 import 'mis_format.dart';
 import 'mis_models.dart';
 import 'mis_repository.dart';
 import 'mis_widgets.dart';
 
-class _Level {
-  final String role;
-  final String level;
-  final String? child;
-  final String? parentKey;
-  const _Level(this.role, this.level, this.child, this.parentKey);
-}
-
-const _levels = [
-  _Level('RM', 'region', 'division', 'region'),
-  _Level('DM', 'division', 'area', 'division'),
-  _Level('AM', 'area', 'branch', 'area'),
-  _Level('BM', 'branch', 'employee', 'branch'),
-  _Level('FO', 'employee', null, null),
-];
-
-int _tierFloor(String? tier) => switch (tier) {
-      'region' => 1,
-      'division' => 2,
-      'area' => 3,
-      'branch' => 4,
-      'self' => 4,
-      _ => 0,
-    };
-
-class _Bucket {
+class _BucketDef {
   final String key;
   final String label;
-  final String d;
-  final String c;
-  final bool money;
-  final String dLabel;
-  final String cLabel;
-  const _Bucket(
-      this.key, this.label, this.d, this.c, this.money, this.dLabel, this.cLabel);
+  const _BucketDef(this.key, this.label);
 }
 
-const _buckets = [
-  _Bucket('regular', 'Regular', 'regular_demand', 'regular_collection', true,
-      'Demand', 'Collection'),
-  _Bucket('1-30', '1-30', 'demand_1_30', 'collection_1_30', true, 'Demand',
-      'Collection'),
-  _Bucket('31-60', '31-60', 'demand_31_60', 'collection_31_60', true, 'Demand',
-      'Collection'),
-  _Bucket('pnpa', 'PNPA', 'pnpa_demand', 'pnpa_collection', true, 'Demand',
-      'Collection'),
-  _Bucket('npa', 'NPA', 'npa_cases', 'npa_clo_acc', false, 'Cases', 'Closed'),
+const List<_BucketDef> _buckets = [
+  _BucketDef('regular', 'Regular'),
+  _BucketDef('1_30', '1-30'),
+  _BucketDef('31_60', '31-60'),
+  _BucketDef('pnpa', 'PNPA'),
+  _BucketDef('npa', 'NPA'),
 ];
 
-const _attentionPct = 75.0;
+const Map<String, String> _levelLabel = {
+  'region': 'Region',
+  'division': 'Division',
+  'area': 'Area',
+  'branch': 'Branch',
+  'employee': 'Officer',
+};
 
-int _lowestN(int count) {
-  if (count <= 0) return 0;
-  final v = count * 0.1;
-  return v < 1 ? 1 : v.round();
-}
-
-class _DrillItem {
-  final String level;
-  final String? parentKey;
-  final String? value;
-  const _DrillItem(this.level, this.parentKey, this.value);
+/// Name match, plus emp_id match for the Officer level. Empty query = all.
+List<AnalysisUnitRow> _filterRows(
+    List<AnalysisUnitRow> rows, String query, bool isEmployee) {
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return rows;
+  return rows
+      .where((r) =>
+          r.unit.toLowerCase().contains(q) ||
+          (isEmployee && (r.empId ?? '').toLowerCase().contains(q)))
+      .toList();
 }
 
 class MisAnalyticalScreen extends ConsumerStatefulWidget {
@@ -90,151 +62,100 @@ class MisAnalyticalScreen extends ConsumerStatefulWidget {
 
 class _MisAnalyticalScreenState extends ConsumerState<MisAnalyticalScreen> {
   String _mode = 'collection'; // collection | disbursement
-  String _range = 'ftd'; // ftd | mtd
   String _bucketKey = 'regular';
-  bool _onlyLowest = true;
-  int _roleIdx = 3;
-  List<_DrillItem> _drill = const [];
   String? _date;
   String? _month;
 
   @override
-  void initState() {
-    super.initState();
-    final floor = _tierFloor(ref.read(misSessionProvider)?.scope?.tier);
-    _roleIdx = floor > 3 ? floor : 3;
-  }
-
-  void _selectLevel(int i) => setState(() {
-        _roleIdx = i;
-        _drill = const [];
-      });
-
-  void _drillInto(_Level level, String? unit) {
-    if (level.child == null || _roleIdx >= _levels.length - 1) return;
-    setState(() {
-      _drill = [..._drill, _DrillItem(level.level, level.parentKey, unit)];
-      _roleIdx = _roleIdx + 1;
-    });
-  }
-
-  void _back(int floor) => setState(() {
-        _drill = _drill.sublist(0, _drill.length - 1);
-        _roleIdx = (_roleIdx - 1) < floor ? floor : _roleIdx - 1;
-      });
-
-  @override
   Widget build(BuildContext context) {
-    final tier = ref.watch(misSessionProvider)?.scope?.tier;
-    final floor = _tierFloor(tier);
-    final roleIdx = _roleIdx < floor ? floor : _roleIdx;
-    final level = _levels[roleIdx];
-    final bucket = _buckets.firstWhere((b) => b.key == _bucketKey,
-        orElse: () => _buckets.first);
-
-    final datesAsync = ref.watch(misCollectionDatesProvider);
-    final monthsAsync = ref.watch(misDisbMonthsProvider);
+    final filtersAsync = ref.watch(misAnalysisFiltersProvider);
 
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(title: const Text('Analytical Tool')),
-      body: (_mode == 'collection' ? datesAsync : monthsAsync).when(
+      body: filtersAsync.when(
         loading: () => const AppLoadingBlock(height: 240),
         error: (e, _) => Padding(
           padding: const EdgeInsets.all(16),
-          child: AppErrorPanel(message: e.toString()),
+          child: AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(misAnalysisFiltersProvider),
+          ),
         ),
-        data: (periods) {
-          final activeDate = _mode == 'collection'
-              ? (_date ?? (periods.isNotEmpty ? periods.first : null))
-              : null;
-          final activeMonth = _mode == 'disbursement'
-              ? (_month ?? (periods.isNotEmpty ? periods.first : null))
-              : null;
-          return _body(
-              floor, roleIdx, level, bucket, periods, activeDate, activeMonth);
-        },
+        data: _body,
       ),
     );
   }
 
-  Widget _body(int floor, int roleIdx, _Level level, _Bucket bucket,
-      List<String> periods, String? activeDate, String? activeMonth) {
-    final parent = <String, dynamic>{
-      for (final d in _drill)
-        if (d.parentKey != null) d.parentKey!: d.value,
-    };
-    final parentKey = _drill.map((d) => '${d.parentKey}:${d.value}').join('|');
-    final q = AnalyticalQuery(
+  Widget _body(AnalysisFilters filters) {
+    final activeDate =
+        _date ?? (filters.dates.isNotEmpty ? filters.dates.first : null);
+    final activeMonth =
+        _month ?? (filters.months.isNotEmpty ? filters.months.first : null);
+    final dateReady =
+        _mode == 'disbursement' ? activeMonth != null : activeDate != null;
+
+    // Every level — region, division, area, branch, FO — top 5 (+ bottom 5
+    // except region) nationally, one shared call. Branch/employee also carry
+    // the full national list, backing the searchable panels below.
+    final query = AnalysisQuery(
       mode: _mode,
-      range: _range,
-      level: level.level,
       date: activeDate,
       month: activeMonth,
-      parent: parent,
-      parentKey: parentKey,
+      bucket: _bucketKey,
     );
-    final rowsAsync = ref.watch(misAnalyticalRowsProvider(q));
+
+    final leaderboardAsync = dateReady
+        ? ref.watch(misAnalysisLeaderboardProvider(query))
+        : const AsyncValue<AnalysisLeaderboard>.loading();
+    final myRankAsync = dateReady
+        ? ref.watch(misAnalysisMyRankProvider(query))
+        : const AsyncValue<AnalysisMyRank>.loading();
+    final myRank = myRankAsync.asData?.value;
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: EdgeInsets.fromLTRB(
           16, 12, 16, MediaQuery.of(context).padding.bottom + 24),
       children: [
-        // Period picker — calendar for collection dates, month grid for months.
-        if (_mode == 'collection')
-          MisDatePicker(
-            value: activeDate,
-            available: periods,
-            onChanged: (v) => setState(() => _date = v),
-          )
-        else
-          MisMonthPicker(
-            value: activeMonth,
-            available: periods,
-            onChanged: (v) => setState(() => _month = v),
-          ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            MisSegmented<String>(
-              options: const [
-                ('collection', 'Collection'),
-                ('disbursement', 'Disbursement')
-              ],
-              value: _mode,
-              onChanged: (v) => setState(() {
-                _mode = v;
-                _drill = const [];
-              }),
-            ),
+            // Collection figures are always MTD as of the picked date — the
+            // daily feed is itself month-to-date cumulative, so there is no
+            // separate "for the day only" reading to offer alongside it.
             if (_mode == 'collection')
-              MisSegmented<String>(
-                options: const [('ftd', 'FTD'), ('mtd', 'MTD')],
-                value: _range,
-                onChanged: (v) => setState(() => _range = v),
+              const Padding(
+                padding: EdgeInsets.only(right: 10),
+                child: Text('MTD',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.muted)),
               ),
-            MisSegmented<bool>(
-              options: const [(true, 'Lowest 10%'), (false, 'All ranked')],
-              value: _onlyLowest,
-              onChanged: (v) => setState(() => _onlyLowest = v),
+            Expanded(
+              child: _mode == 'disbursement'
+                  ? MisMonthPicker(
+                      value: activeMonth,
+                      available: filters.months,
+                      onChanged: (v) => setState(() => _month = v),
+                    )
+                  : MisDatePicker(
+                      value: activeDate,
+                      available: filters.dates,
+                      onChanged: (v) => setState(() => _date = v),
+                    ),
             ),
           ],
         ),
-        const SizedBox(height: 10),
-        // Level buttons (at/below the caller's tier)
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: MisSegmented<int>(
-            options: [
-              for (var i = floor; i < _levels.length; i++)
-                (i, _levels[i].role),
-            ],
-            value: roleIdx,
-            onChanged: _selectLevel,
-          ),
+        const SizedBox(height: 12),
+        MisSegmented<String>(
+          options: const [
+            ('collection', 'Collection'),
+            ('disbursement', 'Disbursement'),
+          ],
+          value: _mode,
+          onChanged: (v) => setState(() => _mode = v),
         ),
         if (_mode == 'collection') ...[
           const SizedBox(height: 10),
@@ -242,171 +163,452 @@ class _MisAnalyticalScreenState extends ConsumerState<MisAnalyticalScreen> {
             scrollDirection: Axis.horizontal,
             child: MisSegmented<String>(
               options: [for (final b in _buckets) (b.key, b.label)],
-              value: bucket.key,
+              value: _bucketKey,
               onChanged: (v) => setState(() => _bucketKey = v),
             ),
           ),
         ],
-        if (_drill.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              OutlinedButton.icon(
-                onPressed: () => _back(floor),
-                icon: const Icon(Icons.arrow_back_rounded, size: 16),
-                label: const Text('Back'),
-                style: OutlinedButton.styleFrom(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: MisBreadcrumb(crumbs: [
-                  for (final d in _drill) MisCrumb(d.value ?? '—'),
-                  MisCrumb(level.role),
-                ]),
-              ),
-            ],
-          ),
-        ],
-        const SizedBox(height: 14),
-        rowsAsync.when(
-          loading: () => const AppLoadingBlock(height: 200),
-          error: (e, _) => AppErrorPanel(
-            message: e.toString(),
-            onRetry: () => ref.invalidate(misAnalyticalRowsProvider(q)),
-          ),
-          data: (rows) => _ranked(q, level, bucket, rows),
+        _LevelPanel(
+          title: 'Regions',
+          levelKey: 'region',
+          leaderboardAsync: leaderboardAsync,
+          myRank: myRank,
+          mode: _mode,
+        ),
+        _LevelPanel(
+          title: 'Divisions',
+          levelKey: 'division',
+          leaderboardAsync: leaderboardAsync,
+          myRank: myRank,
+          mode: _mode,
+        ),
+        _LevelPanel(
+          title: 'Areas',
+          levelKey: 'area',
+          leaderboardAsync: leaderboardAsync,
+          myRank: myRank,
+          mode: _mode,
+        ),
+        // FOs — still top 5 / bottom 5 (there can be thousands nationally),
+        // but searchable by name or employee ID within the full national list.
+        _LevelPanel(
+          title: 'FOs',
+          levelKey: 'employee',
+          leaderboardAsync: leaderboardAsync,
+          myRank: myRank,
+          mode: _mode,
+          showYourRankLine: true,
+          searchable: true,
+        ),
+        // Branches — last on purpose: unlike every level above it, this one
+        // shows the FULL national list (not just top/bottom 5), so it reads as
+        // the "browse everything" panel at the end of the screen.
+        _BranchPanel(
+          leaderboardAsync: leaderboardAsync,
+          myRank: myRank,
+          mode: _mode,
         ),
       ],
     );
   }
+}
 
-  Widget _ranked(
-      AnalyticalQuery q, _Level level, _Bucket bucket, List<AnalyticalRow> raw) {
-    final isEmp = level.level == 'employee';
-    final canDrill = level.child != null;
+/// One level — Top 5 (all regions for `region` — too few nationally for a
+/// distinct bottom 5) and Bottom 5, stacked. The caller's own unit, wherever
+/// it lands, is highlighted.
+class _LevelPanel extends StatefulWidget {
+  const _LevelPanel({
+    required this.title,
+    required this.levelKey,
+    required this.leaderboardAsync,
+    required this.myRank,
+    required this.mode,
+    this.showYourRankLine = false,
+    this.searchable = false,
+  });
 
-    if (_mode == 'disbursement') {
-      final rows = raw
-          .where((r) => r.amount > 0 || r.count > 0)
-          .toList()
-        ..sort((a, b) => a.amount.compareTo(b.amount));
-      final total = rows.length;
-      final n = _lowestN(total);
-      final ranked = _onlyLowest ? rows.take(n).toList() : rows;
-      final lowest = ranked.isNotEmpty ? ranked.first.amount : 0.0;
+  final String title;
+  final String levelKey;
+  final AsyncValue<AnalysisLeaderboard> leaderboardAsync;
+  final AnalysisMyRank? myRank;
+  final String mode;
+  final bool showYourRankLine;
+  final bool searchable;
 
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_onlyLowest && total > 0)
-            _sliceNote(n, ranked.length, total, null),
-          MisSnapshotGrid(perRow: 2, cards: [
-            MisSnapshotCard(
-                accent: 'indigo',
-                icon: Icons.trending_down_rounded,
-                label: '${level.role} · units in scope',
-                value: misNum(total)),
-            MisSnapshotCard(
-                accent: 'red',
-                icon: Icons.warning_amber_rounded,
-                label: 'Lowest amount in slice',
-                value: misRupees(lowest),
-                sub: 'Bottom unit'),
-          ]),
-          const SizedBox(height: 14),
-          if (ranked.isEmpty)
-            const MisInlineEmpty('No data for this level.')
-          else
-            for (var i = 0; i < ranked.length; i++) ...[
-              MisMetricColumnsCard(
-                title: '${i + 1}. ${ranked[i].unit ?? ranked[i].empId ?? '—'}',
-                subtitle: isEmp ? ranked[i].empId : null,
-                columns: [
-                  ('Accounts', misNum(ranked[i].count)),
-                  ('Amount', misRupees(ranked[i].amount)),
-                ],
-                onTap: canDrill
-                    ? () => _drillInto(level, ranked[i].unit)
-                    : null,
-              ),
-              const SizedBox(height: 8),
-            ],
-        ],
-      );
-    }
+  @override
+  State<_LevelPanel> createState() => _LevelPanelState();
+}
 
-    // Collection: rank by achievement % ascending.
-    final rows = raw
-        .map((r) => (
-              row: r,
-              demand: r.field(bucket.d),
-              collection: r.field(bucket.c),
-              pct: r.field(bucket.d) > 0
-                  ? r.field(bucket.c) / r.field(bucket.d) * 100
-                  : 0.0,
-            ))
-        .where((e) => e.demand > 0)
-        .toList()
-      ..sort((a, b) => a.pct.compareTo(b.pct));
-    final total = rows.length;
-    final n = _lowestN(total);
-    final ranked = _onlyLowest ? rows.take(n).toList() : rows;
-    final belowAttn = rows.where((e) => e.pct < _attentionPct).length;
-    final workingAsync = ref.watch(misAnalyticalWorkingProvider(q));
+class _LevelPanelState extends State<_LevelPanel> {
+  final _controller = TextEditingController();
+  String _query = '';
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (_onlyLowest && total > 0)
-          _sliceNote(n, ranked.length, total, workingAsync.asData?.value,
-              bucket: bucket.label),
-        MisSnapshotGrid(perRow: 2, cards: [
-          MisSnapshotCard(
-              accent: 'indigo',
-              icon: Icons.trending_down_rounded,
-              label: '${bucket.label} · units in scope',
-              value: misNum(total)),
-          MisSnapshotCard(
-              accent: 'red',
-              icon: Icons.warning_amber_rounded,
-              label: 'Below 75% achieved',
-              value: misNum(belowAttn),
-              sub: 'Need attention'),
-        ]),
-        const SizedBox(height: 14),
-        if (ranked.isEmpty)
-          const MisInlineEmpty('No data for this date / level / bucket.')
-        else
-          for (var i = 0; i < ranked.length; i++) ...[
-            MisUnitCard(
-              title: '${i + 1}. ${ranked[i].row.unit ?? ranked[i].row.empId ?? '—'}',
-              subtitle: isEmp ? ranked[i].row.empId : null,
-              demand: ranked[i].demand,
-              collection: ranked[i].collection,
-              money: bucket.money,
-              onTap:
-                  canDrill ? () => _drillInto(level, ranked[i].row.unit) : null,
-            ),
-            const SizedBox(height: 8),
-          ],
-      ],
-    );
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
-  Widget _sliceNote(int sliceN, int shown, int total, int? working,
-      {String? bucket}) {
-    final parts = <String>[
-      'Showing lowest ${misNum(sliceN < shown ? sliceN : shown)} of ${misNum(total)} units (10%)',
-      if (working != null && working > 0) '${misNum(working)} working',
-    ];
+  @override
+  Widget build(BuildContext context) {
+    final isEmployee = widget.levelKey == 'employee';
+    final hasBottom = widget.levelKey != 'region';
+    final mine = widget.myRank?.level(widget.levelKey);
+    final label = _levelLabel[widget.levelKey] ?? widget.title;
+
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Text(
-        '${parts.join(', ')}, ranked by ${_mode == 'disbursement' ? 'disbursement amount' : '${bucket ?? ''} achievement'}.',
-        style: const TextStyle(fontSize: 12, color: AppColors.muted),
+      padding: const EdgeInsets.only(top: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.title,
+              style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.ink)),
+          if (widget.searchable) ...[
+            const SizedBox(height: 8),
+            TextField(
+              controller: _controller,
+              onChanged: (v) => setState(() => _query = v),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText:
+                    'Search ${label.toLowerCase()} by name or emp ID…',
+                prefixIcon: const Icon(Icons.search_rounded, size: 18),
+                suffixIcon: _controller.text.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 16),
+                        onPressed: () {
+                          _controller.clear();
+                          setState(() => _query = '');
+                        },
+                      ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          widget.leaderboardAsync.when(
+            loading: () => const AppLoadingBlock(height: 140),
+            error: (e, _) => AppErrorPanel(message: e.toString()),
+            data: (lb) {
+              final data = lb.level(widget.levelKey);
+              if (data.top.isEmpty) {
+                return MisInlineEmpty(
+                    'No ${label.toLowerCase()} data for this date / bucket.');
+              }
+              final searching =
+                  widget.searchable && _query.trim().isNotEmpty;
+              if (searching) {
+                // Search the full national list when the backend supplies
+                // one; degrade to the current top+bottom 5 otherwise.
+                final pool = data.all ?? [...data.top, ...data.bottom];
+                final results = _filterRows(pool, _query, isEmployee);
+                if (results.isEmpty) {
+                  return MisInlineEmpty(
+                      'No ${label.toLowerCase()} matches your search.');
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${misNum(results.length)} match${results.length == 1 ? '' : 'es'} nationally',
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2,
+                          color: AppColors.inkSoft),
+                    ),
+                    const SizedBox(height: 8),
+                    for (final r in results)
+                      _RankTile(
+                        row: r,
+                        levelKey: widget.levelKey,
+                        mode: widget.mode,
+                        isMine: mine != null && r.unit == mine.unit,
+                      ),
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.levelKey == 'region' ? 'All regions' : 'Top 5',
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.2,
+                        color: AppColors.inkSoft),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final r in data.top)
+                    _RankTile(
+                      row: r,
+                      levelKey: widget.levelKey,
+                      mode: widget.mode,
+                      isMine: mine != null && r.unit == mine.unit,
+                    ),
+                  if (hasBottom && data.bottom.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    const Text('Bottom 5',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.2,
+                            color: AppColors.inkSoft)),
+                    const SizedBox(height: 8),
+                    for (final r in data.bottom)
+                      _RankTile(
+                        row: r,
+                        levelKey: widget.levelKey,
+                        mode: widget.mode,
+                        isMine: mine != null && r.unit == mine.unit,
+                      ),
+                  ],
+                ],
+              );
+            },
+          ),
+          if (widget.showYourRankLine) ...[
+            const SizedBox(height: 8),
+            if (mine != null)
+              Text(
+                'Your rank: #${mine.rank} of ${misNum(mine.total)} FOs — '
+                '${widget.mode == 'collection' ? '${mine.pct ?? '0.00'}%' : misRupees(mine.amount ?? 0)} '
+                '(${mine.unit}).',
+                style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              )
+            else
+              const Text('No FO data for you on this date / bucket.',
+                  style: TextStyle(fontSize: 12, color: AppColors.muted)),
+          ],
+        ],
       ),
     );
   }
+}
+
+/// Branches — the one panel that shows EVERY branch nationally (not just its
+/// top/bottom 5), because that's the level small enough to browse in full and
+/// specific enough to be worth searching by name.
+class _BranchPanel extends StatefulWidget {
+  const _BranchPanel({
+    required this.leaderboardAsync,
+    required this.myRank,
+    required this.mode,
+  });
+
+  final AsyncValue<AnalysisLeaderboard> leaderboardAsync;
+  final AnalysisMyRank? myRank;
+  final String mode;
+
+  @override
+  State<_BranchPanel> createState() => _BranchPanelState();
+}
+
+class _BranchPanelState extends State<_BranchPanel> {
+  final _controller = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mine = widget.myRank?.branch;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Branches',
+              style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.ink)),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _controller,
+            onChanged: (v) => setState(() => _query = v),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: 'Search branch by name…',
+              prefixIcon: const Icon(Icons.search_rounded, size: 18),
+              suffixIcon: _controller.text.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 16),
+                      onPressed: () {
+                        _controller.clear();
+                        setState(() => _query = '');
+                      },
+                    ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          widget.leaderboardAsync.when(
+            loading: () => const AppLoadingBlock(height: 140),
+            error: (e, _) => AppErrorPanel(message: e.toString()),
+            data: (lb) {
+              final allRows = lb.branch.all ?? const <AnalysisUnitRow>[];
+              if (allRows.isEmpty) {
+                return const MisInlineEmpty(
+                    'No branch data for this date / bucket.');
+              }
+              final rows = _filterRows(allRows, _query, false);
+              if (rows.isEmpty) {
+                return const MisInlineEmpty('No branch matches your search.');
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _query.trim().isNotEmpty
+                        ? '${misNum(rows.length)} of ${misNum(allRows.length)} branches'
+                        : 'All ${misNum(allRows.length)} branches',
+                    style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.2,
+                        color: AppColors.inkSoft),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final r in rows)
+                    _RankTile(
+                      row: r,
+                      levelKey: 'branch',
+                      mode: widget.mode,
+                      isMine: mine != null && r.unit == mine.unit,
+                    ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Compact rank row — rank badge, unit (+ emp ID for the Officer level), and
+/// the mode-specific figures — with the caller's own row (when present)
+/// highlighted.
+class _RankTile extends StatelessWidget {
+  const _RankTile({
+    required this.row,
+    required this.levelKey,
+    required this.mode,
+    required this.isMine,
+  });
+
+  final AnalysisUnitRow row;
+  final String levelKey;
+  final String mode;
+  final bool isMine;
+
+  @override
+  Widget build(BuildContext context) {
+    final isEmployee = levelKey == 'employee';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isMine
+            ? AppColors.success.withOpacity(0.10)
+            : AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(
+          color: isMine
+              ? AppColors.success.withOpacity(0.35)
+              : AppColors.hairline,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 30,
+                height: 24,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Text('#${row.rank}',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.primary)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${isMine ? '★ ' : ''}${row.unit}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.ink),
+                    ),
+                    if (isEmployee && (row.empId ?? '').isNotEmpty)
+                      Text(row.empId!,
+                          style: const TextStyle(
+                              fontSize: 11, color: AppColors.muted)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (mode == 'collection')
+            Row(
+              children: [
+                Expanded(child: _kv('Demand', misNum(row.demand ?? 0))),
+                Expanded(
+                    child: _kv('Collection', misNum(row.collection ?? 0))),
+                Expanded(child: _kv('Achieved', '${row.pct ?? '0.00'}%')),
+                Expanded(child: _kv('FTOD', misNum(row.ftod ?? 0))),
+              ],
+            )
+          else
+            Row(
+              children: [
+                Expanded(child: _kv('Accounts', misNum(row.count ?? 0))),
+                Expanded(child: _kv('Amount', misRupees(row.amount ?? 0))),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _kv(String label, String value) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: const TextStyle(fontSize: 9.5, color: AppColors.muted)),
+          const SizedBox(height: 1),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink),
+          ),
+        ],
+      );
 }

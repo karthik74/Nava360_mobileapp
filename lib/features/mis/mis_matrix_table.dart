@@ -104,7 +104,7 @@ class MisGroup {
   const MisGroup(this.label, this.span);
 }
 
-class MisMatrixTable extends StatelessWidget {
+class MisMatrixTable extends StatefulWidget {
   const MisMatrixTable({
     super.key,
     required this.stubHeader,
@@ -113,6 +113,8 @@ class MisMatrixTable extends StatelessWidget {
     this.groups,
     this.stubWidth = 132,
     this.cellWidth = 86,
+    this.headerColor,
+    this.groupHeaderColor,
   });
 
   /// Header of the pinned first column — "Region", "Bucket", "Mode", …
@@ -129,10 +131,35 @@ class MisMatrixTable extends StatelessWidget {
   final double stubWidth;
   final double cellWidth;
 
+  /// Overrides the column-header band colour (default: the app's brand
+  /// primary). Used by screens whose header colour is a fixed identity
+  /// regardless of the app theme (e.g. the Branch Report card's navy).
+  final Color? headerColor;
+
+  /// Overrides the spanning group-header band colour (default: primaryDark).
+  final Color? groupHeaderColor;
+
+  @override
+  State<MisMatrixTable> createState() => _MisMatrixTableState();
+}
+
+class _MisMatrixTableState extends State<MisMatrixTable> {
+  // Only the measure columns scroll (the stub stays pinned) — a persistent
+  // thumb makes that scrollability visible up front, instead of a reader
+  // having to discover it by swiping and landing mid-table with no cue why
+  // the leftmost columns are gone.
+  final _hScroll = ScrollController();
+
+  @override
+  void dispose() {
+    _hScroll.dispose();
+    super.dispose();
+  }
+
   static const double _rowH = 44;
   static const double _bandH = 26;
 
-  bool get _grouped => groups != null && groups!.isNotEmpty;
+  bool get _grouped => widget.groups != null && widget.groups!.isNotEmpty;
   double get _headerH => _bandH * (_grouped ? 2 : 1);
 
   Color _rowBg(MisMatrixRow r, int i) {
@@ -156,8 +183,6 @@ class MisMatrixTable extends StatelessWidget {
           ? FontWeight.w800
           : FontWeight.w500;
 
-  bool _topBorder(MisMatrixRow r) => r.kind == MisRowKind.total;
-
   @override
   Widget build(BuildContext context) {
     return GlassCard(
@@ -176,7 +201,7 @@ class MisMatrixTable extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SizedBox(
-                width: stubWidth,
+                width: widget.stubWidth,
                 child: Column(
                   children: [
                     Container(
@@ -185,14 +210,14 @@ class MisMatrixTable extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       alignment: Alignment.centerLeft,
                       decoration: BoxDecoration(
-                        color: AppColors.primary,
+                        color: widget.headerColor ?? AppColors.primary,
                         border: const Border(
                           right: BorderSide(color: Colors.black),
                           bottom: BorderSide(color: Colors.black),
                         ),
                       ),
                       child: Text(
-                        stubHeader,
+                        widget.stubHeader,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -202,42 +227,58 @@ class MisMatrixTable extends StatelessWidget {
                         ),
                       ),
                     ),
-                    for (var i = 0; i < rows.length; i++) _stubCell(rows[i], i),
+                    for (var i = 0; i < widget.rows.length; i++)
+                      _stubCell(widget.rows[i], i),
                   ],
                 ),
               ),
               Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (_grouped)
+                child: Scrollbar(
+                  controller: _hScroll,
+                  thumbVisibility: true,
+                  trackVisibility: true,
+                  child: SingleChildScrollView(
+                    controller: _hScroll,
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (_grouped)
+                          Row(
+                            children: [
+                              for (final g in widget.groups!)
+                                _headerCell(
+                                    g.label,
+                                    widget.cellWidth * g.span,
+                                    widget.groupHeaderColor ??
+                                        AppColors.primaryDark),
+                            ],
+                          ),
                         Row(
                           children: [
-                            for (final g in groups!)
-                              _headerCell(g.label, cellWidth * g.span,
-                                  AppColors.primaryDark),
+                            for (final h in widget.headers)
+                              _headerCell(
+                                h,
+                                widget.cellWidth,
+                                widget.headerColor ??
+                                    (h == 'Demand' ||
+                                            h == 'Balance' ||
+                                            h == 'Pending'
+                                        ? const Color(0xFFFCE4D6)
+                                        : h == 'Collection'
+                                            ? const Color(0xFFE2EFDA)
+                                            : h == 'Coll %' ||
+                                                    h == 'Collection %'
+                                                ? const Color(0xFFFFFFCC)
+                                                : AppColors.primary),
+                              ),
                           ],
                         ),
-                      Row(
-                        children: [
-                          for (final h in headers)
-                            _headerCell(
-                              h,
-                              cellWidth,
-                              h == 'Demand' || h == 'Balance' || h == 'Pending'
-                                  ? const Color(0xFFFCE4D6)
-                                  : h == 'Collection'
-                                      ? const Color(0xFFE2EFDA)
-                                      : h == 'Coll %' || h == 'Collection %'
-                                          ? const Color(0xFFFFFFCC)
-                                          : AppColors.primary,
-                            ),
-                        ],
-                      ),
-                      for (var i = 0; i < rows.length; i++) _cellsRow(rows[i], i),
-                    ],
+                        for (var i = 0; i < widget.rows.length; i++)
+                          _cellsRow(widget.rows[i], i),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -269,7 +310,7 @@ class MisMatrixTable extends StatelessWidget {
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w800,
-          color: color == AppColors.primary || color == AppColors.primaryDark ? Colors.white : Colors.black,
+          color: color.computeLuminance() < 0.4 ? Colors.white : Colors.black,
         ),
       ),
     );
@@ -356,7 +397,7 @@ class MisMatrixTable extends StatelessWidget {
     final color =
         c.muted ? AppColors.muted : (c.color ?? AppColors.inkSoft);
     return Container(
-      width: cellWidth,
+      width: widget.cellWidth,
       decoration: BoxDecoration(
         color: c.bgColor ?? r.bgColor ?? _rowBg(r, i),
         border: const Border(
@@ -494,4 +535,159 @@ class MisCcTitle extends StatelessWidget {
           ],
         ),
       );
+}
+
+/// A matrix table that NEVER scrolls — every column is laid out with
+/// Expanded/flex so the whole grid always fits the available width, unlike
+/// [MisMatrixTable] (built for an open-ended column count, which scrolls the
+/// measure columns horizontally). Used where the caller has already made
+/// enough room for every column to fit without scrolling — e.g. the Branch
+/// Report card, which switches the device to landscape for exactly this
+/// reason — rather than where the column count is unbounded.
+class MisFlexMatrixTable extends StatelessWidget {
+  const MisFlexMatrixTable({
+    super.key,
+    required this.stubHeader,
+    required this.headers,
+    required this.rows,
+    this.groups,
+    this.stubFlex = 3,
+    this.cellFlex = 2,
+    this.headerColor,
+    this.groupHeaderColor,
+  });
+
+  final String stubHeader;
+  final List<String> headers;
+  final List<MisGroup>? groups;
+  final List<MisMatrixRow> rows;
+  final int stubFlex;
+  final int cellFlex;
+  final Color? headerColor;
+  final Color? groupHeaderColor;
+
+  bool get _grouped => groups != null && groups!.isNotEmpty;
+
+  Color _rowBg(MisMatrixRow r, int i) {
+    if (r.bgColor != null) return r.bgColor!;
+    switch (r.kind) {
+      case MisRowKind.total:
+        return const Color(0xFFF4B084);
+      case MisRowKind.category:
+        return AppColors.surfaceAlt;
+      case MisRowKind.child:
+        return AppColors.surface;
+      case MisRowKind.accent:
+        return AppColors.danger.withValues(alpha: 0.04);
+      case MisRowKind.normal:
+        return i.isOdd ? AppColors.surfaceAlt : AppColors.surface;
+    }
+  }
+
+  Widget _headerCell(String text, int flex, Color color, {bool left = false}) {
+    return Expanded(
+      flex: flex,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+        color: color,
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: left ? TextAlign.left : TextAlign.right,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            color: color.computeLuminance() < 0.4 ? Colors.white : Colors.black,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _valueCell(MisCell c, int flex, FontWeight rowWeight, Color bg) {
+    return Expanded(
+      flex: flex,
+      child: Container(
+        color: bg,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+        child: Text(
+          c.text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.right,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: c.weight ?? rowWeight,
+            color: c.muted ? AppColors.muted : (c.color ?? AppColors.inkSoft),
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final headColor = headerColor ?? AppColors.primary;
+    final groupColor = groupHeaderColor ?? headerColor ?? AppColors.primaryDark;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: Container(
+        decoration: BoxDecoration(border: Border.all(color: AppColors.hairline)),
+        child: Column(
+          children: [
+            if (_grouped)
+              Row(
+                children: [
+                  _headerCell('', stubFlex, groupColor),
+                  for (final g in groups!)
+                    _headerCell(g.label, cellFlex * g.span, groupColor),
+                ],
+              ),
+            Row(
+              children: [
+                _headerCell(stubHeader, stubFlex, headColor, left: true),
+                for (final h in headers) _headerCell(h, cellFlex, headColor),
+              ],
+            ),
+            for (var i = 0; i < rows.length; i++)
+              Row(
+                children: [
+                  Expanded(
+                    flex: stubFlex,
+                    child: Container(
+                      color: _rowBg(rows[i], i),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+                      child: Text(
+                        rows[i].lead.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: rows[i].kind == MisRowKind.total
+                              ? FontWeight.w800
+                              : FontWeight.w700,
+                          color: AppColors.ink,
+                        ),
+                      ),
+                    ),
+                  ),
+                  for (final c in rows[i].cells)
+                    _valueCell(
+                      c,
+                      cellFlex,
+                      rows[i].kind == MisRowKind.total
+                          ? FontWeight.w800
+                          : FontWeight.w500,
+                      _rowBg(rows[i], i),
+                    ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }

@@ -321,6 +321,7 @@ class MisGroupedBarChart extends StatelessWidget {
     required this.seriesColors,
     this.money = false,
     this.height = 230,
+    this.valueFormatter,
   });
 
   final List<MisBarGroup> groups;
@@ -328,6 +329,15 @@ class MisGroupedBarChart extends StatelessWidget {
   final List<Color> seriesColors;
   final bool money;
   final double height;
+
+  /// Optional override for how a value is printed (bar labels AND axis
+  /// ticks). Needed when a metric's own formatting rules (already-in-Crore
+  /// values, a percentage, a plain count, …) don't match the built-in
+  /// money/misNum choice below — e.g. the Branch Matrix, whose metric `type`
+  /// can be 'cr' (already-in-Crore — misRupees() would wrongly re-divide it
+  /// by 1e7 again), 'pct' or 'count'. Omitted, both places keep this widget's
+  /// exact original behaviour.
+  final String Function(double)? valueFormatter;
 
   static const double _leftPad = 42;
   static const double _bottomPad = 30;
@@ -360,7 +370,17 @@ class MisGroupedBarChart extends StatelessWidget {
     const barsSpace = 2.0;
     final seriesCount =
         groups.isEmpty ? 1 : groups.first.values.length.clamp(1, 99);
-    String fmt(double v) => money ? misRupees(v) : misNum(v);
+    // Bar value labels: the caller's formatter when given, else the original
+    // money/misNum choice — unchanged for every existing call site.
+    String fmt(double v) =>
+        valueFormatter != null ? valueFormatter!(v) : (money ? misRupees(v) : misNum(v));
+    // Axis ticks: same override when given, else the original magnitude-based
+    // formatting (which never depended on `money`) — also unchanged for
+    // existing callers, but now consistent with the labels above when a
+    // formatter IS supplied.
+    String axisFmt(double v) => valueFormatter != null
+        ? valueFormatter!(v)
+        : (v.abs() >= 1000 ? misNum(v.round()) : v.toStringAsFixed(0));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -372,6 +392,17 @@ class MisGroupedBarChart extends StatelessWidget {
             // Each rod gets its own label, so the crowding budget is per ROD,
             // not per category.
             final slot = plotW / (groups.length * seriesCount);
+            // Mirrors fl_chart's own BarChartAlignment.spaceEvenly geometry
+            // (BarChartDataExtension.calculateGroupsX): fixed-width groups
+            // with an equal gap before/between/after them — NOT N equal
+            // slices of the plot, which only coincides with this when the
+            // groups are negligibly thin next to the plot width.
+            final groupWidthPx =
+                seriesCount * barW + (seriesCount - 1) * barsSpace;
+            final eachSpace =
+                (plotW - groups.length * groupWidthPx) / (groups.length + 1);
+            double groupCenterPx(int i) =>
+                (i + 1) * eachSpace + (i + 0.5) * groupWidthPx;
             return Stack(
               children: [
                 Positioned.fill(
@@ -405,9 +436,7 @@ class MisGroupedBarChart extends StatelessWidget {
                             showTitles: true,
                             reservedSize: _leftPad,
                             getTitlesWidget: (v, _) => Text(
-                              v.abs() >= 1000
-                                  ? misNum(v.round())
-                                  : v.toStringAsFixed(0),
+                              axisFmt(v),
                               style: const TextStyle(
                                   fontSize: 9, color: AppColors.muted),
                             ),
@@ -463,11 +492,23 @@ class MisGroupedBarChart extends StatelessWidget {
                       for (var i = 0; i < groups.length; i++)
                         for (var s = 0; s < groups[i].values.length; s++)
                           MisPlotLabel(
-                            // Centre of category i, offset to rod s within it.
-                            xFrac: ((i + 0.5) / groups.length) +
-                                ((s - (groups[i].values.length - 1) / 2) *
-                                        (barW + barsSpace)) /
-                                    plotW,
+                            // Centre of category i (matching fl_chart's own
+                            // BarChartAlignment.spaceEvenly geometry exactly —
+                            // NOT a naive (i+0.5)/groups.length slice, which
+                            // only approximates spaceEvenly when the groups
+                            // are negligibly thin next to the plot width; with
+                            // few groups (e.g. a handful of branches after an
+                            // Area drill) the fixed-width groups vs. the
+                            // variable gaps between them diverge from that
+                            // approximation enough to visibly mis-place the
+                            // label over the wrong bar. See
+                            // BarChartDataExtension.calculateGroupsX in the
+                            // fl_chart package for the formula mirrored here),
+                            // offset to rod s within it.
+                            xFrac: (groupCenterPx(i) +
+                                    ((s - (groups[i].values.length - 1) / 2) *
+                                        (barW + barsSpace))) /
+                                plotW,
                             yFrac: groups[i].values[s] / top,
                             text: fmt(groups[i].values[s]),
                             color: seriesColors[s % seriesColors.length],

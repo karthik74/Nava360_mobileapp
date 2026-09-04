@@ -738,22 +738,278 @@ class DisbTrendRow {
       );
 }
 
-// ── Analytical ───────────────────────────────────────────────────────────────
+// ── Analytical (leaderboard tool) ───────────────────────────────────────────
+// Ports src/mis/gwm/api/analysisApi.ts's response shapes: /analysis/filters,
+// /analysis/leaderboard, /analysis/my-rank.
 
-/// A per-unit analytical row. Fields are dynamic (per-bucket demand/collection
-/// columns for collection mode; count/amount for disbursement mode), so the raw
-/// map is kept and read through typed getters.
-class AnalyticalRow {
-  final Map<String, dynamic> raw;
-  const AnalyticalRow(this.raw);
+/// The caller's own scope, as returned by `/analysis/filters`.
+class AnalysisMe {
+  final String? tier;
+  final String? region;
+  final String? division;
+  final String? area;
+  final String? branch;
+  final String? empId;
+  final String? name;
 
-  String? get unit => misToStr(raw['unit']);
-  String? get empId => misToStr(raw['emp_id']);
-  double get count => misToDouble(raw['count']) ?? 0;
-  double get amount => misToDouble(raw['amount']) ?? 0;
+  const AnalysisMe({
+    this.tier,
+    this.region,
+    this.division,
+    this.area,
+    this.branch,
+    this.empId,
+    this.name,
+  });
 
-  /// Any numeric bucket field by name (e.g. "regular_demand").
-  double field(String key) => misToDouble(raw[key]) ?? 0;
+  factory AnalysisMe.fromJson(Map<String, dynamic> j) => AnalysisMe(
+        tier: misToStr(j['tier']),
+        region: misToStr(j['region']),
+        division: misToStr(j['division']),
+        area: misToStr(j['area']),
+        branch: misToStr(j['branch']),
+        empId: misToStr(j['emp_id']),
+        name: misToStr(j['name']),
+      );
+}
+
+/// `/analysis/filters` — dates/months/levels metadata, loaded once per screen.
+class AnalysisFilters {
+  final List<String> dates;
+  final List<String> months;
+  final List<String> levels;
+  final AnalysisMe me;
+
+  const AnalysisFilters({
+    this.dates = const [],
+    this.months = const [],
+    this.levels = const [],
+    this.me = const AnalysisMe(),
+  });
+
+  factory AnalysisFilters.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    return AnalysisFilters(
+      dates: (j['dates'] is List)
+          ? (j['dates'] as List).map((e) => e.toString()).toList()
+          : const [],
+      months: (j['months'] is List)
+          ? (j['months'] as List).map((e) => e.toString()).toList()
+          : const [],
+      levels: (j['levels'] is List)
+          ? (j['levels'] as List).map((e) => e.toString()).toList()
+          : const [],
+      me: j['me'] is Map
+          ? AnalysisMe.fromJson(_asMap(j['me']))
+          : const AnalysisMe(),
+    );
+  }
+}
+
+/// One ranked unit row from `/analysis/leaderboard`. Collection rows carry
+/// demand/collection/pct/ftod (accounts only); disbursement rows carry
+/// count/amount.
+class AnalysisUnitRow {
+  final String unit;
+  final String? empId;
+  final double? demand;
+  final double? collection;
+
+  /// Fixed 2-decimal string from the backend, e.g. "5.00".
+  final String? pct;
+  final double? ftod;
+  final double? count;
+  final double? amount;
+  final int rank;
+
+  const AnalysisUnitRow({
+    required this.unit,
+    this.empId,
+    this.demand,
+    this.collection,
+    this.pct,
+    this.ftod,
+    this.count,
+    this.amount,
+    this.rank = 0,
+  });
+
+  factory AnalysisUnitRow.fromJson(Map<String, dynamic> j) => AnalysisUnitRow(
+        unit: misToStr(j['unit']) ?? '',
+        empId: misToStr(j['emp_id']),
+        demand: misToDouble(j['demand']),
+        collection: misToDouble(j['collection']),
+        pct: misToStr(j['pct']),
+        ftod: misToDouble(j['ftod']),
+        count: misToDouble(j['count']),
+        amount: misToDouble(j['amount']),
+        rank: misToInt(j['rank']) ?? 0,
+      );
+}
+
+/// One level's slice of `/analysis/leaderboard` — top 5 (+ bottom 5, empty for
+/// `region`), plus the full national list (`all`) for `branch` and `employee`,
+/// which backs a search across everyone nationally rather than just the ten
+/// rows already shown.
+class AnalysisLeaderboardLevel {
+  final List<AnalysisUnitRow> top;
+  final List<AnalysisUnitRow> bottom;
+  final List<AnalysisUnitRow>? all;
+  final int total;
+
+  const AnalysisLeaderboardLevel({
+    this.top = const [],
+    this.bottom = const [],
+    this.all,
+    this.total = 0,
+  });
+
+  factory AnalysisLeaderboardLevel.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    List<AnalysisUnitRow> rows(dynamic v) => v is List
+        ? v
+            .whereType<Map>()
+            .map((m) => AnalysisUnitRow.fromJson(m.cast<String, dynamic>()))
+            .toList()
+        : const [];
+    return AnalysisLeaderboardLevel(
+      top: rows(j['top']),
+      bottom: rows(j['bottom']),
+      all: j['all'] is List ? rows(j['all']) : null,
+      total: misToInt(j['total']) ?? 0,
+    );
+  }
+}
+
+/// `/analysis/leaderboard` — all-India top 5 (+ bottom 5 except region) at
+/// every level, plus the full national branch/employee lists. Always unscoped.
+class AnalysisLeaderboard {
+  final String mode;
+  final AnalysisLeaderboardLevel region;
+  final AnalysisLeaderboardLevel division;
+  final AnalysisLeaderboardLevel area;
+  final AnalysisLeaderboardLevel branch;
+  final AnalysisLeaderboardLevel employee;
+
+  const AnalysisLeaderboard({
+    this.mode = 'collection',
+    this.region = const AnalysisLeaderboardLevel(),
+    this.division = const AnalysisLeaderboardLevel(),
+    this.area = const AnalysisLeaderboardLevel(),
+    this.branch = const AnalysisLeaderboardLevel(),
+    this.employee = const AnalysisLeaderboardLevel(),
+  });
+
+  factory AnalysisLeaderboard.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    return AnalysisLeaderboard(
+      mode: misToStr(j['mode']) ?? 'collection',
+      region: AnalysisLeaderboardLevel.fromJson(j['region']),
+      division: AnalysisLeaderboardLevel.fromJson(j['division']),
+      area: AnalysisLeaderboardLevel.fromJson(j['area']),
+      branch: AnalysisLeaderboardLevel.fromJson(j['branch']),
+      employee: AnalysisLeaderboardLevel.fromJson(j['employee']),
+    );
+  }
+
+  /// The level's data by key ("region"|"division"|"area"|"branch"|"employee").
+  AnalysisLeaderboardLevel level(String key) => switch (key) {
+        'region' => region,
+        'division' => division,
+        'area' => area,
+        'branch' => branch,
+        'employee' => employee,
+        _ => const AnalysisLeaderboardLevel(),
+      };
+}
+
+/// One level's entry in `/analysis/my-rank` — the caller's own national rank.
+class AnalysisRankEntry {
+  final String unit;
+  final int rank;
+  final int total;
+  final String? pct;
+  final double? demand;
+  final double? collection;
+  final double? ftod;
+  final double? count;
+  final double? amount;
+
+  const AnalysisRankEntry({
+    this.unit = '',
+    this.rank = 0,
+    this.total = 0,
+    this.pct,
+    this.demand,
+    this.collection,
+    this.ftod,
+    this.count,
+    this.amount,
+  });
+
+  factory AnalysisRankEntry.fromJson(Map<String, dynamic> j) =>
+      AnalysisRankEntry(
+        unit: misToStr(j['unit']) ?? '',
+        rank: misToInt(j['rank']) ?? 0,
+        total: misToInt(j['total']) ?? 0,
+        pct: misToStr(j['pct']),
+        demand: misToDouble(j['demand']),
+        collection: misToDouble(j['collection']),
+        ftod: misToDouble(j['ftod']),
+        count: misToDouble(j['count']),
+        amount: misToDouble(j['amount']),
+      );
+}
+
+/// `/analysis/my-rank` — the caller's own national rank at every level they
+/// belong to (e.g. "#50 of 800 FOs"). Unscoped.
+class AnalysisMyRank {
+  final String mode;
+  final String? empId;
+  final String? name;
+  final AnalysisRankEntry? region;
+  final AnalysisRankEntry? division;
+  final AnalysisRankEntry? area;
+  final AnalysisRankEntry? branch;
+  final AnalysisRankEntry? employee;
+
+  const AnalysisMyRank({
+    this.mode = 'collection',
+    this.empId,
+    this.name,
+    this.region,
+    this.division,
+    this.area,
+    this.branch,
+    this.employee,
+  });
+
+  factory AnalysisMyRank.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    AnalysisRankEntry? entry(dynamic v) => v is Map
+        ? AnalysisRankEntry.fromJson(v.cast<String, dynamic>())
+        : null;
+    return AnalysisMyRank(
+      mode: misToStr(j['mode']) ?? 'collection',
+      empId: misToStr(j['emp_id']),
+      name: misToStr(j['name']),
+      region: entry(j['region']),
+      division: entry(j['division']),
+      area: entry(j['area']),
+      branch: entry(j['branch']),
+      employee: entry(j['employee']),
+    );
+  }
+
+  /// The level's entry by key ("region"|"division"|"area"|"branch"|"employee").
+  AnalysisRankEntry? level(String key) => switch (key) {
+        'region' => region,
+        'division' => division,
+        'area' => area,
+        'branch' => branch,
+        'employee' => employee,
+        _ => null,
+      };
 }
 
 // ── Comparison ───────────────────────────────────────────────────────────────
@@ -1108,6 +1364,160 @@ class HierOption {
       HierOption(misToStr(j[idKey]) ?? '', misToStr(j[nameKey]) ?? '');
 }
 
+// ── Branch Matrix ────────────────────────────────────────────────────────────
+// Mirrors src/mis/gwm/api/branchMatrixApi.ts — GET /branch-matrix?fy=. One call
+// returns every branch, every month in the selected financial year, every
+// metric; the caller picks which metric column to render.
+
+/// count | cr (crore) | pct.
+typedef BranchMatrixType = String;
+
+/// sum | avg — how the rightmost Total column is derived for this metric.
+typedef BranchMatrixAgg = String;
+
+class BranchMatrixMetric {
+  final String key;
+  final String label;
+  final BranchMatrixType type;
+  final BranchMatrixAgg agg;
+
+  const BranchMatrixMetric({
+    required this.key,
+    required this.label,
+    required this.type,
+    required this.agg,
+  });
+
+  factory BranchMatrixMetric.fromJson(Map<String, dynamic> j) =>
+      BranchMatrixMetric(
+        key: misToStr(j['key']) ?? '',
+        label: misToStr(j['label']) ?? '',
+        type: misToStr(j['type']) ?? 'count',
+        agg: misToStr(j['agg']) ?? 'sum',
+      );
+}
+
+class BranchMatrixRow {
+  final String branch;
+  final String? area;
+  final String? division;
+  final String? region;
+
+  /// 'YYYY-MM-01' -> metric key -> value (null = not available).
+  final Map<String, Map<String, double?>> values;
+
+  /// One Total per metric across this branch's months.
+  final Map<String, double?> totals;
+
+  /// True only for the network-wide "Total" row appended last.
+  final bool isTotal;
+
+  const BranchMatrixRow({
+    required this.branch,
+    this.area,
+    this.division,
+    this.region,
+    this.values = const {},
+    this.totals = const {},
+    this.isTotal = false,
+  });
+
+  factory BranchMatrixRow.fromJson(Map<String, dynamic> j) {
+    final values = <String, Map<String, double?>>{};
+    if (j['values'] is Map) {
+      (j['values'] as Map).forEach((month, metricMap) {
+        if (metricMap is Map) {
+          final inner = <String, double?>{};
+          metricMap.forEach((k, v) => inner[k.toString()] = misToDouble(v));
+          values[month.toString()] = inner;
+        }
+      });
+    }
+    final totals = <String, double?>{};
+    if (j['totals'] is Map) {
+      (j['totals'] as Map)
+          .forEach((k, v) => totals[k.toString()] = misToDouble(v));
+    }
+    return BranchMatrixRow(
+      branch: misToStr(j['branch']) ?? '—',
+      area: misToStr(j['area']),
+      division: misToStr(j['division']),
+      region: misToStr(j['region']),
+      values: values,
+      totals: totals,
+      isTotal: j['is_total'] == true,
+    );
+  }
+
+  /// One cell's value for a metric in a given month.
+  double? cell(String month, String metricKey) => values[month]?[metricKey];
+}
+
+class BranchMatrixResponse {
+  final List<BranchMatrixMetric> metrics;
+  final String? note;
+
+  /// The FY's start year actually applied, e.g. 2026 for "FY 2026-27".
+  final int? fy;
+
+  /// "FY 2026-27".
+  final String? fyLabel;
+
+  /// Every FY that has data, newest first.
+  final List<int> availableFys;
+
+  /// This FY's months, ascending (union across every branch).
+  final List<String> months;
+  final int branchCount;
+  final List<BranchMatrixRow> branches;
+
+  /// Loan product filter echoed back: `igl` | `fig` | `il`; null ⇒ all products.
+  final String? product;
+
+  const BranchMatrixResponse({
+    this.metrics = const [],
+    this.note,
+    this.fy,
+    this.fyLabel,
+    this.availableFys = const [],
+    this.months = const [],
+    this.branchCount = 0,
+    this.branches = const [],
+    this.product,
+  });
+
+  factory BranchMatrixResponse.fromJson(dynamic raw) {
+    final j = _asMap(raw);
+    return BranchMatrixResponse(
+      metrics: (j['metrics'] is List)
+          ? (j['metrics'] as List)
+              .whereType<Map>()
+              .map((m) => BranchMatrixMetric.fromJson(m.cast<String, dynamic>()))
+              .toList()
+          : const [],
+      note: misToStr(j['note']),
+      fy: (j['fy'] as num?)?.toInt(),
+      fyLabel: misToStr(j['fy_label']),
+      product: misToStr(j['product']),
+      availableFys: (j['available_fys'] is List)
+          ? (j['available_fys'] as List)
+              .map((e) => (e as num).toInt())
+              .toList()
+          : const [],
+      months: (j['months'] is List)
+          ? (j['months'] as List).map((e) => e.toString()).toList()
+          : const [],
+      branchCount: (j['branch_count'] as num?)?.toInt() ?? 0,
+      branches: (j['branches'] is List)
+          ? (j['branches'] as List)
+              .whereType<Map>()
+              .map((m) => BranchMatrixRow.fromJson(m.cast<String, dynamic>()))
+              .toList()
+          : const [],
+    );
+  }
+}
+
 // ── Locations ────────────────────────────────────────────────────────────────
 
 class BranchLocationRow {
@@ -1260,41 +1670,51 @@ class BranchPerformance {
   }
 }
 
-/// Server-supplied opening figures + published assumption rates for the
-/// business projection. The rates are read-only on every client.
-class BranchProjectionSeed {
-  final String fromMonth;
-  final double? openingAccounts;
-  final double openingPos;
-  final double closureAccPct;
-  final double closurePosPct;
-  final double disbAccounts;
-  final double disbAmount;
-  final int disbBasisMonths;
+/// One month of the BUSINESS Projection table — a PURE READ from the server,
+/// exactly as uploaded (see routes/branchReport.js on the API). There is no
+/// roll-forward arithmetic, no assumption rates, on any client: the server
+/// sends every forward month's Opening/Closure/DB/Closing figures straight
+/// from the "Branch Report Cards Consolidated" upload, same as the web port
+/// (BranchProjectionMonth in branchReportApi.ts). A null cell means the
+/// upload didn't carry that figure for that month — never a zero.
+class BranchProjectionMonth {
+  final String month; // "2026-09-01"
+  final String label; // "Sep-26"
+  final double? openingAcc;
+  final double? openingPos;
+  final double? closureAcc;
+  final double? closurePos;
+  final double? dbAcc;
+  final double? dbAmt;
+  final double? closingAcc;
+  final double? closingPos;
 
-  const BranchProjectionSeed({
-    this.fromMonth = '',
-    this.openingAccounts,
-    this.openingPos = 0,
-    this.closureAccPct = 0,
-    this.closurePosPct = 0,
-    this.disbAccounts = 0,
-    this.disbAmount = 0,
-    this.disbBasisMonths = 0,
+  const BranchProjectionMonth({
+    this.month = '',
+    this.label = '',
+    this.openingAcc,
+    this.openingPos,
+    this.closureAcc,
+    this.closurePos,
+    this.dbAcc,
+    this.dbAmt,
+    this.closingAcc,
+    this.closingPos,
   });
 
-  factory BranchProjectionSeed.fromJson(dynamic raw) {
+  factory BranchProjectionMonth.fromJson(dynamic raw) {
     final j = _asMap(raw);
-    final d = _asMap(j['defaults']);
-    return BranchProjectionSeed(
-      fromMonth: misToStr(j['from_month']) ?? '',
-      openingAccounts: misToDouble(j['opening_accounts']),
-      openingPos: misToDouble(j['opening_pos']) ?? 0,
-      closureAccPct: misToDouble(d['closure_acc_pct']) ?? 0,
-      closurePosPct: misToDouble(d['closure_pos_pct']) ?? 0,
-      disbAccounts: misToDouble(d['disb_accounts']) ?? 0,
-      disbAmount: misToDouble(d['disb_amount']) ?? 0,
-      disbBasisMonths: misToDouble(j['disb_basis_months'])?.round() ?? 0,
+    return BranchProjectionMonth(
+      month: misToStr(j['month']) ?? '',
+      label: misToStr(j['label']) ?? misToStr(j['short']) ?? '',
+      openingAcc: misToDouble(j['opening_acc']),
+      openingPos: misToDouble(j['opening_pos']),
+      closureAcc: misToDouble(j['closure_acc']),
+      closurePos: misToDouble(j['closure_pos']),
+      dbAcc: misToDouble(j['db_acc']),
+      dbAmt: misToDouble(j['db_amt']),
+      closingAcc: misToDouble(j['closing_acc']),
+      closingPos: misToDouble(j['closing_pos']),
     );
   }
 }
@@ -1312,7 +1732,7 @@ class BranchReportResponse {
   final List<String> months; // newest first
   final BranchPortfolio? portfolio;
   final List<BranchPerformance> performance;
-  final BranchProjectionSeed? projection;
+  final List<BranchProjectionMonth> projection;
 
   const BranchReportResponse({
     this.tier = 'all',
@@ -1324,7 +1744,7 @@ class BranchReportResponse {
     this.months = const [],
     this.portfolio,
     this.performance = const [],
-    this.projection,
+    this.projection = const [],
   });
 
   factory BranchReportResponse.fromJson(dynamic raw) {
@@ -1352,9 +1772,11 @@ class BranchReportResponse {
           for (final p in j['performance'] as List)
             BranchPerformance.fromJson(p),
       ],
-      projection: j['projection'] == null
-          ? null
-          : BranchProjectionSeed.fromJson(j['projection']),
+      projection: [
+        if (j['projection'] is List)
+          for (final p in j['projection'] as List)
+            BranchProjectionMonth.fromJson(p),
+      ],
     );
   }
 }

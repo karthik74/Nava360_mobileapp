@@ -4,13 +4,22 @@
 //  one /branch-report call, entirely server-scoped (a BM/FO only ever gets
 //  their own branch; requesting another returns 403). Ports
 //  BranchReportScreen.tsx. Read-only: no figure on this screen can be edited.
+//
+//  Every figure, including the BUSINESS Projection, is a PURE READ from the
+//  server — nothing here is computed, rolled forward, or blended with any
+//  live data (see BranchProjectionMonth in mis_models.dart). Image/CSV
+//  export mirror the web's downloadImage/downloadCsv exactly.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import 'mis_export.dart';
 import 'mis_format.dart';
 import 'mis_matrix_table.dart';
 import 'mis_models.dart';
@@ -26,97 +35,13 @@ String _pct1(double? v) => v == null ? '—' : '${v.toStringAsFixed(1)}%';
 String _pct2(double? v) => v == null ? '—' : '${v.toStringAsFixed(2)}%';
 String _ratio1(double? v) => v == null ? '—' : v.toStringAsFixed(1);
 
-const _monShort = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-];
-
-class _ProjCol {
-  final String label; // "Aug-26"
-  final double? openAcc;
-  final double openPos;
-  final double? closureAcc;
-  final double closurePos;
-  final double dbAcc;
-  final double dbAmt;
-  final double? closeAcc;
-  final double closePos;
-  const _ProjCol({
-    required this.label,
-    this.openAcc,
-    required this.openPos,
-    this.closureAcc,
-    required this.closurePos,
-    required this.dbAcc,
-    required this.dbAmt,
-    this.closeAcc,
-    required this.closePos,
-  });
-}
-
-/// Months after the reporting month up to the fiscal-year end (Mar), max 12.
-List<({String key, String label})> _projectionMonths(String fromMonth) {
-  final y = int.tryParse(fromMonth.substring(0, 4)) ?? 0;
-  final m = int.tryParse(fromMonth.substring(5, 7)) ?? 1;
-  final out = <({String key, String label})>[];
-  var yy = y;
-  var mm = m + 1;
-  if (mm > 12) {
-    mm = 1;
-    yy += 1;
-  }
-  final endYear = mm > 3 ? yy + 1 : yy;
-  while ((yy < endYear || (yy == endYear && mm <= 3)) && out.length < 12) {
-    out.add((
-      key: '$yy-${mm.toString().padLeft(2, '0')}-01',
-      label: '${_monShort[mm - 1]}-${yy.toString().substring(2)}',
-    ));
-    mm += 1;
-    if (mm > 12) {
-      mm = 1;
-      yy += 1;
-    }
-  }
-  return out;
-}
-
-/// Rolls the opening balances forward with the published assumption rates.
-/// FIDELITY RULE (from the web port): accounts are rounded every month, rupees
-/// are NOT — the rupee chain runs at full precision and is rounded once at
-/// display. Rounding rupees per month drifts off the circulated PDF by the
-/// third column.
-List<_ProjCol> _buildProjection(BranchProjectionSeed seed) {
-  final months = _projectionMonths(seed.fromMonth);
-  double? openAcc = seed.openingAccounts;
-  double openPos = seed.openingPos;
-  return [
-    for (final m in months)
-      () {
-        final closureAcc = openAcc == null
-            ? null
-            : (openAcc! * (seed.closureAccPct / 100)).roundToDouble();
-        final closurePos = openPos * (seed.closurePosPct / 100);
-        final closeAcc = openAcc == null || closureAcc == null
-            ? null
-            : openAcc! - closureAcc + seed.disbAccounts;
-        final closePos = openPos - closurePos + seed.disbAmount;
-        final col = _ProjCol(
-          label: m.label,
-          openAcc: openAcc,
-          openPos: openPos,
-          closureAcc: closureAcc,
-          closurePos: closurePos,
-          dbAcc: seed.disbAccounts,
-          dbAmt: seed.disbAmount,
-          closeAcc: closeAcc,
-          closePos: closePos,
-        );
-        openAcc = closeAcc;
-        openPos = closePos;
-        return col;
-      }(),
-  ];
-}
+// The circulated PDF is a single sheet of navy-banded tables (BranchReport.css
+// on web) — reproduced here rather than restyled as generic MIS cards, so a
+// figure can be checked against the file it came from without re-reading the
+// layout first. Fixed regardless of the app's (per-company) brand colour —
+// the navy IS the report card's identity.
+const Color _brcNavy = Color(0xFF2F5597); // section bands + column headers
+const Color _brcNavyDeep = Color(0xFF1F3864); // the title bar
 
 class MisBranchReportScreen extends ConsumerStatefulWidget {
   const MisBranchReportScreen({super.key});
@@ -130,13 +55,49 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
   String? _branch; // null → the server resolves the caller's own branch
   String? _month; // null → the branch's latest month
 
+  // The report card ("brc-sheet" on web) is the capture target for the Image
+  // export — title bar through the Projection table, not the pickers or the
+  // IMPORTANT notes below it.
+  final GlobalKey _sheetKey = GlobalKey();
+  bool _shooting = false;
+  bool _exportingCsv = false;
+
   @override
   Widget build(BuildContext context) {
     final q = BranchReportQuery(branch: _branch, month: _month);
     final async = ref.watch(misBranchReportProvider(q));
+    final data = async.valueOrNull;
+    final canExport = data?.portfolio != null;
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('Branch Report')),
+      appBar: AppBar(
+        title: const Text('Branch Report'),
+        actions: [
+          IconButton(
+            tooltip: 'Download the report card as a PNG, exactly as shown',
+            onPressed: !canExport || _shooting ? null : () => _downloadImage(data!),
+            icon: _shooting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.image_outlined),
+          ),
+          IconButton(
+            tooltip: 'Export CSV',
+            onPressed:
+                !canExport || _exportingCsv ? null : () => _downloadCsv(data!),
+            icon: _exportingCsv
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.download_rounded),
+          ),
+        ],
+      ),
       body: async.when(
         loading: () => const AppLoadingBlock(height: 240),
         error: (e, _) => Padding(
@@ -149,6 +110,101 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
         data: (data) => _body(data, q),
       ),
     );
+  }
+
+  // ── PNG of the sheet, exactly as rendered ──────────────────────────────────
+  Future<void> _downloadImage(BranchReportResponse data) async {
+    if (_shooting) return;
+    setState(() => _shooting = true);
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      final boundary = _sheetKey.currentContext?.findRenderObject()
+          as RenderRepaintBoundary?;
+      if (boundary == null) return;
+      final image = await boundary.toImage(pixelRatio: 2.5);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final bytes = byteData!.buffer.asUint8List();
+      if (!mounted) return;
+      await misSaveImage(
+        context,
+        'Report Card - ${data.branch ?? 'branch'}.png',
+        bytes,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not create the report image: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _shooting = false);
+    }
+  }
+
+  // ── CSV of exactly what is on screen — mirrors downloadCsv() on the web ────
+  Future<void> _downloadCsv(BranchReportResponse data) async {
+    final pf = data.portfolio;
+    if (pf == null || _exportingCsv) return;
+    setState(() => _exportingCsv = true);
+    try {
+      String r1(double? v) => v == null ? '' : v.toStringAsFixed(1);
+      String r2(double? v) => v == null ? '' : v.toStringAsFixed(2);
+      final perf = data.performance;
+      final proj = data.projection;
+      final rows = <List<Object?>>[
+        [
+          'BRANCH REPORT CARD',
+          data.branch,
+          'BM: ${data.bmName ?? '—'}',
+          "FO's: ${data.foCount}",
+        ],
+        [],
+        ['Portfolio', 'as on ${pf.label}'],
+        [
+          '', 'Total POS', '', 'Regular', '', '1-90 Days', '', 'NPA',
+          '', 'Reg.Cust/FO', 'OD.Cust/FO',
+        ],
+        [
+          '', 'Accounts', 'Amount', 'Accounts', 'Amount', 'Accounts',
+          'Amount', 'Accounts', 'Amount', '', '',
+        ],
+        [
+          'TOTAL',
+          pf.total.accounts, pf.total.amount,
+          pf.regular.accounts, pf.regular.amount,
+          pf.od1To90.accounts, pf.od1To90.amount,
+          pf.npa.accounts, pf.npa.amount,
+          r1(pf.regCustPerFo), r1(pf.odCustPerFo),
+        ],
+        [],
+        ['Collection Performance', for (final p in perf) p.label],
+        ['FTOD', for (final p in perf) p.ftod ?? ''],
+        [
+          'Regular Collection %',
+          for (final p in perf) r2(p.regularCollectionPct),
+        ],
+        ['NPA %', for (final p in perf) r2(p.npaPct)],
+        ['NPA Coll. Amount', for (final p in perf) p.npaCollectionAmount ?? ''],
+        ['NPA Collection %', for (final p in perf) r2(p.npaCollectionPct)],
+        [],
+        ['BUSINESS Projection', for (final c in proj) c.label],
+        ['a) Opening Active A/c', for (final c in proj) c.openingAcc ?? ''],
+        ['b) Opening POS', for (final c in proj) c.openingPos ?? ''],
+        ['c) Closure A/c', for (final c in proj) c.closureAcc ?? ''],
+        ['d) Closure POS', for (final c in proj) c.closurePos ?? ''],
+        ['e) DB A/c', for (final c in proj) c.dbAcc ?? ''],
+        ['f) DB Amt', for (final c in proj) c.dbAmt ?? ''],
+        ['g) Closing Active A/c', for (final c in proj) c.closingAcc ?? ''],
+        ['h) Closing POS', for (final c in proj) c.closingPos ?? ''],
+      ];
+      final csv = misCsvDocument(rows);
+      if (!mounted) return;
+      await misSaveCsv(context, 'Report Card - ${data.branch}.csv', csv);
+    } finally {
+      if (mounted) setState(() => _exportingCsv = false);
+    }
   }
 
   Widget _body(BranchReportResponse data, BranchReportQuery q) {
@@ -244,22 +300,86 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
             MisInlineEmpty(
                 "${data.branch ?? 'This branch'} has no month-end POS loaded, so the report card can't be drawn.")
           else ...[
-            _titleCard(data),
-            const SizedBox(height: 16),
-            MisSectionTitle(
-                'Portfolio — as on ${pf.label} ${pf.month.length >= 4 ? pf.month.substring(0, 4) : ''}'),
-            _portfolioTable(pf),
-            const SizedBox(height: 18),
-            MisSectionTitle(
-                'Collection Performance — last ${data.performance.length} month${data.performance.length == 1 ? '' : 's'}'),
-            _performanceTable(data.performance),
-            if (data.projection != null) ...[
-              const SizedBox(height: 18),
-              const MisSectionTitle('Business Projection'),
-              _assumptions(data),
-              const SizedBox(height: 10),
-              _projectionTable(data.projection!),
-            ],
+            Builder(builder: (context) {
+              // The screen itself stays portrait — only the report card
+              // renders as landscape, rotated in place and anchored to the
+              // left edge (not centred), so its tables get a wide-format
+              // layout without the device actually turning. quarterTurns: 3
+              // (not 1) so the Column's first child — the title bar — lands
+              // on the LEFT edge of the rotated card, not the right.
+              //
+              // Pre-rotation width = the portrait screen's HEIGHT (matching
+              // what an actual landscape screen's width would have offered
+              // the tables) and pre-rotation height = the portrait screen's
+              // OWN width (so after the 90° turn the card's rendered width
+              // lands back exactly at the phone's real width). That's still
+              // just a viewport, not a hard cap on the content — the scroll
+              // view lets the full report scroll vertically inside it so
+              // nothing is ever clipped, however long the branch's data.
+              // (No horizontal scroll needed alongside it: every table's
+              // columns are laid out with flex, so they already always fit
+              // this exact width — nesting one here would give the inner
+              // view an unbounded height and crash the whole card.)
+              final size = MediaQuery.of(context).size;
+              return RepaintBoundary(
+                key: _sheetKey,
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: RotatedBox(
+                    quarterTurns: 3,
+                    child: SizedBox(
+                      width: size.height,
+                      height: size.width,
+                      child: SingleChildScrollView(
+                        child: Container(
+                          // The capture target needs an opaque background —
+                          // a RepaintBoundary paints transparent otherwise,
+                          // which comes out as a black PNG.
+                          color: AppColors.bg,
+                          child: ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadii.lg),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(AppRadii.lg),
+                      border: Border.all(color: AppColors.hairline),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _titleBar(data),
+                        _band('Portfolio',
+                            note:
+                                'as on ${pf.label} ${pf.month.length >= 4 ? pf.month.substring(0, 4) : ''}'),
+                        Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: _portfolioTable(pf),
+                        ),
+                        _band('Collection Performance',
+                            note:
+                                'last ${data.performance.length} month${data.performance.length == 1 ? '' : 's'}'),
+                        Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: _performanceTable(data.performance),
+                        ),
+                        if (data.projection.isNotEmpty) ...[
+                          _band('BUSINESS', center: 'Projection'),
+                          Padding(
+                            padding: const EdgeInsets.all(10),
+                            child: _projectionTable(data.projection),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+              ),
+                ),
+              ),
+              );
+            }),
             const SizedBox(height: 18),
             _important(data),
           ],
@@ -294,52 +414,95 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
     );
   }
 
-  Widget _titleCard(BranchReportResponse data) {
-    return GlassCard(
-      child: Row(
+  /// The sheet's title bar — "BRANCH REPORT CARD · <BRANCH> · BM / FO's",
+  /// navy-deep on white, matching `.brc-title` on web exactly. Phones are
+  /// narrow, so it stacks (mirrors the web's own <720px layout).
+  Widget _titleBar(BranchReportResponse data) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      color: _brcNavyDeep,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // AppColors.primary is runtime-brandable, so this Icon can't be const.
-          Icon(Icons.apartment_rounded, size: 20, color: AppColors.primary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'BRANCH REPORT CARD',
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.6,
-                    color: AppColors.muted,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  data.branch ?? '—',
-                  style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.ink),
-                ),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          Row(
             children: [
-              Text('BM: ${data.bmName ?? '—'}',
-                  style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.inkSoft)),
-              Text("FO's: ${data.foCount > 0 ? data.foCount : '—'}",
-                  style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.inkSoft)),
+              const Icon(Icons.apartment_rounded, size: 16, color: Colors.white),
+              const SizedBox(width: 8),
+              const Text(
+                'BRANCH REPORT CARD',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.8,
+                  color: Colors.white,
+                ),
+              ),
             ],
           ),
+          const SizedBox(height: 6),
+          Text(
+            (data.branch ?? '—').toUpperCase(),
+            style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.6,
+                color: Colors.white),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "BM: ${data.bmName ?? '—'}   ·   FO's: ${data.foCount > 0 ? data.foCount : '—'}",
+            style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: Colors.white70),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// One section band — "Portfolio", "Collection Performance", "BUSINESS" —
+  /// navy full width with white bold text, matching `.brc-band` on web. Either
+  /// a right-aligned [note] (Portfolio/Collection Performance) or a
+  /// [center]-aligned caption (BUSINESS · Projection).
+  Widget _band(String title, {String? note, String? center}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+      color: _brcNavy,
+      child: Row(
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.4,
+                color: Colors.white),
+          ),
+          if (center != null)
+            Expanded(
+              child: Text(
+                center,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.8,
+                    color: Colors.white),
+              ),
+            ),
+          if (note != null) ...[
+            const Spacer(),
+            Text(
+              note,
+              style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white70),
+            ),
+          ],
         ],
       ),
     );
@@ -350,7 +513,7 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
         ? const MisCell.dash()
         : MisCell(_count(c.accounts), weight: FontWeight.w700);
     MisCell amt(BrPortfolioCell c) => MisCell(_inr(c.amount));
-    return MisMatrixTable(
+    return MisFlexMatrixTable(
       stubHeader: '',
       groups: const [
         MisGroup('Total POS', 2),
@@ -363,8 +526,10 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
         'Acc', 'Amount', 'Acc', 'Amount', 'Acc', 'Amount', 'Acc', 'Amount',
         'Reg.Cust', 'OD.Cust',
       ],
-      stubWidth: 64,
-      cellWidth: 92,
+      stubFlex: 2,
+      cellFlex: 2,
+      headerColor: _brcNavy,
+      groupHeaderColor: _brcNavy,
       rows: [
         MisMatrixRow(
           lead: const MisLead('TOTAL'),
@@ -403,11 +568,12 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
         MisMatrixRow(
             lead: MisLead(name), cells: [for (final p in perf) cell(p)]);
 
-    return MisMatrixTable(
+    return MisFlexMatrixTable(
       stubHeader: 'Metric',
       headers: [for (final p in perf) header(p)],
-      stubWidth: 128,
-      cellWidth: 104,
+      stubFlex: 4,
+      cellFlex: 3,
+      headerColor: _brcNavy,
       rows: [
         row('FTOD', (p) => MisCell(_count(p.ftod))),
         row('Regular Collection %',
@@ -419,71 +585,38 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
     );
   }
 
-  Widget _assumptions(BranchReportResponse data) {
-    final seed = data.projection!;
-    Widget field(String label, String value) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(label.toUpperCase(),
-                style: const TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.4,
-                    color: AppColors.muted)),
-            const SizedBox(height: 2),
-            Text(value,
-                style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink)),
-          ],
-        );
-    return GlassCard(
-      child: Wrap(
-        spacing: 20,
-        runSpacing: 10,
-        children: [
-          field('Closure A/c', '${seed.closureAccPct}% of opening'),
-          field('Closure POS', '${seed.closurePosPct}% of opening'),
-          field('DB A/c', '${_count(seed.disbAccounts)} / month'),
-          field('DB Amt', '₹${_inr(seed.disbAmount)} / month'),
-          field(
-            'Disbursement basis',
-            seed.disbBasisMonths > 0
-                ? '${data.branch ?? 'branch'} average, last ${seed.disbBasisMonths} month(s)'
-                : 'no disbursement history',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _projectionTable(BranchProjectionSeed seed) {
-    final cols = _buildProjection(seed);
+  // Every column here is a pure read from the server (BranchProjectionMonth)
+  // — no roll-forward arithmetic, same as the web port's projection table.
+  Widget _projectionTable(List<BranchProjectionMonth> cols) {
     if (cols.isEmpty) {
       return const MisInlineEmpty('No projection window for this month.');
     }
-    MisMatrixRow row(String name, MisCell Function(_ProjCol) cell) =>
+    MisMatrixRow row(
+            String name, MisCell Function(BranchProjectionMonth) cell) =>
         MisMatrixRow(
             lead: MisLead(name), cells: [for (final c in cols) cell(c)]);
     MisCell accCell(double? v) =>
         v == null ? const MisCell.dash() : MisCell(_count(v));
-    return MisMatrixTable(
+    MisCell amtCell(double? v) =>
+        v == null ? const MisCell.dash() : MisCell(_inr(v));
+    return MisFlexMatrixTable(
       stubHeader: 'Projection',
       headers: [for (final c in cols) c.label],
-      stubWidth: 148,
-      cellWidth: 104,
+      stubFlex: 5,
+      cellFlex: 3,
+      headerColor: _brcNavy,
       rows: [
-        row('a) Opening Active A/c', (c) => accCell(c.openAcc)),
-        row('b) Opening POS', (c) => MisCell(_inr(c.openPos))),
+        row('a) Opening Active A/c', (c) => accCell(c.openingAcc)),
+        row('b) Opening POS', (c) => amtCell(c.openingPos)),
         row('c) Closure A/c', (c) => accCell(c.closureAcc)),
-        row('d) Closure POS', (c) => MisCell(_inr(c.closurePos))),
-        row('e) DB A/c', (c) => MisCell(_count(c.dbAcc))),
-        row('f) DB Amt', (c) => MisCell(_inr(c.dbAmt))),
-        row('g) Closing Active A/c', (c) => accCell(c.closeAcc)),
+        row('d) Closure POS', (c) => amtCell(c.closurePos)),
+        row('e) DB A/c', (c) => accCell(c.dbAcc)),
+        row('f) DB Amt', (c) => amtCell(c.dbAmt)),
+        row('g) Closing Active A/c', (c) => accCell(c.closingAcc)),
         row('h) Closing POS',
-            (c) => MisCell(_inr(c.closePos), weight: FontWeight.w700)),
+            (c) => c.closingPos == null
+                ? const MisCell.dash()
+                : MisCell(_inr(c.closingPos), weight: FontWeight.w700)),
       ],
     );
   }

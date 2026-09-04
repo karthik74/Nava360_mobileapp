@@ -29,13 +29,17 @@ class MisDrill {
   final String? division;
   final String? area;
   final String? branch;
-  const MisDrill({this.region, this.division, this.area, this.branch});
+  /// Loan product filter: `igl` | `fig` | `il`; null ⇒ all products.
+  final String? product;
+  const MisDrill(
+      {this.region, this.division, this.area, this.branch, this.product});
 
   Map<String, dynamic> toMap() => {
         if (region != null) 'region': region,
         if (division != null) 'division': division,
         if (area != null) 'area': area,
         if (branch != null) 'branch': branch,
+        if (product != null) 'product': product,
       };
 
   @override
@@ -44,10 +48,11 @@ class MisDrill {
       other.region == region &&
       other.division == division &&
       other.area == area &&
-      other.branch == branch;
+      other.branch == branch &&
+      other.product == product;
 
   @override
-  int get hashCode => Object.hash(region, division, area, branch);
+  int get hashCode => Object.hash(region, division, area, branch, product);
 }
 
 // ── Collection ───────────────────────────────────────────────────────────────
@@ -444,47 +449,50 @@ class DisbDailyQuery {
       Object.hash(date, range, product, region, division, area, branch);
 }
 
-// ── Analytical ("Lowest 10%") ────────────────────────────────────────────────
+// ── Analysis (leaderboard tool) ──────────────────────────────────────────────
 
-/// Collection analytical bucket field pairs (demand, collection) summed for MTD.
-const List<(String, String)> _analyticalFields = [
-  ('regular_demand', 'regular_collection'),
-  ('demand_1_30', 'collection_1_30'),
-  ('demand_31_60', 'collection_31_60'),
-  ('pnpa_demand', 'pnpa_collection'),
-  ('npa_cases', 'npa_clo_acc'),
-];
-
-class AnalyticalQuery {
+class AnalysisQuery {
   final String mode; // collection | disbursement
-  final String range; // ftd | mtd (collection only)
-  final String level; // region | division | area | branch | employee
-  final String? date;
-  final String? month;
-  final Map<String, dynamic> parent; // drilled ancestors (level -> name)
-  final String parentKey; // canonical string of `parent` for equality
-  const AnalyticalQuery({
+  final String? date; // collection: the MTD-as-of date
+  final String? month; // disbursement
+  final String bucket; // collection only, but always sent (mirrors the web)
+  final String product;
+  const AnalysisQuery({
     required this.mode,
-    required this.range,
-    required this.level,
     this.date,
     this.month,
-    this.parent = const {},
-    this.parentKey = '',
+    this.bucket = 'regular',
+    this.product = '',
   });
 
   @override
   bool operator ==(Object other) =>
-      other is AnalyticalQuery &&
+      other is AnalysisQuery &&
       other.mode == mode &&
-      other.range == range &&
-      other.level == level &&
       other.date == date &&
       other.month == month &&
-      other.parentKey == parentKey;
+      other.bucket == bucket &&
+      other.product == product;
 
   @override
-  int get hashCode => Object.hash(mode, range, level, date, month, parentKey);
+  int get hashCode => Object.hash(mode, date, month, bucket, product);
+}
+
+// ── Branch Matrix ────────────────────────────────────────────────────────────
+
+/// A `/branch-matrix` request: financial year + loan product filter.
+class BranchMatrixQuery {
+  final int? fy;
+  /// Loan product filter: `igl` | `fig` | `il`; null ⇒ all products.
+  final String? product;
+  const BranchMatrixQuery({this.fy, this.product});
+
+  @override
+  bool operator ==(Object other) =>
+      other is BranchMatrixQuery && other.fy == fy && other.product == product;
+
+  @override
+  int get hashCode => Object.hash(fy, product);
 }
 
 // ── Repository ───────────────────────────────────────────────────────────────
@@ -735,70 +743,34 @@ class MisRepository {
         parse: ClientsListResponse.fromJson,
       );
 
-  // Analytical -----------------------------------------------------------------
-  Future<List<AnalyticalRow>> _collectionAnalytical(String date, String level) =>
-      _api.get('/collection/analytical',
-          query: {'date': date, 'level': level},
-          parse: (d) => d is List
-              ? d
-                  .whereType<Map>()
-                  .map((m) => AnalyticalRow(m.cast<String, dynamic>()))
-                  .toList()
-              : <AnalyticalRow>[]);
+  // Analysis (leaderboard tool) --------------------------------------------------
+  Future<AnalysisFilters> analysisFilters() =>
+      _api.get('/analysis/filters', parse: AnalysisFilters.fromJson);
 
-  /// MTD = sum the month's analytical rows up to (and including) the date,
-  /// merged per unit client-side (the endpoint only accepts a single date).
-  Future<List<AnalyticalRow>> _collectionAnalyticalMtd(
-      String date, String level) async {
-    final dates = await collectionDates();
-    final prefix = date.length >= 7 ? date.substring(0, 7) : date;
-    final monthDates = dates
-        .where((d) =>
-            d.length >= 7 &&
-            d.substring(0, 7) == prefix &&
-            d.compareTo(date) <= 0)
-        .toList();
-    final merged = <String, Map<String, dynamic>>{};
-    for (final d in monthDates) {
-      final rows = await _collectionAnalytical(d, level);
-      for (final r in rows) {
-        final key = r.empId ?? r.unit;
-        if (key == null) continue;
-        final cur =
-            merged.putIfAbsent(key, () => {'unit': r.unit, 'emp_id': r.empId});
-        for (final f in _analyticalFields) {
-          cur[f.$1] = (misToDouble(cur[f.$1]) ?? 0) + r.field(f.$1);
-          cur[f.$2] = (misToDouble(cur[f.$2]) ?? 0) + r.field(f.$2);
-        }
-      }
-    }
-    return merged.values.map(AnalyticalRow.new).toList();
-  }
+  Future<AnalysisLeaderboard> analysisLeaderboard(AnalysisQuery q) => _api.get(
+        '/analysis/leaderboard',
+        query: {
+          'mode': q.mode,
+          'date': q.date,
+          'month': q.month,
+          'bucket': q.bucket,
+          'product': _p(q.product),
+        },
+        parse: AnalysisLeaderboard.fromJson,
+      );
 
-  Future<List<AnalyticalRow>> analyticalRows(AnalyticalQuery q) async {
-    if (q.mode == 'disbursement') {
-      if (q.month == null) return [];
-      return _api.get('/disbursement/by-unit',
-          query: {'month': q.month, 'level': q.level, ...q.parent},
-          parse: (d) => d is List
-              ? d
-                  .whereType<Map>()
-                  .map((m) => AnalyticalRow(m.cast<String, dynamic>()))
-                  .toList()
-              : <AnalyticalRow>[]);
-    }
-    if (q.date == null) return [];
-    return q.range == 'mtd'
-        ? _collectionAnalyticalMtd(q.date!, q.level)
-        : _collectionAnalytical(q.date!, q.level);
-  }
-
-  Future<int> analyticalWorking(AnalyticalQuery q) {
-    if (q.date == null) return Future.value(0);
-    return _api.get('/employees/working-counts',
-        query: {'date': q.date, 'level': q.level, ...q.parent},
-        parse: (d) => misToInt((d is Map ? d['working'] : null)) ?? 0);
-  }
+  /// The caller's own national rank at every level they belong to. Unscoped.
+  Future<AnalysisMyRank> analysisMyRank(AnalysisQuery q) => _api.get(
+        '/analysis/my-rank',
+        query: {
+          'mode': q.mode,
+          'date': q.date,
+          'month': q.month,
+          'bucket': q.bucket,
+          'product': _p(q.product),
+        },
+        parse: AnalysisMyRank.fromJson,
+      );
 
   // Comparison -----------------------------------------------------------------
   Future<CompareDailyResponse> compareDaily(
@@ -820,6 +792,16 @@ class MisRepository {
           if (branch != null) 'branch': branch,
         },
         parse: CompareDailyResponse.fromJson,
+      );
+
+  // Branch Matrix (full-access CEO/Director only; server 403s anyone else) -----
+  /// One call returns every branch, every month in the selected financial
+  /// year, every metric. Omit `fy` for the latest FY with data; omit
+  /// `product` for all products.
+  Future<BranchMatrixResponse> branchMatrix(BranchMatrixQuery q) => _api.get(
+        '/branch-matrix',
+        query: {'fy': q.fy, 'product': q.product},
+        parse: BranchMatrixResponse.fromJson,
       );
 
   // Hierarchy (cascading scope filter options) ---------------------------------
@@ -1068,13 +1050,16 @@ final misDailyPlanPendingProvider = FutureProvider.autoDispose
   (ref, q) => ref.watch(misRepositoryProvider).dailyPlanPending(q.date, q.type),
 );
 
-final misAnalyticalRowsProvider =
-    FutureProvider.autoDispose.family<List<AnalyticalRow>, AnalyticalQuery>(
-  (ref, q) => ref.watch(misRepositoryProvider).analyticalRows(q),
+final misAnalysisFiltersProvider = FutureProvider.autoDispose<AnalysisFilters>(
+  (ref) => ref.watch(misRepositoryProvider).analysisFilters(),
 );
-final misAnalyticalWorkingProvider =
-    FutureProvider.autoDispose.family<int, AnalyticalQuery>(
-  (ref, q) => ref.watch(misRepositoryProvider).analyticalWorking(q),
+final misAnalysisLeaderboardProvider =
+    FutureProvider.autoDispose.family<AnalysisLeaderboard, AnalysisQuery>(
+  (ref, q) => ref.watch(misRepositoryProvider).analysisLeaderboard(q),
+);
+final misAnalysisMyRankProvider =
+    FutureProvider.autoDispose.family<AnalysisMyRank, AnalysisQuery>(
+  (ref, q) => ref.watch(misRepositoryProvider).analysisMyRank(q),
 );
 
 final misDailyPlanBranchesProvider =
@@ -1104,6 +1089,11 @@ final misEmployeePersonalProvider =
 final misBranchLocationsProvider =
     FutureProvider.autoDispose<List<BranchLocationRow>>(
   (ref) => ref.watch(misRepositoryProvider).branchLocations(),
+);
+
+final misBranchMatrixProvider =
+    FutureProvider.autoDispose.family<BranchMatrixResponse, BranchMatrixQuery>(
+  (ref, q) => ref.watch(misRepositoryProvider).branchMatrix(q),
 );
 
 // Cascading scope-filter options (child level loaded by parent id).
