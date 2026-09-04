@@ -83,7 +83,22 @@ import 'features/travel/travel_claims_screen.dart';
 import 'features/travel/travel_claim_form_screen.dart';
 import 'features/travel/travel_claim_detail_screen.dart';
 import 'features/travel/travel_approvals_screen.dart';
+import 'features/purchase_orders/po_list_screen.dart';
+import 'features/purchase_orders/po_form_screen.dart';
 import 'features/travel/travel_claim_review_screen.dart';
+import 'features/rent_management/rent_list_screen.dart';
+import 'features/rent_management/rent_branch_form_screen.dart';
+import 'features/rent_management/rent_payable_screen.dart';
+import 'features/rent_management/rent_notice_form_screen.dart';
+import 'features/rent_management/rent_utility_bill_form_screen.dart';
+import 'features/rent_management/rent_repository.dart' show isoPeriod;
+import 'features/mail_record/mail_list_screen.dart';
+import 'features/mail_record/mail_record_form_screen.dart';
+import 'features/mail_record/mail_shipment_screen.dart';
+import 'features/mail_record/mail_complaint_form_screen.dart';
+import 'features/mail_record/mail_complaint_screen.dart';
+import 'features/mail_record/mail_complaint_department_form_screen.dart';
+import 'features/letterhead/letterhead_screen.dart';
 
 final goRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -396,6 +411,101 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, state) => TravelClaimReviewScreen(
           claimId: int.parse(state.pathParameters['id']!),
         ),
+      ),
+      // ── Admin Tools · Purchase Orders ──
+      GoRoute(
+        path: '/admin/purchase-orders',
+        builder: (_, __) => const PoListScreen(),
+      ),
+      // Static sub-route must precede '/admin/purchase-orders/:id' so it
+      // isn't captured as an id.
+      GoRoute(
+        path: '/admin/purchase-orders/new',
+        builder: (_, __) => const PoFormScreen(),
+      ),
+      GoRoute(
+        path: '/admin/purchase-orders/:id',
+        builder: (_, state) => PoFormScreen(
+          poId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      // ── Admin Tools · Rent Management ──
+      GoRoute(
+        path: '/admin/rent',
+        builder: (_, __) => const RentListScreen(),
+      ),
+      // Static sub-routes must precede any '/admin/rent/.../:id' route so
+      // they aren't captured as an id.
+      GoRoute(
+        path: '/admin/rent/branches/new',
+        builder: (_, __) => const RentBranchFormScreen(),
+      ),
+      GoRoute(
+        path: '/admin/rent/branches/:id',
+        builder: (_, state) => RentBranchFormScreen(
+          branchId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/admin/rent/payable/:id',
+        builder: (_, state) => RentPayableScreen(
+          payableId: int.parse(state.pathParameters['id']!),
+          period: state.uri.queryParameters['period'] ?? isoPeriod(DateTime.now()),
+        ),
+      ),
+      GoRoute(
+        path: '/admin/rent/notices/new',
+        builder: (_, __) => const RentNoticeFormScreen(),
+      ),
+      GoRoute(
+        path: '/admin/rent/utility-bills/new',
+        builder: (_, __) => const RentUtilityBillFormScreen(),
+      ),
+      // ── Admin Tools · Mail Record ──
+      GoRoute(
+        path: '/admin/mail',
+        builder: (_, __) => const MailListScreen(),
+      ),
+      // Static sub-routes must precede any '/admin/mail/.../:id' route so
+      // they aren't captured as an id.
+      GoRoute(
+        path: '/admin/mail/records/new',
+        builder: (_, __) => const MailRecordFormScreen(),
+      ),
+      GoRoute(
+        path: '/admin/mail/records/:id',
+        builder: (_, state) => MailRecordFormScreen(
+          recordId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/admin/mail/shipments/new',
+        builder: (_, __) => const MailShipmentScreen(),
+      ),
+      GoRoute(
+        path: '/admin/mail/complaints/new',
+        builder: (_, __) => const MailComplaintFormScreen(),
+      ),
+      GoRoute(
+        path: '/admin/mail/complaints/:id',
+        builder: (_, state) => MailComplaintScreen(
+          complaintId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/admin/mail/complaint-departments/new',
+        builder: (_, __) => const MailComplaintDepartmentFormScreen(),
+      ),
+      GoRoute(
+        path: '/admin/mail/complaint-departments/:id',
+        builder: (_, state) => MailComplaintDepartmentFormScreen(
+          deptId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      // ── Admin Tools · Letter Head ──
+      GoRoute(
+        path: '/admin/letterhead',
+        builder: (_, __) => const LetterheadScreen(),
       ),
       ShellRoute(
         builder: (_, __, child) => HomeShell(child: child),

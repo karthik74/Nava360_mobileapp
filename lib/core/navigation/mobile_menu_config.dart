@@ -125,6 +125,26 @@ const List<MobileMenuItem> kMobileMenu = [
   // travel-claim / travel-plan permission (any of create/view).
   MobileMenuItem(key: 'hrms.travelClaims', label: 'Travel Claims', route: '/travel/claims', icon: Icons.flight_takeoff_rounded, module: MobileModule.hrms, order: 9, requiredPermissions: ['TRAVEL_CLAIM_CREATE', 'TRAVEL_CLAIM_VIEW']),
   MobileMenuItem(key: 'hrms.travelPlans', label: 'Travel Plans', route: '/travel/plans', icon: Icons.luggage_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['TRAVEL_PLAN_CREATE', 'TRAVEL_PLAN_VIEW']),
+  // Admin Tools · Purchase Orders — first of the four ported office-admin apps
+  // (rent, mail, purchase orders, letterhead) to reach mobile. Same
+  // ADMIN_PO_VIEW gate as the web sidebar entry; moduleCode matches the web
+  // top-level "adminTools" menuConfig key for the ENABLED_MODULES toggle.
+  MobileMenuItem(key: 'hrms.purchaseOrders', label: 'Purchase Orders', route: '/admin/purchase-orders', icon: Icons.receipt_long_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['ADMIN_PO_VIEW'], moduleCode: 'adminTools'),
+  // Admin Tools · Rent Management — second of the four ported office-admin apps
+  // (rent, mail, purchase orders, letterhead) to reach mobile. Same
+  // ADMIN_RENT_VIEW gate as the web sidebar entry; moduleCode matches the web
+  // top-level "adminTools" menuConfig key for the ENABLED_MODULES toggle.
+  MobileMenuItem(key: 'hrms.rentManagement', label: 'Rent Management', route: '/admin/rent', icon: Icons.home_work_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['ADMIN_RENT_VIEW'], moduleCode: 'adminTools'),
+  // Admin Tools · Mail Record — third of the four ported office-admin apps
+  // (rent, mail, purchase orders, letterhead) to reach mobile. Same
+  // ADMIN_MAIL_VIEW gate as the web sidebar entry; moduleCode matches the web
+  // top-level "adminTools" menuConfig key for the ENABLED_MODULES toggle.
+  MobileMenuItem(key: 'hrms.mailRecord', label: 'Mail Record', route: '/admin/mail', icon: Icons.mail_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['ADMIN_MAIL_VIEW'], moduleCode: 'adminTools'),
+  // Admin Tools · Letter Head — fourth and last of the ported office-admin apps
+  // (rent, mail, purchase orders, letterhead) to reach mobile. Same
+  // ADMIN_LETTERHEAD_VIEW gate as the web sidebar entry; moduleCode matches the
+  // web top-level "adminTools" menuConfig key for the ENABLED_MODULES toggle.
+  MobileMenuItem(key: 'hrms.letterhead', label: 'Letter Head', route: '/admin/letterhead', icon: Icons.description_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['ADMIN_LETTERHEAD_VIEW'], moduleCode: 'adminTools'),
   MobileMenuItem(key: 'hrms.announcements', label: 'Announcements', route: '/announcements', icon: Icons.campaign_rounded, module: MobileModule.hrms, order: 11),
   MobileMenuItem(key: 'hrms.policies', label: 'Policies', route: '/policies', icon: Icons.description_rounded, module: MobileModule.hrms, order: 12),
   MobileMenuItem(key: 'hrms.meetings', label: 'My Meetings', route: '/my-meetings', icon: Icons.event_rounded, module: MobileModule.hrms, order: 13),
@@ -145,24 +165,23 @@ const List<MobileMenuItem> kMobileMenu = [
   // "Report a concern" button (keeps the reporting entry low-profile).
 
   // ── MIS · Grow With Me module (its OWN module, not under HRMS) ──
-  // A separate backend + auto-login (derived from the nava360 identity). Ungated
-  // for now — mirrors the web sidebar, where every logged-in user gets a MIS
-  // session; add requiredPermissions here to limit MIS to specific roles.
+  // A separate backend + auto-login (derived from the nava360 identity). Gated
+  // on MIS_VIEW, same as the web sidebar's MIS entry (src/nav/menuConfig.ts).
   // Order mirrors the website's MIS menu.
-  MobileMenuItem(key: 'mis.dashboard', label: 'Dashboard', route: '/mis', icon: Icons.dashboard_rounded, module: MobileModule.mis, order: 1),
-  MobileMenuItem(key: 'mis.portfolio', label: 'Portfolio', route: '/mis/portfolio', icon: Icons.pie_chart_rounded, module: MobileModule.mis, order: 2),
-  MobileMenuItem(key: 'mis.collection', label: 'Collection', route: '/mis/collection', icon: Icons.payments_rounded, module: MobileModule.mis, order: 3),
-  MobileMenuItem(key: 'mis.disbursement', label: 'Disbursement', route: '/mis/disbursement', icon: Icons.account_balance_rounded, module: MobileModule.mis, order: 4),
-  MobileMenuItem(key: 'mis.hourly', label: 'Hourly', route: '/mis/hourly', icon: Icons.schedule_rounded, module: MobileModule.mis, order: 5),
-  MobileMenuItem(key: 'mis.comparison', label: 'Comparison', route: '/mis/comparison', icon: Icons.compare_arrows_rounded, module: MobileModule.mis, order: 6),
-  MobileMenuItem(key: 'mis.analytical', label: 'Analytical', route: '/mis/analytical', icon: Icons.query_stats_rounded, module: MobileModule.mis, order: 7),
-  MobileMenuItem(key: 'mis.dailyPlan', label: 'Daily Plan', route: '/mis/daily-plan', icon: Icons.edit_note_rounded, module: MobileModule.mis, order: 8),
-  MobileMenuItem(key: 'mis.feedback', label: 'Feedback', route: '/mis/feedback', icon: Icons.forum_rounded, module: MobileModule.mis, order: 9),
+  MobileMenuItem(key: 'mis.dashboard', label: 'Dashboard', route: '/mis', icon: Icons.dashboard_rounded, module: MobileModule.mis, order: 1, requiredPermissions: ['MIS_VIEW']),
+  MobileMenuItem(key: 'mis.portfolio', label: 'Portfolio', route: '/mis/portfolio', icon: Icons.pie_chart_rounded, module: MobileModule.mis, order: 2, requiredPermissions: ['MIS_VIEW']),
+  MobileMenuItem(key: 'mis.collection', label: 'Collection', route: '/mis/collection', icon: Icons.payments_rounded, module: MobileModule.mis, order: 3, requiredPermissions: ['MIS_VIEW']),
+  MobileMenuItem(key: 'mis.disbursement', label: 'Disbursement', route: '/mis/disbursement', icon: Icons.account_balance_rounded, module: MobileModule.mis, order: 4, requiredPermissions: ['MIS_VIEW']),
+  MobileMenuItem(key: 'mis.hourly', label: 'Hourly', route: '/mis/hourly', icon: Icons.schedule_rounded, module: MobileModule.mis, order: 5, requiredPermissions: ['MIS_VIEW']),
+  MobileMenuItem(key: 'mis.comparison', label: 'Comparison', route: '/mis/comparison', icon: Icons.compare_arrows_rounded, module: MobileModule.mis, order: 6, requiredPermissions: ['MIS_VIEW']),
+  MobileMenuItem(key: 'mis.analytical', label: 'Analytical', route: '/mis/analytical', icon: Icons.query_stats_rounded, module: MobileModule.mis, order: 7, requiredPermissions: ['MIS_VIEW']),
+  MobileMenuItem(key: 'mis.dailyPlan', label: 'Daily Plan', route: '/mis/daily-plan', icon: Icons.edit_note_rounded, module: MobileModule.mis, order: 8, requiredPermissions: ['MIS_VIEW']),
+  MobileMenuItem(key: 'mis.feedback', label: 'Feedback', route: '/mis/feedback', icon: Icons.forum_rounded, module: MobileModule.mis, order: 9, requiredPermissions: ['MIS_VIEW']),
   // Per-branch report card — auto-scoped by the API: a BM/FO only ever sees
   // their own branch here (mirrors the web sidebar's Branch Report entry).
-  MobileMenuItem(key: 'mis.branchReport', label: 'Branch Report', route: '/mis/branch-report', icon: Icons.assessment_rounded, module: MobileModule.mis, order: 10),
-  MobileMenuItem(key: 'mis.employees', label: 'Directory', route: '/mis/employees', icon: Icons.contacts_rounded, module: MobileModule.mis, order: 11),
-  MobileMenuItem(key: 'mis.locations', label: 'Locations', route: '/mis/locations', icon: Icons.map_rounded, module: MobileModule.mis, order: 12),
+  MobileMenuItem(key: 'mis.branchReport', label: 'Branch Report', route: '/mis/branch-report', icon: Icons.assessment_rounded, module: MobileModule.mis, order: 10, requiredPermissions: ['MIS_VIEW']),
+  MobileMenuItem(key: 'mis.employees', label: 'Directory', route: '/mis/employees', icon: Icons.contacts_rounded, module: MobileModule.mis, order: 11, requiredPermissions: ['MIS_VIEW']),
+  MobileMenuItem(key: 'mis.locations', label: 'Locations', route: '/mis/locations', icon: Icons.map_rounded, module: MobileModule.mis, order: 12, requiredPermissions: ['MIS_VIEW']),
 
   // ── Payroll module cards (self-service only) ──
   MobileMenuItem(key: 'pay.payslips', label: 'My Payslips', route: '/my-payslips', icon: Icons.receipt_long_rounded, module: MobileModule.payroll, order: 1),
