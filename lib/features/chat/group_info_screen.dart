@@ -27,7 +27,6 @@ class GroupInfoScreen extends ConsumerWidget {
             ?.where((c) => c.id == this.conversation.id)
             .firstOrNull ??
         this.conversation;
-    final isCreator = conversation.createdByEmployeeId == myEmpId;
     final myMember = conversation.members
         .where((m) => m.employeeId == myEmpId)
         .firstOrNull;
@@ -174,9 +173,10 @@ class GroupInfoScreen extends ConsumerWidget {
                   myEmployeeId: myEmpId,
                   conversationId: conversation.id,
                 )),
-            if (isCreator) ...[
-              const SizedBox(height: 20),
-              // Leave group button
+            // Leave group — any member may leave, not just the creator/admins
+            // (mirrors ChatPage.tsx on web).
+            const SizedBox(height: 20),
+            // Leave group button
               GlassCard(
                 padding: EdgeInsets.zero,
                 shadow: AppShadows.soft,
@@ -206,7 +206,6 @@ class GroupInfoScreen extends ConsumerWidget {
                   onTap: () => _confirmLeave(context, ref),
                 ),
               ),
-            ],
             if (isAdmin) ...[
               const SizedBox(height: 12),
               // Delete group (for everyone)
