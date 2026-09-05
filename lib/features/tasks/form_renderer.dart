@@ -89,6 +89,8 @@ Map<String, String> validateForm(
     // Assigned fields are owned by the assigner — skip unless the assignee is
     // also the assigner (self-task).
     if (f.assigned && !includeAssigned) continue;
+    // Display-only fields are shown, never filled, never required.
+    if (f.readOnly) continue;
     // A section header asks nothing, and a system field is filled for the user.
     // Marking either "required" in the builder must not block a submission the
     // user has no way to complete.
@@ -190,7 +192,7 @@ class _FieldBlock extends StatelessWidget {
                       ),
                       children: [
                         TextSpan(text: field.label),
-                        if (field.required && !lockedAssigned)
+                        if (field.required && !lockedAssigned && !field.readOnly)
                           const TextSpan(
                             text: ' *',
                             style: TextStyle(color: Colors.red),
@@ -219,12 +221,29 @@ class _FieldBlock extends StatelessWidget {
               ],
             ),
           ),
-        _FieldInput(
-          field: field,
-          value: value,
-          onChanged: onChanged,
-          readOnly: effectiveReadOnly,
-        ),
+        if (field.readOnly)
+          // Display only, as designed on the template: the placeholder is the fixed
+          // note; nothing to type, nothing validated, nothing submitted.
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              (field.placeholder ?? '').trim().isEmpty ? '—' : field.placeholder!.trim(),
+              style: const TextStyle(fontSize: 13.5, color: Colors.black87, height: 1.4),
+            ),
+          )
+        else
+          _FieldInput(
+            field: field,
+            value: value,
+            onChanged: onChanged,
+            readOnly: effectiveReadOnly,
+          ),
         if (field.helpText != null && field.helpText!.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),

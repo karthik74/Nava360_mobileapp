@@ -615,6 +615,10 @@ class FormFieldDef {
   /// The assignee sees the value but cannot edit it.
   final bool assigned;
 
+  /// Display only, as designed on the template: the placeholder (or label) is
+  /// shown as static text and the assignee cannot fill the field. Never required.
+  final bool readOnly;
+
   /// The question script, for a [FieldType.videoQa] field. Null for every other type.
   final VideoQaConfig? videoQa;
 
@@ -640,6 +644,7 @@ class FormFieldDef {
     this.visibleWhen = const [],
     this.visibleWhenLogic = 'all',
     this.assigned = false,
+    this.readOnly = false,
     this.videoQa,
     this.mediaSource = MediaSource.both,
   });
@@ -668,6 +673,7 @@ class FormFieldDef {
       visibleWhen: conds,
       visibleWhenLogic: (j['visibleWhenLogic'] as String?) ?? 'all',
       assigned: j['assigned'] == true,
+      readOnly: j['readOnly'] == true,
       videoQa: j['videoQa'] is Map<String, dynamic>
           ? VideoQaConfig.fromJson(j['videoQa'] as Map<String, dynamic>)
           : null,
