@@ -569,6 +569,28 @@ class VideoQaConfig {
   }
 }
 
+/// Where an image / multiimage / video field may take its media from. Set per field
+/// on the web template builder (`mediaSource`); missing or unknown means [both].
+enum MediaSource {
+  both,
+  gallery,
+  camera;
+
+  bool get allowsGallery => this != camera;
+  bool get allowsCamera => this != gallery;
+
+  static MediaSource from(String? raw) {
+    switch (raw) {
+      case 'gallery':
+        return MediaSource.gallery;
+      case 'camera':
+        return MediaSource.camera;
+      default:
+        return MediaSource.both;
+    }
+  }
+}
+
 class FormFieldDef {
   final String id;
   final FieldType type;
@@ -596,6 +618,10 @@ class FormFieldDef {
   /// The question script, for a [FieldType.videoQa] field. Null for every other type.
   final VideoQaConfig? videoQa;
 
+  /// Where an image / multiimage / video field may take its media from, as designed
+  /// on the web template builder. Defaults to [MediaSource.both].
+  final MediaSource mediaSource;
+
   FormFieldDef({
     required this.id,
     required this.type,
@@ -615,6 +641,7 @@ class FormFieldDef {
     this.visibleWhenLogic = 'all',
     this.assigned = false,
     this.videoQa,
+    this.mediaSource = MediaSource.both,
   });
 
   factory FormFieldDef.fromJson(Map<String, dynamic> j) {
@@ -644,6 +671,7 @@ class FormFieldDef {
       videoQa: j['videoQa'] is Map<String, dynamic>
           ? VideoQaConfig.fromJson(j['videoQa'] as Map<String, dynamic>)
           : null,
+      mediaSource: MediaSource.from(j['mediaSource'] as String?),
     );
   }
 }

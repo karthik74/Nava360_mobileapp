@@ -465,11 +465,12 @@ class _FieldInput extends StatelessWidget {
 
       case FieldType.image:
       case FieldType.webcam:
-        // Single image, camera-first.
+        // Single image; the template decides gallery / live camera / either.
         return _FileField(
           value: value,
           multi: false,
           imageOnly: true,
+          mediaSource: field.mediaSource,
           readOnly: readOnly,
           onChanged: onChanged,
         );
@@ -479,6 +480,17 @@ class _FieldInput extends StatelessWidget {
           value: value,
           multi: true,
           imageOnly: true,
+          mediaSource: field.mediaSource,
+          readOnly: readOnly,
+          onChanged: onChanged,
+        );
+
+      case FieldType.video:
+        return _FileField(
+          value: value,
+          multi: false,
+          video: true,
+          mediaSource: field.mediaSource,
           readOnly: readOnly,
           onChanged: onChanged,
         );
@@ -493,7 +505,6 @@ class _FieldInput extends StatelessWidget {
         );
 
       case FieldType.file:
-      case FieldType.video:
       case FieldType.audio:
         return _FileField(
           value: value,
@@ -919,6 +930,8 @@ class _FileField extends ConsumerStatefulWidget {
     required this.readOnly,
     required this.onChanged,
     this.imageOnly = false,
+    this.video = false,
+    this.mediaSource = MediaSource.both,
   });
 
   final dynamic value;
@@ -928,6 +941,14 @@ class _FileField extends ConsumerStatefulWidget {
 
   /// When true the picker offers only camera + gallery (no document picker).
   final bool imageOnly;
+
+  /// A `video` field: "camera" records a clip and "gallery" picks an existing one.
+  final bool video;
+
+  /// Which sources the template allows for an image / multiimage / video field.
+  /// [MediaSource.both] keeps the classic camera-or-gallery sheet; a single source
+  /// skips the sheet and opens that source directly.
+  final MediaSource mediaSource;
 
   @override
   ConsumerState<_FileField> createState() => _FileFieldState();
@@ -948,6 +969,11 @@ class _FileFieldState extends ConsumerState<_FileField> {
 
   Future<void> _addFromCamera() async {
     final picker = ImagePicker();
+    if (widget.video) {
+      final clip = await picker.pickVideo(source: ImageSource.camera);
+      if (clip != null) await _uploadPaths([(clip.path, clip.name)]);
+      return;
+    }
     final shot = await picker.pickImage(
       source: ImageSource.camera,
       imageQuality: 70,
@@ -958,6 +984,11 @@ class _FileFieldState extends ConsumerState<_FileField> {
 
   Future<void> _addFromGallery() async {
     final picker = ImagePicker();
+    if (widget.video) {
+      final clip = await picker.pickVideo(source: ImageSource.gallery);
+      if (clip != null) await _uploadPaths([(clip.path, clip.name)]);
+      return;
+    }
     if (widget.multi) {
       final shots = await picker.pickMultiImage(imageQuality: 70, maxWidth: 2000);
       await _uploadPaths(shots.map((x) => (x.path, x.name)).toList());
@@ -1017,7 +1048,23 @@ class _FileFieldState extends ConsumerState<_FileField> {
     _emit(next);
   }
 
+  bool get _mediaOnly => widget.imageOnly || widget.video;
+
   Future<void> _showAddSheet() async {
+    final allowCamera = widget.mediaSource.allowsCamera;
+    final allowGallery = widget.mediaSource.allowsGallery;
+
+    // A template that fixes the source gets no sheet: the camera (or gallery)
+    // opens straight away, exactly as designed.
+    if (_mediaOnly && allowCamera && !allowGallery) {
+      await _addFromCamera();
+      return;
+    }
+    if (_mediaOnly && allowGallery && !allowCamera) {
+      await _addFromGallery();
+      return;
+    }
+
     final action = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.white,
@@ -1028,17 +1075,25 @@ class _FileFieldState extends ConsumerState<_FileField> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.photo_camera_outlined),
-              title: const Text('Take a photo'),
-              onTap: () => Navigator.pop(ctx, 'camera'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: Text(widget.multi ? 'Choose photos' : 'Choose a photo'),
-              onTap: () => Navigator.pop(ctx, 'gallery'),
-            ),
-            if (!widget.imageOnly)
+            if (allowCamera)
+              ListTile(
+                leading: Icon(widget.video
+                    ? Icons.videocam_outlined
+                    : Icons.photo_camera_outlined),
+                title: Text(widget.video ? 'Record a video' : 'Take a photo'),
+                onTap: () => Navigator.pop(ctx, 'camera'),
+              ),
+            if (allowGallery)
+              ListTile(
+                leading: Icon(widget.video
+                    ? Icons.video_library_outlined
+                    : Icons.photo_library_outlined),
+                title: Text(widget.video
+                    ? 'Choose a video'
+                    : (widget.multi ? 'Choose photos' : 'Choose a photo')),
+                onTap: () => Navigator.pop(ctx, 'gallery'),
+              ),
+            if (!_mediaOnly)
               ListTile(
                 leading: const Icon(Icons.attach_file_rounded),
                 title: Text(widget.multi ? 'Attach files' : 'Attach a file'),
@@ -1059,6 +1114,27 @@ class _FileFieldState extends ConsumerState<_FileField> {
         await _addDocuments();
         break;
     }
+  }
+
+  /// Button icon: names the fixed source when the template chose one.
+  IconData get _addIcon {
+    if (!_mediaOnly || widget.mediaSource == MediaSource.both) return Icons.add_rounded;
+    if (widget.mediaSource == MediaSource.camera) {
+      return widget.video ? Icons.videocam_outlined : Icons.photo_camera_outlined;
+    }
+    return widget.video ? Icons.video_library_outlined : Icons.photo_library_outlined;
+  }
+
+  String _addLabel(bool empty) {
+    if (!_mediaOnly || widget.mediaSource == MediaSource.both) {
+      return empty ? 'Add attachment' : 'Add more';
+    }
+    if (widget.mediaSource == MediaSource.camera) {
+      if (widget.video) return empty ? 'Record video' : 'Record another';
+      return empty ? 'Take photo' : 'Take another';
+    }
+    if (widget.video) return empty ? 'Choose video' : 'Choose another';
+    return empty ? (widget.multi ? 'Choose photos' : 'Choose photo') : 'Choose more';
   }
 
   @override
@@ -1090,10 +1166,8 @@ class _FileFieldState extends ConsumerState<_FileField> {
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.add_rounded, size: 18),
-            label: Text(_busy
-                ? 'Uploading…'
-                : (files.isEmpty ? 'Add attachment' : 'Add more')),
+                : Icon(_addIcon, size: 18),
+            label: Text(_busy ? 'Uploading…' : _addLabel(files.isEmpty)),
           )
         else if (files.isEmpty)
           Text(

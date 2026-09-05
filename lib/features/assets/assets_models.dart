@@ -12,6 +12,11 @@ class AssetAssignment {
   final String assetTag;
   final String? serialNumber;
   final String? imeiNumber;
+  /// What the asset is — shown on My Assets. Null from older backends.
+  final String? assetType;
+  final String? brand;
+  final String? model;
+  final String? category;
   final String assignedToType;
   final int? employeeId;
   final String? employeeName;
@@ -32,6 +37,10 @@ class AssetAssignment {
     required this.assignedToType,
     this.serialNumber,
     this.imeiNumber,
+    this.assetType,
+    this.brand,
+    this.model,
+    this.category,
     required this.acknowledgementRequired,
     required this.acknowledgementStatus,
     required this.status,
@@ -51,6 +60,10 @@ class AssetAssignment {
         assetTag: j['assetTag'] as String? ?? '',
         serialNumber: j['serialNumber'] as String?,
         imeiNumber: j['imeiNumber'] as String?,
+        assetType: j['assetType'] as String?,
+        brand: j['brand'] as String?,
+        model: j['model'] as String?,
+        category: j['category'] as String?,
         assignedToType: j['assignedToType'] as String? ?? 'EMPLOYEE',
         employeeId: (j['employeeId'] as num?)?.toInt(),
         employeeName: j['employeeName'] as String?,
