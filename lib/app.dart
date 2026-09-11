@@ -99,6 +99,11 @@ import 'features/mail_record/mail_complaint_form_screen.dart';
 import 'features/mail_record/mail_complaint_screen.dart';
 import 'features/mail_record/mail_complaint_department_form_screen.dart';
 import 'features/letterhead/letterhead_screen.dart';
+import 'features/np/np_dashboard_screen.dart';
+import 'features/np/np_candidate_form_screen.dart';
+import 'features/np/np_candidate_detail_screen.dart';
+import 'features/np/np_bgv_screen.dart';
+import 'features/np/np_agreement_screen.dart';
 
 final goRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -506,6 +511,41 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/letterhead',
         builder: (_, __) => const LetterheadScreen(),
+      ),
+      // ── NP (Navachetana Prathinidhi) Onboarding ──
+      // 13-step BM→AM→DM→OPS workflow over /api/np. Static '/new' precedes
+      // the ':id' routes so it isn't captured as an id.
+      GoRoute(
+        path: '/np',
+        builder: (_, __) => const NpDashboardScreen(),
+      ),
+      GoRoute(
+        path: '/np/candidates/new',
+        builder: (_, __) => const NpCandidateFormScreen(),
+      ),
+      GoRoute(
+        path: '/np/candidates/:id',
+        builder: (_, state) => NpCandidateDetailScreen(
+          candidateId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/np/candidates/:id/edit',
+        builder: (_, state) => NpCandidateFormScreen(
+          candidateId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/np/candidates/:id/bgv',
+        builder: (_, state) => NpBgvScreen(
+          candidateId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/np/candidates/:id/agreement',
+        builder: (_, state) => NpAgreementScreen(
+          candidateId: int.parse(state.pathParameters['id']!),
+        ),
       ),
       ShellRoute(
         builder: (_, __, child) => HomeShell(child: child),

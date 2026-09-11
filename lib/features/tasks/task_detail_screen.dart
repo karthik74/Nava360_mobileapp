@@ -61,9 +61,10 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
   /// Why the last [_captureLatLng] call produced no fix, for the blocking dialog.
   String? _locationFailure;
 
-  /// One-shot GPS fix for geo-tagging a completion. Completing a task REQUIRES
-  /// a location (the backend refuses a submission without one), so a null here
-  /// aborts the completion and [_locationFailure] explains what to fix.
+  /// One-shot GPS fix for geo-tagging a completion. When the task's template
+  /// makes location mandatory the backend refuses a submission without one, so
+  /// a null here aborts the completion and [_locationFailure] explains what to
+  /// fix; otherwise the completion simply goes ahead untagged.
   Future<({double lat, double lng})?> _captureLatLng() async {
     _locationFailure = null;
     try {
@@ -161,10 +162,11 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
       final repo = ref.read(taskRepositoryProvider);
 
       // Capture a single GPS fix up front and geo-tag whichever call performs
-      // the completion. Mandatory — the backend refuses a submission without it,
-      // so stop here (before any status change) and tell the employee why.
+      // the completion. Mandatory only when the template says so — then the
+      // backend refuses a submission without it, so stop here (before any
+      // status change) and tell the employee why. Otherwise best-effort.
       final loc = await _captureLatLng();
-      if (loc == null) {
+      if (loc == null && task.completionLocationRequired) {
         if (!mounted) return;
         setState(() => _submitting = false);
         await _showLocationRequired();
@@ -189,8 +191,8 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
         result = await repo.submitFormResponse(
           task.id,
           jsonEncode(pruned),
-          lat: loc.lat,
-          lng: loc.lng,
+          lat: loc?.lat,
+          lng: loc?.lng,
         );
       } else {
         final target =
@@ -198,8 +200,8 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
         result = await repo.updateStatus(
           task.id,
           target,
-          lat: loc.lat,
-          lng: loc.lng,
+          lat: loc?.lat,
+          lng: loc?.lng,
         );
       }
 

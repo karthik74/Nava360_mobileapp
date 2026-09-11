@@ -46,6 +46,13 @@ final _attendanceProvider =
       );
 });
 
+/// Record change history (Timeline tab). Only fetched for users who may see
+/// the full profile (the endpoint needs EMPLOYEE_VIEW).
+final _changeLogProvider =
+    FutureProvider.autoDispose.family<List<EmployeeChangeLog>, int>((ref, id) {
+  return ref.watch(employeeDetailRepositoryProvider).timeline(id);
+});
+
 final _tasksProvider =
     FutureProvider.autoDispose.family<List<Task>, int>((ref, id) {
   return ref.watch(taskRepositoryProvider).listForEmployee(id);
@@ -229,7 +236,10 @@ class EmployeeDetailScreen extends ConsumerWidget {
                   ),
                   _AssetsTab(employeeId: employeeId),
                   _PerformanceTab(employeeId: employeeId),
-                  _TimelineTab(employeeId: employeeId),
+                  _TimelineTab(
+                    employeeId: employeeId,
+                    canViewChanges: canViewSensitive,
+                  ),
                 ],
               ),
             ),
@@ -1855,13 +1865,19 @@ class _TimelineEvent {
 }
 
 class _TimelineTab extends ConsumerWidget {
-  const _TimelineTab({required this.employeeId});
+  const _TimelineTab({required this.employeeId, required this.canViewChanges});
   final int employeeId;
+
+  /// Whether the caller may load the record change history (EMPLOYEE_VIEW).
+  final bool canViewChanges;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Reuse the per-domain providers and merge their data into one feed.
-    // TODO: replace with a dedicated backend activity-feed endpoint when available.
+    // Record changes come from the backend change log; the activity feed below
+    // is still composed client-side from the other domains.
+    final changes = canViewChanges
+        ? ref.watch(_changeLogProvider(employeeId))
+        : const AsyncValue<List<EmployeeChangeLog>>.data(<EmployeeChangeLog>[]);
     final att = ref.watch(_attendanceProvider(employeeId));
     final tasks = ref.watch(_tasksProvider(employeeId));
     final leave = ref.watch(_leaveProvider(employeeId));
@@ -1921,31 +1937,241 @@ class _TimelineTab extends ConsumerWidget {
     events.sort((a, b) => b.time.compareTo(a.time));
     final top = events.take(40).toList();
 
+    final activity = top.isEmpty
+        ? (anyLoading
+            ? const AppLoadingBlock(height: 200)
+            : const AppEmptyState(
+                icon: Icons.timeline_rounded,
+                message: 'No recent activity to show.',
+              ))
+        : GlassCard(
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 14),
+            shadow: AppShadows.soft,
+            child: Column(
+              children: [
+                for (var i = 0; i < top.length; i++)
+                  _TimelineRow(e: top[i], isLast: i == top.length - 1),
+              ],
+            ),
+          );
+
     return _TabScaffold(
       onRefresh: () async {
+        if (canViewChanges) ref.invalidate(_changeLogProvider(employeeId));
         ref.invalidate(_attendanceProvider(employeeId));
         ref.invalidate(_tasksProvider(employeeId));
         ref.invalidate(_leaveProvider(employeeId));
         ref.invalidate(_assetsProvider(employeeId));
         ref.invalidate(_locationProvider(employeeId));
       },
-      child: top.isEmpty
-          ? (anyLoading
-              ? const AppLoadingBlock(height: 200)
-              : const AppEmptyState(
-                  icon: Icons.timeline_rounded,
-                  message: 'No recent activity to show.',
-                ))
-          : GlassCard(
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 14),
-              shadow: AppShadows.soft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (canViewChanges) ...[
+            _ChangeHistoryCard(changes: changes),
+            const SizedBox(height: 14),
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 8),
+              child: Text(
+                'Activity',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.ink,
+                ),
+              ),
+            ),
+          ],
+          activity,
+        ],
+      ),
+    );
+  }
+}
+
+/// "Record changes": every create/update of the employee record — what
+/// changed (old → new), who did it and when. Newest first.
+class _ChangeHistoryCard extends StatelessWidget {
+  const _ChangeHistoryCard({required this.changes});
+  final AsyncValue<List<EmployeeChangeLog>> changes;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      title: 'Record changes',
+      icon: Icons.history_rounded,
+      children: [
+        changes.when(
+          loading: () => const AppLoadingBlock(height: 90),
+          error: (e, _) => const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Text(
+              'Could not load change history.',
+              style: TextStyle(fontSize: 12, color: AppColors.danger),
+            ),
+          ),
+          data: (list) {
+            if (list.isEmpty) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 10),
+                child: Text(
+                  'No changes recorded yet. Edits made from now on will appear here.',
+                  style: TextStyle(fontSize: 12, color: AppColors.muted),
+                ),
+              );
+            }
+            return Column(
+              children: [
+                for (var i = 0; i < list.length; i++)
+                  _ChangeLogRow(entry: list[i], isLast: i == list.length - 1),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _ChangeLogRow extends StatelessWidget {
+  const _ChangeLogRow({required this.entry, required this.isLast});
+  final EmployeeChangeLog entry;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = entry.isCreated ? AppColors.success : AppColors.primary;
+    final n = entry.changes.length;
+    final summary = entry.isCreated
+        ? 'created this record'
+        : 'updated $n field${n == 1 ? '' : 's'}';
+    final at = entry.createdAt;
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 26,
+                height: 26,
+                margin: const EdgeInsets.only(top: 6),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: color.withOpacity(0.28)),
+                ),
+                child: Icon(
+                  entry.isCreated ? Icons.person_add_alt_1_rounded : Icons.edit_rounded,
+                  size: 13,
+                  color: color,
+                ),
+              ),
+              if (!isLast)
+                Expanded(child: Container(width: 2, color: AppColors.hairline)),
+            ],
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(top: 6, bottom: isLast ? 4 : 14),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (var i = 0; i < top.length; i++)
-                    _TimelineRow(e: top[i], isLast: i == top.length - 1),
+                  Text.rich(
+                    TextSpan(
+                      style: const TextStyle(fontSize: 12.5, color: AppColors.ink),
+                      children: [
+                        TextSpan(
+                          text: entry.actorName,
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        TextSpan(
+                          text: ' $summary',
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    at == null ? '—' : _fmtDateTime(at),
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.muted,
+                    ),
+                  ),
+                  if (entry.changes.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AppColors.bg,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.hairline),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final c in entry.changes)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 3),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    c.label.toUpperCase(),
+                                    style: const TextStyle(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.4,
+                                      color: AppColors.muted,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 1),
+                                  Text.rich(
+                                    TextSpan(
+                                      children: [
+                                        TextSpan(
+                                          text: c.oldValue ?? '—',
+                                          style: const TextStyle(
+                                            color: AppColors.muted,
+                                            decoration: TextDecoration.lineThrough,
+                                          ),
+                                        ),
+                                        const TextSpan(
+                                          text: '  →  ',
+                                          style: TextStyle(color: AppColors.muted),
+                                        ),
+                                        TextSpan(
+                                          text: c.newValue ?? '—',
+                                          style: const TextStyle(
+                                            color: AppColors.ink,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
+          ),
+        ],
+      ),
     );
   }
 }

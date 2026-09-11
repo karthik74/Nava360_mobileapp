@@ -55,6 +55,7 @@ class Task {
     this.requiresReview = false,
     this.allowSelfCompletion = true,
     this.allowAttachments = false,
+    this.completionLocationRequired = true,
     this.completionPercentage = 0,
   });
 
@@ -98,6 +99,11 @@ class Task {
   final bool requiresReview;
   final bool allowSelfCompletion;
   final bool allowAttachments;
+
+  /// From the task template: a GPS fix is mandatory to submit/complete when
+  /// true. When false, location is still captured if available but a missing
+  /// fix does not block completion.
+  final bool completionLocationRequired;
   final int completionPercentage;
 
   /// Terminal states — no further action is expected from the assignee.
@@ -146,6 +152,7 @@ class Task {
       requiresReview: json['requiresReview'] == true,
       allowSelfCompletion: json['allowSelfCompletion'] != false,
       allowAttachments: json['allowAttachments'] == true,
+      completionLocationRequired: json['completionLocationRequired'] != false,
       completionPercentage: (json['completionPercentage'] as num?)?.toInt() ?? 0,
     );
   }
