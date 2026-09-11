@@ -1251,7 +1251,7 @@ class _MisNavRow extends StatelessWidget {
           AppColors.pink),
       ('Analytical', Icons.query_stats_rounded, '/mis/analytical',
           AppColors.danger),
-      ('Daily Plan', Icons.edit_note_rounded, '/mis/daily-plan',
+      ('Daily Report', Icons.edit_note_rounded, '/mis/daily-plan',
           AppColors.primary),
       ('Branch Report', Icons.assessment_rounded, '/mis/branch-report',
           AppColors.warning),

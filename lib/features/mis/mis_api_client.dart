@@ -118,6 +118,31 @@ class MisApiClient {
     }
   }
 
+  /// Fetches a binary (.xlsx) endpoint — the server-rendered report exports
+  /// (Daily Reports, Branches Pending) that build the file on the backend, same
+  /// as the web module's `apiDownload` (src/mis/gwm/api/config.ts). Returns the
+  /// raw bytes plus the filename the server suggested via Content-Disposition,
+  /// for the caller to hand to `misSaveBytes`.
+  Future<(Uint8List, String?)> getBytes(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    try {
+      final res = await _dio.get<List<int>>(
+        path,
+        queryParameters: _clean(query),
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final disposition = res.headers.value('content-disposition');
+      final match = disposition == null
+          ? null
+          : RegExp(r'filename="?([^";]+)"?').firstMatch(disposition);
+      return (Uint8List.fromList(res.data ?? const []), match?.group(1));
+    } on DioException catch (e) {
+      throw _mapError(e);
+    }
+  }
+
   Future<T> patch<T>(
     String path, {
     Object? body,

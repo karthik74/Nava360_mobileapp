@@ -206,14 +206,8 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
       return;
     }
     if (_type == 'achievement') {
-      if (!(_plan?.exists ?? false)) {
-        setState(() => _msg = (false,
-            'Upload the Daily Plan for this date first — the Achievement unlocks once the plan is saved.'));
-        return;
-      }
-      if (_isToday && DateTime.now().hour < 18) {
-        setState(() => _msg = (false,
-            'Achievement can only be uploaded after 6:00 PM. Please come back this evening.'));
+      if (_date.compareTo(_todayIso()) > 0) {
+        setState(() => _msg = (false, 'An achievement cannot be recorded for a future date.'));
         return;
       }
     }
@@ -277,7 +271,7 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(title: const Text('Daily Reports')),
-      body: ListView(
+      body: RefreshIndicator(onRefresh: _load, child: ListView(
         padding: EdgeInsets.fromLTRB(
             16, 14, 16, MediaQuery.of(context).padding.bottom + 32),
         children: [
@@ -293,7 +287,7 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
           const SizedBox(height: 14),
           MisDailyPlanReport(role: role, autoLoad: role == 'AM'),
         ],
-      ),
+      )),
     );
   }
 
@@ -306,17 +300,8 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
   // ── Achievement gating ────────────────────────────────────────────────────
   // An Achievement can only be entered after the Daily Plan for the same date
   // has been uploaded, and (for today) only after 6:00 PM.
-  bool get _isToday => _date == _todayIso();
 
-  /// Achievement blocked because the plan for this date hasn't been saved yet.
-  bool get _achPlanMissing =>
-      _type == 'achievement' && !(_plan?.exists ?? false);
-
-  /// Achievement blocked because it's today and before 6 PM.
-  bool get _achTooEarly =>
-      _type == 'achievement' && _isToday && DateTime.now().hour < 18;
-
-  bool get _achBlocked => _achPlanMissing || _achTooEarly;
+  bool get _achBlocked => _type == 'achievement' && _date.compareTo(_todayIso()) > 0;
 
   @override
   Widget build(BuildContext context) {
@@ -324,11 +309,12 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
     final role = misRoleFromScope(
       session?.scope?.tier,
       session?.user?.role ?? '',
+      session?.user?.designation,
     );
     // Uploading is Branch-Manager-only — the API 403s every non-branch writer,
     // so an AM and above get the READ surfaces (report builder + branches
     // pending) instead of a form they could never submit. Mirrors the web.
-    if (role != 'BM' && role != 'FO') {
+    if (role != 'BM') {
       return _managerView(role);
     }
 
@@ -337,8 +323,8 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('Daily Plan')),
-      body: ListView(
+      appBar: AppBar(title: const Text('Daily Report'), actions: [IconButton(icon: const Icon(Icons.refresh_rounded), tooltip: 'Refresh data', onPressed: _load)]),
+      body: RefreshIndicator(onRefresh: _load, child: ListView(
         padding: EdgeInsets.fromLTRB(
             16, 14, 16, MediaQuery.of(context).padding.bottom + 32),
         children: [
@@ -402,25 +388,23 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
                         color: AppColors.muted)),
-                if (_pickerMode) ...[
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      for (final c in [
-                        ('Yesterday', _shiftIso(_todayIso(), -1)),
-                        ('Today', _todayIso()),
-                        ('Tomorrow', _shiftIso(_todayIso(), 1)),
-                      ]) ...[
-                        _DateChip(
-                          label: c.$1,
-                          active: _date == c.$2,
-                          onTap: () => _setDate(c.$2),
-                        ),
-                        const SizedBox(width: 8),
-                      ],
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    for (final c in [
+                      ('Yesterday', _shiftIso(_todayIso(), -1)),
+                      ('Today', _todayIso()),
+                      if (_type == 'plan') ('Tomorrow', _shiftIso(_todayIso(), 1)),
+                    ]) ...[
+                      _DateChip(
+                        label: c.$1,
+                        active: _date == c.$2,
+                        onTap: () => _setDate(c.$2),
+                      ),
+                      const SizedBox(width: 8),
                     ],
-                  ),
-                ],
+                  ],
+                ),
               ],
             ),
           ),
@@ -431,7 +415,7 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
             children: [
               Expanded(
                 child: _ModeCard(
-                  label: 'Daily Plan',
+                  label: 'Daily Report',
                   hint: 'Morning',
                   icon: Icons.wb_sunny_rounded,
                   active: _type == 'plan',
@@ -465,14 +449,10 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
           ],
 
           if (_achBlocked) ...[
-            _Banner(
-              icon: _achPlanMissing
-                  ? Icons.lock_outline_rounded
-                  : Icons.schedule_rounded,
+            const _Banner(
+              icon: Icons.lock_outline_rounded,
               color: AppColors.warning,
-              text: _achPlanMissing
-                  ? 'Upload the Daily Plan for this date first. The Achievement unlocks once the plan is saved.'
-                  : 'Achievement entry opens after 6:00 PM. Please come back this evening.',
+              text: 'An achievement cannot be recorded for a future date.',
             ),
             const SizedBox(height: 12),
           ],
@@ -533,13 +513,13 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
                 icon: const Icon(Icons.save_rounded, size: 18),
                 label: Text(_busy
                     ? 'Saving…'
-                    : 'Save ${_type == 'plan' ? 'Daily Plan' : 'Achievement'}'),
+                    : 'Save ${_type == 'plan' ? 'Daily Report' : 'Achievement'}'),
               ),
             ),
           ],
         ],
       ),
-    );
+    ));
   }
 
   Widget _group(String title, Color color, List<Widget> children) {
@@ -767,3 +747,4 @@ class _Banner extends StatelessWidget {
     );
   }
 }
+

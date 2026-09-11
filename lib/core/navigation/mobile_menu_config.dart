@@ -171,23 +171,24 @@ const List<MobileMenuItem> kMobileMenu = [
   // "Report a concern" button (keeps the reporting entry low-profile).
 
   // ── MIS · Grow With Me module (its OWN module, not under HRMS) ──
-  // A separate backend + auto-login (derived from the nava360 identity). Gated
-  // on MIS_VIEW, same as the web sidebar's MIS entry (src/nav/menuConfig.ts).
-  // Order mirrors the website's MIS menu.
-  MobileMenuItem(key: 'mis.dashboard', label: 'Dashboard', route: '/mis', icon: Icons.dashboard_rounded, module: MobileModule.mis, order: 1, requiredPermissions: ['MIS_VIEW']),
-  MobileMenuItem(key: 'mis.portfolio', label: 'Portfolio', route: '/mis/portfolio', icon: Icons.pie_chart_rounded, module: MobileModule.mis, order: 2, requiredPermissions: ['MIS_VIEW']),
-  MobileMenuItem(key: 'mis.collection', label: 'Collection', route: '/mis/collection', icon: Icons.payments_rounded, module: MobileModule.mis, order: 3, requiredPermissions: ['MIS_VIEW']),
-  MobileMenuItem(key: 'mis.disbursement', label: 'Disbursement', route: '/mis/disbursement', icon: Icons.account_balance_rounded, module: MobileModule.mis, order: 4, requiredPermissions: ['MIS_VIEW']),
-  MobileMenuItem(key: 'mis.hourly', label: 'Hourly', route: '/mis/hourly', icon: Icons.schedule_rounded, module: MobileModule.mis, order: 5, requiredPermissions: ['MIS_VIEW']),
-  MobileMenuItem(key: 'mis.comparison', label: 'Comparison', route: '/mis/comparison', icon: Icons.compare_arrows_rounded, module: MobileModule.mis, order: 6, requiredPermissions: ['MIS_VIEW']),
-  MobileMenuItem(key: 'mis.analytical', label: 'Analytical', route: '/mis/analytical', icon: Icons.query_stats_rounded, module: MobileModule.mis, order: 7, requiredPermissions: ['MIS_VIEW']),
-  MobileMenuItem(key: 'mis.dailyPlan', label: 'Daily Plan', route: '/mis/daily-plan', icon: Icons.edit_note_rounded, module: MobileModule.mis, order: 8, requiredPermissions: ['MIS_VIEW']),
-  MobileMenuItem(key: 'mis.feedback', label: 'Feedback', route: '/mis/feedback', icon: Icons.forum_rounded, module: MobileModule.mis, order: 9, requiredPermissions: ['MIS_VIEW']),
+  // A separate backend + auto-login (derived from the nava360 identity).
+  // Always visible in the drawer regardless of the user's permissions (no
+  // MIS_VIEW gate) — the backend/API calls behind each screen still enforce
+  // their own access control. Order mirrors the website's MIS menu.
+  MobileMenuItem(key: 'mis.dashboard', label: 'Dashboard', route: '/mis', icon: Icons.dashboard_rounded, module: MobileModule.mis, order: 1),
+  MobileMenuItem(key: 'mis.portfolio', label: 'Portfolio', route: '/mis/portfolio', icon: Icons.pie_chart_rounded, module: MobileModule.mis, order: 2),
+  MobileMenuItem(key: 'mis.collection', label: 'Collection', route: '/mis/collection', icon: Icons.payments_rounded, module: MobileModule.mis, order: 3),
+  MobileMenuItem(key: 'mis.disbursement', label: 'Disbursement', route: '/mis/disbursement', icon: Icons.account_balance_rounded, module: MobileModule.mis, order: 4),
+  MobileMenuItem(key: 'mis.hourly', label: 'Hourly', route: '/mis/hourly', icon: Icons.schedule_rounded, module: MobileModule.mis, order: 5),
+  MobileMenuItem(key: 'mis.comparison', label: 'Comparison', route: '/mis/comparison', icon: Icons.compare_arrows_rounded, module: MobileModule.mis, order: 6),
+  MobileMenuItem(key: 'mis.analytical', label: 'Analytical', route: '/mis/analytical', icon: Icons.query_stats_rounded, module: MobileModule.mis, order: 7),
+  MobileMenuItem(key: 'mis.dailyPlan', label: 'Daily Report', route: '/mis/daily-plan', icon: Icons.edit_note_rounded, module: MobileModule.mis, order: 8),
+  MobileMenuItem(key: 'mis.feedback', label: 'Feedback', route: '/mis/feedback', icon: Icons.forum_rounded, module: MobileModule.mis, order: 9),
   // Per-branch report card — auto-scoped by the API: a BM/FO only ever sees
   // their own branch here (mirrors the web sidebar's Branch Report entry).
-  MobileMenuItem(key: 'mis.branchReport', label: 'Branch Report', route: '/mis/branch-report', icon: Icons.assessment_rounded, module: MobileModule.mis, order: 10, requiredPermissions: ['MIS_VIEW']),
-  MobileMenuItem(key: 'mis.employees', label: 'Directory', route: '/mis/employees', icon: Icons.contacts_rounded, module: MobileModule.mis, order: 11, requiredPermissions: ['MIS_VIEW']),
-  MobileMenuItem(key: 'mis.locations', label: 'Locations', route: '/mis/locations', icon: Icons.map_rounded, module: MobileModule.mis, order: 12, requiredPermissions: ['MIS_VIEW']),
+  MobileMenuItem(key: 'mis.branchReport', label: 'Branch Report', route: '/mis/branch-report', icon: Icons.assessment_rounded, module: MobileModule.mis, order: 10),
+  MobileMenuItem(key: 'mis.employees', label: 'Directory', route: '/mis/employees', icon: Icons.contacts_rounded, module: MobileModule.mis, order: 11),
+  MobileMenuItem(key: 'mis.locations', label: 'Locations', route: '/mis/locations', icon: Icons.map_rounded, module: MobileModule.mis, order: 12),
 
   // ── Payroll module cards (self-service only) ──
   MobileMenuItem(key: 'pay.payslips', label: 'My Payslips', route: '/my-payslips', icon: Icons.receipt_long_rounded, module: MobileModule.payroll, order: 1),

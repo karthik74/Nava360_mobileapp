@@ -7,6 +7,8 @@
 //  employee; the active level is derived from which parent fields are set.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'mis_api_client.dart';
@@ -901,6 +903,20 @@ class MisRepository {
               : <PendingBranch>[];
         },
       );
+
+  /// Formatted .xlsx of the plan/achievement report, built server-side — mirrors
+  /// the web module's `dailyPlanExport` (src/mis/gwm/api/dailyPlanApi.ts). One
+  /// sheet per level the caller's OWN access allows, and Plan-only vs
+  /// Plan+Achievement decided by the server from whether achievement has
+  /// actually been submitted for the date — not from anything the app sends.
+  Future<(Uint8List, String?)> dailyPlanExportBytes(String date) =>
+      _api.getBytes('/daily-plan/export', query: {'date': date});
+
+  /// Formatted .xlsx of the "Branches Pending" follow-up list.
+  Future<(Uint8List, String?)> dailyPlanPendingExportBytes(
+          String date, String type) =>
+      _api.getBytes('/daily-plan/pending-branches/export',
+          query: {'date': date, 'type': type});
 
   // Feedback (write) -----------------------------------------------------------
   Future<List<FeedbackItem>> listFeedback() =>

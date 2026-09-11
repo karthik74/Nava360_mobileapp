@@ -24,10 +24,10 @@ import 'mis_widgets.dart';
 
 /// scope.tier → role bucket. all→CEO, region→RM, division→DM, area→AM,
 /// branch→BM, self→FO. An explicit branch-side designation always wins.
-String misRoleFromScope(String? tier, String role) {
+String misRoleFromScope(String? tier, String role, [String? designation]) {
   final r = role.trim().toUpperCase();
-  if (const ['BM', 'ABM', 'BOE', 'BSM'].contains(r)) return 'BM';
-  if (r == 'FO') return 'FO';
+  final d = (designation ?? '').trim().toLowerCase();
+  if (r == 'BM' || d == 'branch manager' || d.contains('branch manager')) return 'BM';
   switch (tier) {
     case 'self':
       return 'FO';
@@ -536,6 +536,7 @@ class _PendingBranchesSheet extends ConsumerStatefulWidget {
 
 class _PendingBranchesSheetState extends ConsumerState<_PendingBranchesSheet> {
   String _type = 'plan';
+  bool _downloading = false;
 
   @override
   Widget build(BuildContext context) {
@@ -606,11 +607,17 @@ class _PendingBranchesSheetState extends ConsumerState<_PendingBranchesSheet> {
                   ),
                   const Spacer(),
                   IconButton(
-                    tooltip: 'Download CSV',
-                    onPressed: (async.valueOrNull?.isEmpty ?? true)
+                    tooltip: 'Download report',
+                    onPressed: _downloading || (async.valueOrNull?.isEmpty ?? true)
                         ? null
-                        : () => _download(async.value!, label),
-                    icon: const Icon(Icons.download_rounded),
+                        : _download,
+                    icon: _downloading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.download_rounded),
                   ),
                 ],
               ),
@@ -694,37 +701,35 @@ class _PendingBranchesSheetState extends ConsumerState<_PendingBranchesSheet> {
     );
   }
 
-  Future<void> _download(List<PendingBranch> branches, String label) async {
-    // Date and Type are COLUMNS, not just filename parts: once the sheet is off
-    // the device it still has to say which date and which list it is.
-    final csv = misCsvDocument([
-      const [
-        '#',
-        'Date',
-        'Type',
-        'Branch',
-        'Area',
-        'Region',
-        'Branch Manager',
-        'BM Phone',
-      ],
-      for (var i = 0; i < branches.length; i++)
-        [
-          i + 1,
-          misPrettyDate(widget.date),
-          label,
-          branches[i].branchName,
-          branches[i].area ?? '',
-          branches[i].region ?? '',
-          branches[i].bmName ?? '',
-          branches[i].bmPhone ?? '',
-        ],
-    ]);
-    await misSaveCsv(
-      context,
-      'branches-pending_${label.toLowerCase()}_${widget.date}.csv',
-      csv,
-    );
+  /// Formatted .xlsx built server-side — mirrors the web module's
+  /// `dailyPlanPendingExport` (src/mis/gwm/api/dailyPlanApi.ts).
+  Future<void> _download() async {
+    setState(() => _downloading = true);
+    try {
+      final (bytes, suggestedName) = await ref
+          .read(misRepositoryProvider)
+          .dailyPlanPendingExportBytes(widget.date, _type);
+      if (!mounted) return;
+      await misSaveBytes(
+        context,
+        suggestedName ?? 'branches-pending_${_type}_${widget.date}.xlsx',
+        bytes,
+        mimeType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        noun: 'report',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text('Could not download the report: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _downloading = false);
+    }
   }
 }
 
@@ -808,11 +813,9 @@ class MisDailyPlanReportTable extends ConsumerWidget {
               ),
             ),
             IconButton(
-              tooltip: 'Export CSV',
-              onPressed: planRows.isEmpty
-                  ? null
-                  : () => _exportCsv(
-                      context, planRows, achByName, grandPlan, grandAch),
+              tooltip: 'Download report',
+              onPressed:
+                  planRows.isEmpty ? null : () => _exportReport(context, ref),
               icon: const Icon(Icons.download_rounded),
             ),
           ],
@@ -1113,34 +1116,34 @@ class MisDailyPlanReportTable extends ConsumerWidget {
     );
   }
 
-  Future<void> _exportCsv(
-    BuildContext context,
-    List<_ReportRow> rows,
-    Map<String, _ReportRow> achByName,
-    _ReportRow grandPlan,
-    _ReportRow grandAch,
-  ) async {
-    final head = <Object?>[
-      'name',
-      for (final c in _metrics) 'plan_${c.key}',
-      if (_both)
-        for (final c in _metrics) 'ach_${c.key}',
-    ];
-    final lines = <List<Object?>>[head];
-    for (final r in [...rows, grandPlan]) {
-      final a = r.name == 'Grand Total' ? grandAch : achByName[r.name];
-      lines.add([
-        r.name,
-        for (final c in _metrics) r.get(c.key),
-        if (_both)
-          for (final c in _metrics) a == null ? 0 : a.get(c.key),
-      ]);
+  /// Formatted .xlsx built server-side — mirrors the web module's
+  /// `dailyPlanExport` (src/mis/gwm/api/dailyPlanApi.ts). One sheet per level
+  /// the caller's own access allows (not just the on-screen [level]), and
+  /// Plan-only vs Plan+Achievement decided by the server from whether
+  /// achievement has actually been submitted for the date.
+  Future<void> _exportReport(BuildContext context, WidgetRef ref) async {
+    try {
+      final (bytes, suggestedName) =
+          await ref.read(misRepositoryProvider).dailyPlanExportBytes(date);
+      if (!context.mounted) return;
+      await misSaveBytes(
+        context,
+        suggestedName ?? 'daily_${mode}_${level.toLowerCase()}_$date.xlsx',
+        bytes,
+        mimeType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        noun: 'report',
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(
+          content: Text('Could not download the report: $e'),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
-    await misSaveCsv(
-      context,
-      'daily_${mode}_${level.toLowerCase()}_$date.csv',
-      misCsvDocument(lines),
-    );
   }
 }
 
@@ -1150,3 +1153,4 @@ class MisAchColor {
   MisAchColor._();
   static const achievement = Color(0xFF0F766E); // teal-700
 }
+
