@@ -161,6 +161,12 @@ const List<MobileMenuItem> kMobileMenu = [
   // manager whose queue is being read.
   MobileMenuItem(key: 'hrms.targetApprovals', label: 'Target Approvals', route: '/team-target-approvals', icon: Icons.fact_check_rounded, module: MobileModule.hrms, order: 18, employeeAllowed: false, requiredPermissions: ['PERFORMANCE_SCORE_REVIEW']),
   MobileMenuItem(key: 'hrms.audit', label: 'Internal Audit', route: '/audit', icon: Icons.fact_check_rounded, module: MobileModule.hrms, order: 18, requiredPermissions: ['AUDIT_PERFORM', 'AUDIT_VIEW_BRANCH', 'AUDIT_VIEW_HIERARCHY', 'AUDIT_VIEW_ALL', 'AUDIT_BM_COMPLIANCE', 'AUDIT_VERIFY'], moduleCode: 'audit'),
+  // NP (Navachetana Prathinidhi) Onboarding — the 13-step BM→AM→DM→OPS
+  // candidate workflow. Same NP_CANDIDATE_VIEW gate as the web sidebar; the
+  // server further narrows the list to the caller's NP scope. moduleCode
+  // matches the web top-level "np" menuConfig key; the per-company on/off
+  // switch is App Settings → Features → NP Onboarding.
+  MobileMenuItem(key: 'hrms.npOnboarding', label: 'NP Onboarding', route: '/np', icon: Icons.person_add_alt_1_rounded, module: MobileModule.hrms, order: 19, requiredPermissions: ['NP_CANDIDATE_VIEW'], moduleCode: 'np', featureFlag: 'FEATURE_NP_ONBOARDING'),
   // Whistleblower is intentionally NOT in the menu — reached via the dashboard's
   // "Report a concern" button (keeps the reporting entry low-profile).
 
