@@ -232,6 +232,10 @@ class NpRepository {
         parse: _detail,
       );
 
+  /// Waves a CB_REJECTED candidate through to BGV (NP_CB_OVERRIDE); remarks are mandatory.
+  Future<NpCandidateDetail> overrideCbRejection(int id, String remarks) =>
+      _api.post('$_base/candidates/$id/cb-check/override', body: {'remarks': remarks}, parse: _detail);
+
   // ── BGV ──
 
   /// Creates the draft on first call, updates it when [reportId] is supplied.

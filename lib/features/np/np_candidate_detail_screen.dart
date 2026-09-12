@@ -360,6 +360,22 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
     await _run('BGV rejection', () => ref.read(npRepositoryProvider).rejectBgv(_id, remarks));
   }
 
+  /// NP_CB_OVERRIDE holders only (the server decides): waves a CB rejection through to BGV.
+  Future<void> _overrideCb() async {
+    if (!await npConfirm(context,
+        title: 'Override credit bureau rejection?',
+        message: "The bureau's verdict stays on record. The candidate continues to background verification as if approved, "
+            'and your reason is written to the audit trail.',
+        confirmLabel: 'Continue',
+        danger: true)) {
+      return;
+    }
+    final remarks = await npPrompt(context,
+        title: 'Justification for overriding', label: 'Reason (required, audited)', confirmLabel: 'Override & continue', danger: true);
+    if (remarks == null) return;
+    await _run('CB override', () => ref.read(npRepositoryProvider).overrideCbRejection(_id, remarks));
+  }
+
   Future<void> _dmApprove() async {
     if (!await npConfirm(context, title: 'Approve as DM?', message: 'The file moves to agreement & PDC collection.', confirmLabel: 'Approve')) {
       return;
@@ -542,6 +558,7 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
                         if (_error != null) ...[const SizedBox(height: 10), AppErrorPanel(message: _error!, onRetry: _load)],
                         if (d.status == 'SENT_BACK_FOR_CORRECTION') ...[const SizedBox(height: 10), _correctionBanner(d)],
                         if (d.rejected) ...[const SizedBox(height: 10), _rejectionBanner(d)],
+                        if (d.cbOverrideAt != null) ...[const SizedBox(height: 10), _cbOverrideBanner(d)],
                         const SizedBox(height: 10),
                         GlassCard(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -653,7 +670,30 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
         icon: Icons.warning_amber_rounded,
         color: AppColors.danger,
         title: npStatusLabel(d.status),
-        body: [if (d.rejectionReason != null) d.rejectionReason!, 'Rejected on ${npFmtDateTime(d.rejectedAt)}'].join('\n'),
+        body: [
+          if (d.rejectionReason != null) d.rejectionReason!,
+          'Rejected on ${npFmtDateTime(d.rejectedAt)}',
+          if (d.can('CB_OVERRIDE')) 'You hold the override permission. A justification is required and is audited.',
+        ].join('\n'),
+        action: d.can('CB_OVERRIDE')
+            ? FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+                onPressed: _busy ? null : _overrideCb,
+                icon: const Icon(Icons.gavel_rounded, size: 18),
+                label: const Text('Override CB rejection & continue to BGV'),
+              )
+            : null,
+      );
+
+  /// The bureau said no, an authorised person waved the candidate through.
+  Widget _cbOverrideBanner(NpCandidateDetail d) => NpBanner(
+        icon: Icons.gavel_rounded,
+        color: const Color(0xFFD97706),
+        title: 'Credit bureau rejection overridden',
+        body: [
+          if (d.cbOverrideRemarks != null) d.cbOverrideRemarks!,
+          'By ${d.cbOverrideBy?.name ?? 'an authorised user'} on ${npFmtDateTime(d.cbOverrideAt)}',
+        ].join('\n'),
       );
 
   // ── 1. Candidate ──
@@ -879,6 +919,13 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
             onPressed: _busy ? null : _submitCb,
             icon: const Icon(Icons.credit_score_rounded, size: 18),
             label: const Text('Submit for CB check'),
+          ),
+        if (d.can('CB_OVERRIDE'))
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: _busy ? null : _overrideCb,
+            icon: const Icon(Icons.gavel_rounded, size: 18),
+            label: const Text('Override CB rejection & continue to BGV'),
           ),
         if (d.can('RECORD_CB_RESULT'))
           NpActionBox(

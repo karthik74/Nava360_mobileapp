@@ -643,6 +643,11 @@ class NpCandidateDetail extends NpCandidateSummary {
   final String? rejectionReason;
   final DateTime? rejectedAt;
 
+  /// Who overrode a credit-bureau rejection, when and why; all null when nobody did.
+  final NpPerson? cbOverrideBy;
+  final DateTime? cbOverrideAt;
+  final String? cbOverrideRemarks;
+
   final DateTime? npIdGeneratedAt;
   final DateTime? esafIdCreatedAt;
   final NpPerson? esafIdBy;
@@ -738,6 +743,9 @@ class NpCandidateDetail extends NpCandidateSummary {
     this.correctionRemarks,
     this.rejectionReason,
     this.rejectedAt,
+    this.cbOverrideBy,
+    this.cbOverrideAt,
+    this.cbOverrideRemarks,
     this.npIdGeneratedAt,
     this.esafIdCreatedAt,
     this.esafIdBy,
@@ -831,6 +839,9 @@ class NpCandidateDetail extends NpCandidateSummary {
       correctionRemarks: _str(j['correctionRemarks']),
       rejectionReason: _str(j['rejectionReason']),
       rejectedAt: _dt(j['rejectedAt']),
+      cbOverrideBy: NpPerson.fromJsonN(j['cbOverrideBy']),
+      cbOverrideAt: _dt(j['cbOverrideAt']),
+      cbOverrideRemarks: _str(j['cbOverrideRemarks']),
       npIdGeneratedAt: _dt(j['npIdGeneratedAt']),
       esafIdCreatedAt: _dt(j['esafIdCreatedAt']),
       esafIdBy: NpPerson.fromJsonN(j['esafIdBy']),
