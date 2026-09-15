@@ -519,7 +519,10 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
                             );
                             _refresh();
                           },
-                          child: _TaskCard(task: task),
+                          child: _TaskCard(
+                            task: task,
+                            currentEmployeeId: user?.employeeId,
+                          ),
                         ),
                       ),
                   ],
@@ -603,11 +606,16 @@ class _MiniStat extends StatelessWidget {
 // ───────────────────────────────── Task card ───────────────────────────────
 
 class _TaskCard extends StatelessWidget {
-  const _TaskCard({required this.task});
+  const _TaskCard({required this.task, this.currentEmployeeId});
   final Task task;
+
+  /// The signed-in employee, to flag tasks assigned to one of their reportees
+  /// that they, as the reporting manager, may perform on the assignee's behalf.
+  final int? currentEmployeeId;
 
   @override
   Widget build(BuildContext context) {
+    final onBehalf = task.isOnBehalfFor(currentEmployeeId);
     final due =
         task.dueDate == null ? null : DateFormat.yMMMd().format(task.dueDate!);
     final dueTime = formatDueTime(task.dueTime);
@@ -655,7 +663,8 @@ class _TaskCard extends StatelessWidget {
           if (priority != null ||
               task.categoryName != null ||
               due != null ||
-              task.assignedByName != null) ...[
+              task.assignedByName != null ||
+              onBehalf) ...[
             const SizedBox(height: 8),
             Wrap(
               spacing: 6,
@@ -686,6 +695,14 @@ class _TaskCard extends StatelessWidget {
                     icon: Icons.person_outline,
                     label: task.assignedByName!,
                     color: AppColors.muted,
+                  ),
+                // Assigned to one of this employee's reportees — as the
+                // reporting manager they can perform it on the assignee's behalf.
+                if (onBehalf)
+                  _MetaPill(
+                    icon: Icons.groups_outlined,
+                    label: 'For ${task.assignedToName ?? 'reportee'}',
+                    color: AppColors.accent,
                   ),
               ],
             ),

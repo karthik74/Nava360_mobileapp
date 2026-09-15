@@ -249,13 +249,17 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
           _hydrate(task);
           final schema = FormSchema.parse(task.formSchema);
           final readOnly = !task.isActionable || _submitting;
+          // Assigned to one of this employee's reportees: the reporting
+          // manager is performing it on the assignee's behalf.
+          final onBehalf =
+              task.isOnBehalfFor(ref.read(authUserProvider)?.employeeId);
 
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
               _Header(task: task),
               const SizedBox(height: 16),
-              _MetaGrid(task: task),
+              _MetaGrid(task: task, showAssignee: onBehalf),
               if (task.description != null &&
                   task.description!.isNotEmpty) ...[
                 const SizedBox(height: 20),
@@ -306,6 +310,16 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
               const SizedBox(height: 16),
               if (_topError != null) _TopBanner(message: _topError!),
               const SizedBox(height: 4),
+              if (onBehalf && task.isActionable) ...[
+                _StatusBanner(
+                  icon: Icons.groups_outlined,
+                  color: AppColors.accent,
+                  text: 'Assigned to ${task.assignedToName ?? 'your reportee'}, who '
+                      'reports to you. As their reporting manager you can complete '
+                      'it on their behalf — whoever submits first completes it.',
+                ),
+                const SizedBox(height: 12),
+              ],
               _ActionArea(
                 task: task,
                 schema: schema,
@@ -474,8 +488,11 @@ class _Header extends StatelessWidget {
 }
 
 class _MetaGrid extends StatelessWidget {
-  const _MetaGrid({required this.task});
+  const _MetaGrid({required this.task, this.showAssignee = false});
   final Task task;
+
+  /// Show who the task is assigned to — only when that isn't the viewer.
+  final bool showAssignee;
 
   @override
   Widget build(BuildContext context) {
@@ -484,6 +501,12 @@ class _MetaGrid extends StatelessWidget {
         : DateFormat('EEE, d MMM y').format(task.dueDate!);
     final dueTime = formatDueTime(task.dueTime);
     final rows = <Widget>[
+      if (showAssignee && task.assignedToName != null)
+        _InfoRow(
+          icon: Icons.groups_outlined,
+          label: 'Assigned to',
+          value: task.assignedToName!,
+        ),
       if (task.customerName != null && task.customerName!.isNotEmpty)
         _InfoRow(
           icon: Icons.badge_outlined,

@@ -57,6 +57,8 @@ class Task {
     this.allowAttachments = false,
     this.completionLocationRequired = true,
     this.completionPercentage = 0,
+    this.hierarchyCanPerform = false,
+    this.performableByCaller = false,
   });
 
   final int id;
@@ -106,6 +108,20 @@ class Task {
   final bool completionLocationRequired;
   final int completionPercentage;
 
+  /// From the template: managers above the assignee in the reporting line may
+  /// also see and perform this task.
+  final bool hierarchyCanPerform;
+
+  /// Whether the signed-in employee may perform this task — the assignee, or
+  /// (on a hierarchy task) a manager above the assignee in the reporting line.
+  /// Resolved by the backend for the caller.
+  final bool performableByCaller;
+
+  /// True when the signed-in employee is acting through the hierarchy rule
+  /// rather than as the assignee.
+  bool isOnBehalfFor(int? me) =>
+      performableByCaller && me != null && assignedToId != null && assignedToId != me;
+
   /// Terminal states — no further action is expected from the assignee.
   bool get isClosed =>
       status == TaskStatuses.done ||
@@ -154,6 +170,8 @@ class Task {
       allowAttachments: json['allowAttachments'] == true,
       completionLocationRequired: json['completionLocationRequired'] != false,
       completionPercentage: (json['completionPercentage'] as num?)?.toInt() ?? 0,
+      hierarchyCanPerform: json['hierarchyCanPerform'] == true,
+      performableByCaller: json['performableByCaller'] == true,
     );
   }
 }
