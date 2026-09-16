@@ -42,31 +42,51 @@ class _NewChatScreenState extends ConsumerState<NewChatScreen> {
   }
 
   Future<void> _startDirectChat(ChatContact contact) async {
+    // This screen is pushed onto the HomeShell's nested navigator (the chat
+    // list lives inside a GoRouter ShellRoute), while showDialog defaults to
+    // the ROOT navigator. Resolve both up front and pop each route from the
+    // navigator that owns it — a bare Navigator.pop(context) here would pop
+    // this screen (and then the chat list) instead of the loading dialog,
+    // leaving the non-dismissible barrier on top: a black screen.
+    final nav = Navigator.of(context);
+    final rootNav = Navigator.of(context, rootNavigator: true);
+
+    // Show a quick loading indicator. Track whether it is still up so a
+    // system-back dismissal during the request can't make us pop something
+    // else off the root navigator later.
+    var loadingShown = true;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Center(
+        child: CircularProgressIndicator(color: AppColors.primary),
+      ),
+    ).whenComplete(() => loadingShown = false);
+
+    void dismissLoading() {
+      if (loadingShown) {
+        loadingShown = false;
+        rootNav.pop();
+      }
+    }
+
     try {
-      // Show a quick loading indicator.
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
-      );
       final conv = await ref
           .read(chatRepositoryProvider)
           .getOrCreateDirect(contact.employeeId);
+      dismissLoading();
       if (!mounted) return;
-      Navigator.pop(context); // dismiss loading
-      Navigator.pop(context); // dismiss new-chat screen
-      Navigator.of(context).push(
+      // Refresh conversations list so it appears.
+      ref.read(conversationsProvider.notifier).refresh();
+      nav.pop(); // dismiss new-chat screen
+      nav.push(
         MaterialPageRoute(
           builder: (_) => ChatThreadScreen(conversation: conv),
         ),
       );
-      // Refresh conversations list so it appears.
-      ref.read(conversationsProvider.notifier).refresh();
     } catch (e) {
+      dismissLoading();
       if (mounted) {
-        Navigator.pop(context); // dismiss loading
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Could not open chat: $e')),
         );
