@@ -193,7 +193,7 @@ class _TeamMemberTrackingScreenState
         children: [
           Row(
             children: [
-              const Icon(Icons.my_location, size: 18, color: AppColors.primary),
+              Icon(Icons.my_location, size: 18, color: AppColors.primary),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text('Live location',

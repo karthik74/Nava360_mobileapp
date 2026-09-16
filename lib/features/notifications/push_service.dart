@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/branding.dart';
 import '../../core/secure_storage.dart';
 import '../attendance/live_location_responder.dart';
 import 'notifications_repository.dart';
@@ -38,12 +39,15 @@ class PushService {
 
   final NotificationsRepository _repo;
 
-  static const _androidChannel = AndroidNotificationChannel(
-    'hrms_default_channel',
-    'Nava360 notifications',
-    description: 'Tasks, leaves, attendance and announcements.',
-    importance: Importance.high,
-  );
+  // Channel name follows the runtime product branding; Android updates the
+  // visible name when the channel is re-created with the same id.
+  static AndroidNotificationChannel get _androidChannel =>
+      AndroidNotificationChannel(
+        'hrms_default_channel',
+        '${Branding.current.productName} notifications',
+        description: 'Tasks, leaves, attendance and announcements.',
+        importance: Importance.high,
+      );
 
   final FlutterLocalNotificationsPlugin _local =
       FlutterLocalNotificationsPlugin();
@@ -52,6 +56,7 @@ class PushService {
   StreamSubscription<RemoteMessage>? _openedSub;
   StreamSubscription<String>? _tokenRefreshSub;
   bool _started = false;
+  bool _startPending = false;
   bool _firebaseReady = false;
   bool _localReady = false;
 
@@ -107,6 +112,21 @@ class PushService {
     final pending = _pendingWhistleblowerId;
     if (cb != null && pending != null) {
       _pendingWhistleblowerId = null;
+      cb(pending);
+    }
+  }
+
+  /// Fired whenever an ANNOUNCEMENT push is tapped (with or without a custom
+  /// route) so the app can report the tap to the backend ("who clicked").
+  /// Buffered like [onOpenChat] for cold-start taps.
+  void Function(int announcementId)? _onAnnouncementTapped;
+  int? _pendingTappedAnnouncementId;
+
+  set onAnnouncementTapped(void Function(int announcementId)? cb) {
+    _onAnnouncementTapped = cb;
+    final pending = _pendingTappedAnnouncementId;
+    if (cb != null && pending != null) {
+      _pendingTappedAnnouncementId = null;
       cb(pending);
     }
   }
@@ -176,11 +196,12 @@ class PushService {
       if (Firebase.apps.isEmpty) {
         await Firebase.initializeApp();
       }
-      await FirebaseMessaging.instance.requestPermission(
+      final settings = await FirebaseMessaging.instance.requestPermission(
         alert: true,
         badge: true,
         sound: true,
       );
+      debugPrint('Push permission: ${settings.authorizationStatus}');
       await FirebaseMessaging.instance
           .setForegroundNotificationPresentationOptions(
         alert: true,
@@ -198,6 +219,13 @@ class PushService {
     } catch (e) {
       debugPrint('Firebase init failed: $e');
     }
+
+    // A start() that arrived while init was still running (e.g. blocked on the
+    // first-ever permission dialog) bailed out on _firebaseReady — replay it.
+    if (_firebaseReady && _startPending) {
+      _startPending = false;
+      await start();
+    }
   }
 
   /// Starts listening for messages and registers the device token. Idempotent.
@@ -205,7 +233,10 @@ class PushService {
   Future<void> start() async {
     if (_started) return;
     if (!_firebaseReady) {
-      debugPrint('PushService.start skipped: Firebase not available');
+      // init() may still be running (first-launch permission dialog). Remember
+      // the request so init can replay it once Firebase comes up.
+      _startPending = true;
+      debugPrint('PushService.start deferred: Firebase not ready yet');
       return;
     }
     _started = true;
@@ -285,6 +316,20 @@ class PushService {
 
   void _handleTapData(Map<String, dynamic> data) {
     final type = data['type']?.toString();
+    // Any announcement tap is reported for the admin "who clicked" view —
+    // BEFORE routing, so notification-only nudges (route, no list entry)
+    // are counted too.
+    if (type == 'ANNOUNCEMENT') {
+      final tappedId = int.tryParse('${data['announcementId']}');
+      if (tappedId != null) {
+        final tapCb = _onAnnouncementTapped;
+        if (tapCb != null) {
+          tapCb(tappedId);
+        } else {
+          _pendingTappedAnnouncementId = tappedId;
+        }
+      }
+    }
     // A push carrying an explicit in-app route wins over the per-type default
     // (e.g. an announcement that should open My documents instead of itself).
     final route = data['route']?.toString();
@@ -356,6 +401,18 @@ class PushService {
   Future<void> _registerCurrentToken() async {
     if (!_firebaseReady) return;
     try {
+      // iOS: FCM can't mint a token until Apple delivers the APNs token, which
+      // arrives shortly after launch. Poll briefly instead of failing the whole
+      // registration; onTokenRefresh still covers the late-arrival case.
+      if (Platform.isIOS) {
+        String? apns;
+        for (var i = 0; i < 10; i++) {
+          apns = await FirebaseMessaging.instance.getAPNSToken();
+          if (apns != null) break;
+          await Future.delayed(const Duration(seconds: 1));
+        }
+        debugPrint('APNs token: ${apns == null ? 'MISSING' : 'present'}');
+      }
       final token = await FirebaseMessaging.instance.getToken();
       if (token != null && token.isNotEmpty) {
         await _register(token);
@@ -397,6 +454,7 @@ class PushService {
   /// Routes a foreground message: silent control messages (e.g. a live-location
   /// request) are handled without a notification; everything else is shown.
   Future<void> _onForegroundMessage(RemoteMessage message) async {
+    debugPrint('FCM foreground message: ${message.messageId}');
     if (message.data['type'] == 'LOCATION_REQUEST') {
       await respondToLiveLocationRequest();
       return;

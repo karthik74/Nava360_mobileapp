@@ -162,7 +162,7 @@ class _HelpdeskRaiseScreenState extends ConsumerState<HelpdeskRaiseScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('These articles might help:',
+                    Text('These articles might help:',
                         style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.primary)),
                     const SizedBox(height: 4),
                     for (final s in _suggestions)
@@ -171,7 +171,7 @@ class _HelpdeskRaiseScreenState extends ConsumerState<HelpdeskRaiseScreen> {
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 3),
                           child: Text('• ${s.title}',
-                              style: const TextStyle(fontSize: 12.5, color: AppColors.primary)),
+                              style: TextStyle(fontSize: 12.5, color: AppColors.primary)),
                         ),
                       ),
                   ],

@@ -241,7 +241,7 @@ class _AnnouncementCard extends StatelessWidget {
                     width: 8,
                     height: 8,
                     margin: const EdgeInsets.only(right: 8),
-                    decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
+                    decoration: BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
                   ),
                 if (a.pinned)
                   const Padding(

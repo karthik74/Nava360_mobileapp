@@ -5,11 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/api_client.dart';
+import '../../core/branding.dart';
 import '../../core/navigation/mobile_menu_config.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../announcements/announcements_repository.dart';
 import '../policies/policies_repository.dart';
+import '../attendance/sign_out_guard.dart';
 import '../auth/auth_controller.dart';
 import '../chat/chat_controller.dart';
 import '../leaves/leave_repository.dart';
@@ -123,9 +125,10 @@ class HomeShell extends ConsumerWidget {
     if (loc.startsWith('/attendance')) return 'Attendance';
     if (loc.startsWith('/leaves')) return 'Leaves';
     if (loc.startsWith('/tasks')) return 'Tasks';
+    if (loc.startsWith('/chats')) return 'Chats';
     if (loc.startsWith('/team')) return 'Team';
     if (loc.startsWith('/performance')) return 'Performance';
-    return 'Nava360';
+    return Branding.current.productName;
   }
 
   @override
@@ -216,6 +219,13 @@ class HomeShell extends ConsumerWidget {
                           ],
                         ),
                       ),
+                      // AI Assistant lives here (top-right of the shell
+                      // header, every tab), not in the menu list.
+                      if (ref
+                          .watch(brandingProvider)
+                          .featureEnabled('FEATURE_AI_ASSISTANT'))
+                        _AssistantButton(
+                            onTap: () => context.push('/assistant')),
                     ],
                   ),
                 ),
@@ -288,6 +298,45 @@ class HomeShell extends ConsumerWidget {
           ),
         ),
       ),
+      ),
+    );
+  }
+}
+
+/// Top-right AI Assistant entry point on the Home tab — a small gradient
+/// sparkle button (the assistant has no menu-list entry).
+class _AssistantButton extends StatelessWidget {
+  const _AssistantButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'AI Assistant',
+      child: SizedBox(
+        width: 38,
+        height: 38,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(11),
+          child: Material(
+            color: Colors.transparent,
+            child: Ink(
+              decoration: BoxDecoration(
+                gradient: AppColors.heroGradient,
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: InkWell(
+                onTap: onTap,
+                child: const Icon(
+                  Icons.auto_awesome_rounded,
+                  size: 18,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -415,7 +464,7 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
     };
     // Routes hosted by the bottom-nav ShellRoute navigate with `go` (switch tab);
     // everything else pushes so the back button returns to the previous screen.
-    const tabRoutes = {'/home', '/attendance', '/leaves', '/tasks', '/team', '/performance', '/hrms', '/payroll', '/more'};
+    const tabRoutes = {'/home', '/attendance', '/leaves', '/tasks', '/chats', '/team', '/performance', '/hrms', '/payroll', '/more'};
 
     Color moduleAccent(MobileModule m) {
       switch (m) {
@@ -425,6 +474,8 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
           return AppColors.success;
         case MobileModule.team:
           return AppColors.pink;
+        case MobileModule.mis:
+          return AppColors.warning;
         case MobileModule.more:
           return AppColors.info;
         case MobileModule.home:
@@ -607,16 +658,22 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
                       name: user?.username ?? 'User',
                       email: user?.email ?? '',
                       role: user?.role ?? 'EMPLOYEE',
-                      onSignOut: () {
-                        // Capture the notifier BEFORE popping the drawer — once
-                        // the drawer is popped this State (and its `ref`) is
-                        // disposed, so reading `ref` later would throw. The
-                        // notifier itself lives in the ProviderContainer and is
-                        // safe to use afterwards.
+                      onSignOut: () async {
+                        // The check-in guard reads providers, so it has to run
+                        // while the drawer — and this State's `ref` — is still
+                        // alive. Same reason the notifier is captured here.
+                        final checkedIn = await isCheckedInNow(ref);
                         final auth =
                             ref.read(authControllerProvider.notifier);
+                        if (!context.mounted) return;
                         Navigator.pop(context);
-                        _showLogoutDialog(context, auth);
+                        if (checkedIn) {
+                          await showCheckOutRequiredDialog(context);
+                          return;
+                        }
+                        if (context.mounted) {
+                          _showLogoutDialog(context, auth);
+                        }
                       },
                     ),
                   ),
@@ -1386,7 +1443,7 @@ class _DrawerUserCard extends StatelessWidget {
                       ),
                       child: Text(
                         role,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: AppColors.primary,
                           fontSize: 8.5,
                           fontWeight: FontWeight.w800,

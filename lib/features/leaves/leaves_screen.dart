@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
+import '../../core/approvals.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -83,6 +84,7 @@ class LeavesScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final balance = ref.watch(_myBalanceProvider);
     final leaves = ref.watch(_myLeavesProvider);
+    final pendingMyApproval = ref.watch(leavesPendingMyApprovalProvider);
 
     final mq = MediaQuery.of(context);
     return Scaffold(
@@ -93,6 +95,7 @@ class LeavesScreen extends ConsumerWidget {
         onRefresh: () async {
           ref.invalidate(_myBalanceProvider);
           ref.invalidate(_myLeavesProvider);
+          ref.invalidate(leavesPendingMyApprovalProvider);
         },
         child: ListView(
           physics: const BouncingScrollPhysics(
@@ -107,6 +110,29 @@ class LeavesScreen extends ConsumerWidget {
           children: [
             _ApplyForLeaveButton(
               onTap: () => _openRequest(context, ref),
+            ),
+            // Approval-engine queue: leaves waiting on ME as a configured
+            // chain approver (chain approvers aren't necessarily managers, so
+            // it lives on the employee-facing screen — hidden when empty,
+            // exactly like the web's PendingApprovalsPanel).
+            ...pendingMyApproval.maybeWhen(
+              data: (rows) => rows.isEmpty
+                  ? const <Widget>[]
+                  : [
+                      const SizedBox(height: 22),
+                      const AppSectionHeader(
+                        title: 'Pending my approval',
+                        subtitle: 'Leave requests waiting on you',
+                        onDark: false,
+                      ),
+                      const SizedBox(height: 12),
+                      for (final r in rows)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _ApprovalQueueTile(r: r),
+                        ),
+                    ],
+              orElse: () => const <Widget>[],
             ),
             const SizedBox(height: 22),
             const AppSectionHeader(
@@ -230,7 +256,7 @@ class _BalanceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final idx = b.leaveTypeLabel.hashCode.abs() % _palettes.length;
     final gradient = _palettes[idx];
-    final balanceText = b.balanceDays == null ? '∞' : '${b.balanceDays}';
+    final balanceText = b.balanceDays == null ? '∞' : fmtLeaveDays(b.balanceDays);
     final allowanceText = b.allowanceDays == null ? '∞' : '${b.allowanceDays}';
 
     return Container(
@@ -310,7 +336,7 @@ class _BalanceCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '${b.usedDays} used · $allowanceText total',
+            '${fmtLeaveDays(b.usedDays)} used · $allowanceText total',
             style: TextStyle(
               color: Colors.white.withOpacity(0.85),
               fontSize: 10.5,
@@ -323,13 +349,213 @@ class _BalanceCard extends StatelessWidget {
   }
 }
 
-class _LeaveTile extends StatelessWidget {
+/// "CASUAL" → "Casual leave" — open leave-type codes are DB-driven now, so
+/// unknown codes humanize generically instead of mapping through an enum.
+String _humanLeaveType(String t) {
+  if (t.isEmpty) return t;
+  final s = t.toLowerCase().replaceAll('_', ' ');
+  return '${s[0].toUpperCase()}${s.substring(1)} leave';
+}
+
+/// One leave waiting on the signed-in user as a configured chain approver —
+/// requester, dates, live chain, and Approve / Reject actions.
+class _ApprovalQueueTile extends ConsumerStatefulWidget {
+  const _ApprovalQueueTile({required this.r});
+  final LeaveRequest r;
+
+  @override
+  ConsumerState<_ApprovalQueueTile> createState() => _ApprovalQueueTileState();
+}
+
+class _ApprovalQueueTileState extends ConsumerState<_ApprovalQueueTile> {
+  bool _busy = false;
+
+  Future<void> _review(String status) async {
+    final user = ref.read(authUserProvider);
+    setState(() => _busy = true);
+    try {
+      await ref.read(leaveRepositoryProvider).review(
+            widget.r.id,
+            status: status,
+            reviewerEmployeeId: user?.employeeId,
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(status == 'APPROVED'
+            ? 'Leave approved.'
+            : 'Leave rejected.'),
+      ));
+      ref.invalidate(leavesPendingMyApprovalProvider);
+      ref.invalidate(_myLeavesProvider);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.r;
+    final steps = ref.watch(leaveApprovalStepsProvider(r.id));
+    return GlassCard(
+      padding: const EdgeInsets.all(14),
+      shadow: AppShadows.soft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      r.employeeName ?? 'Employee #${r.employeeId}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      '${_humanLeaveType(r.leaveType)} · ${r.daysLabel} · ${r.fromDate} → ${r.toDate}',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              StatusPill(
+                  label: 'Awaiting you', color: AppColors.warning),
+            ],
+          ),
+          if (r.reason != null && r.reason!.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              r.reason!.trim(),
+              style: const TextStyle(
+                fontSize: 11.5,
+                color: AppColors.inkSoft,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+          steps.maybeWhen(
+            data: (s) => s.isEmpty
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: ApprovalChainInline(steps: s),
+                  ),
+            orElse: () => const SizedBox.shrink(),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : () => _review('REJECTED'),
+                  icon: const Icon(Icons.close_rounded,
+                      size: 16, color: AppColors.danger),
+                  label: const Text('Reject',
+                      style: TextStyle(color: AppColors.danger)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _busy ? null : () => _review('APPROVED'),
+                  icon: const Icon(Icons.check_rounded, size: 16),
+                  label: const Text('Approve'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LeaveTile extends ConsumerStatefulWidget {
   const _LeaveTile({required this.r});
   final LeaveRequest r;
 
   @override
+  ConsumerState<_LeaveTile> createState() => _LeaveTileState();
+}
+
+class _LeaveTileState extends ConsumerState<_LeaveTile> {
+  bool _busy = false;
+
+  /// Withdraw an own request that nobody has acted on yet. This list is always
+  /// the signed-in employee's own leaves, so ownership needs no extra check —
+  /// only the PENDING gate, matching the web's Cancel button.
+  Future<void> _withdraw() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.lg)),
+        title: const Text('Withdraw this request?',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        content: const Text(
+          'Your leave request will be cancelled and removed from your '
+          'approver\'s queue. You can apply again if you change your mind.',
+          style: TextStyle(color: AppColors.inkSoft, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Keep it')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Withdraw'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _busy = true);
+    try {
+      await ref.read(leaveRepositoryProvider).cancel(widget.r.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Leave request withdrawn.')),
+      );
+      // The days go back to the balance, and the request leaves any approver's
+      // queue, so refresh all three views of it.
+      ref.invalidate(_myLeavesProvider);
+      ref.invalidate(_myBalanceProvider);
+      ref.invalidate(leavesPendingMyApprovalProvider);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final r = widget.r;
     final tone = StatusTone.forLeave(r.status);
+    // Show the configured approval chain on in-flight requests (empty = the
+    // default direct-manager flow → nothing rendered).
+    final steps = r.status == 'PENDING'
+        ? ref.watch(leaveApprovalStepsProvider(r.id))
+        : null;
     return GlassCard(
       padding: const EdgeInsets.all(14),
       shadow: AppShadows.soft,
@@ -365,7 +591,7 @@ class _LeaveTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 1),
                     Text(
-                      '${r.numberOfDays ?? "?"} day(s) · ${r.fromDate} → ${r.toDate}',
+                      '${r.daysLabel} · ${r.fromDate} → ${r.toDate}',
                       style: const TextStyle(
                         fontSize: 11.5,
                         color: AppColors.muted,
@@ -406,15 +632,45 @@ class _LeaveTile extends StatelessWidget {
               ),
             ),
           ],
+          if (steps != null)
+            steps.maybeWhen(
+              data: (s) => s.isEmpty
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: const EdgeInsets.only(top: 10),
+                      child: ApprovalChainInline(steps: s),
+                    ),
+              orElse: () => const SizedBox.shrink(),
+            ),
+          // Only an untouched request can be withdrawn. Once it is approved or
+          // rejected the decision is the approver's to undo, not the employee's.
+          if (r.status == 'PENDING') ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _busy ? null : _withdraw,
+                icon: _busy
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.undo_rounded,
+                        size: 16, color: AppColors.danger),
+                label: Text(
+                  _busy ? 'Withdrawing…' : 'Withdraw request',
+                  style: const TextStyle(color: AppColors.danger),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  String _humanType(String t) {
-    final s = t.toLowerCase().replaceAll('_', ' ');
-    return s[0].toUpperCase() + s.substring(1) + ' leave';
-  }
+  String _humanType(String t) => _humanLeaveType(t);
 }
 
 class _ApplyForLeaveButton extends StatelessWidget {
@@ -478,9 +734,14 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
   String _type = '';
   DateTime _from = DateTime.now();
   DateTime _to = DateTime.now();
+  /// FIRST_HALF | SECOND_HALF for a half-day; null = full day. Only meaningful
+  /// (and only shown) when From and To are the same day.
+  String? _half;
   final _reason = TextEditingController();
   bool _submitting = false;
   String? _err;
+
+  bool get _singleDay => DateUtils.isSameDay(_from, _to);
 
   Future<void> _pick({required bool isFrom}) async {
     final picked = await showDatePicker(
@@ -490,7 +751,7 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
       lastDate: DateTime.now().add(const Duration(days: 365)),
       builder: (ctx, child) => Theme(
         data: Theme.of(ctx).copyWith(
-          colorScheme: const ColorScheme.light(
+          colorScheme: ColorScheme.light(
             primary: AppColors.primary,
             onPrimary: Colors.white,
             surface: Colors.white,
@@ -508,6 +769,7 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
       } else {
         _to = picked;
       }
+      if (!DateUtils.isSameDay(_from, _to)) _half = null;
     });
   }
 
@@ -531,6 +793,7 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
             fromDate: DateFormat('yyyy-MM-dd').format(_from),
             toDate: DateFormat('yyyy-MM-dd').format(_to),
             reason: _reason.text.trim(),
+            halfDaySession: _singleDay ? _half : null,
           ));
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
@@ -669,6 +932,49 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
               ),
             ],
           ),
+          if (_singleDay) ...[
+            const SizedBox(height: 14),
+            const Text(
+              'Duration',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _TypeChip(
+                  label: 'Full day',
+                  icon: Icons.today_rounded,
+                  selected: _half == null,
+                  onTap: () => setState(() => _half = null),
+                ),
+                _TypeChip(
+                  label: 'First half',
+                  icon: Icons.wb_twilight_rounded,
+                  selected: _half == 'FIRST_HALF',
+                  onTap: () => setState(() => _half = 'FIRST_HALF'),
+                ),
+                _TypeChip(
+                  label: 'Second half',
+                  icon: Icons.nights_stay_rounded,
+                  selected: _half == 'SECOND_HALF',
+                  onTap: () => setState(() => _half = 'SECOND_HALF'),
+                ),
+              ],
+            ),
+            if (_half != null) ...[
+              const SizedBox(height: 6),
+              const Text(
+                'A half-day leave counts 0.5 day against your balance.',
+                style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+              ),
+            ],
+          ],
           const SizedBox(height: 14),
           const Text(
             'Reason',
@@ -843,7 +1149,7 @@ class _DateField extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(Icons.calendar_today_rounded,
+            Icon(Icons.calendar_today_rounded,
                 size: 16, color: AppColors.primary),
             const SizedBox(width: 10),
             Expanded(

@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'auth_models.dart';
 import 'auth_repository.dart';
+import 'biometric/biometric_models.dart';
+import 'biometric/device_info_service.dart';
 
 /// Holds the current authenticated user (null = signed out).
 class AuthController extends StateNotifier<AsyncValue<AuthUser?>> {
@@ -19,8 +21,22 @@ class AuthController extends StateNotifier<AsyncValue<AuthUser?>> {
   Future<void> login(String username, String password) async {
     state = const AsyncValue.loading();
     try {
+      // Device identity rides along so the backend can apply the per-shift
+      // device lock. Resolving it must never block a login on its own — if it
+      // throws we send nothing and let the server decide.
+      DeviceIdentity? device;
+      try {
+        device = await DeviceInfoService().resolve();
+      } catch (_) {
+        device = null;
+      }
       final u = await _repo.login(
-        LoginRequest(username: username.trim(), password: password),
+        LoginRequest(
+          username: username.trim(),
+          password: password,
+          hardwareDeviceId: device?.hardwareId,
+          deviceName: device?.deviceName,
+        ),
       );
       state = AsyncValue.data(u);
     } catch (e, st) {

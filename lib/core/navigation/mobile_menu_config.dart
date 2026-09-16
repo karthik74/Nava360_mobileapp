@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../features/auth/auth_models.dart';
+import '../branding.dart';
 
 /// ───────────────────────────────────────────────────────────────────────────
 ///  CENTRALIZED MOBILE NAVIGATION — single source of truth for the bottom nav
@@ -15,7 +16,7 @@ import '../../features/auth/auth_models.dart';
 ///  hardcode menu tiles in the UI. GoRouter route definitions stay in app.dart.
 /// ───────────────────────────────────────────────────────────────────────────
 
-enum MobileModule { home, hrms, payroll, team, more }
+enum MobileModule { home, hrms, payroll, team, mis, more }
 
 class MobileMenuItem {
   final String key;
@@ -39,6 +40,16 @@ class MobileMenuItem {
   /// Root entries rendered in the bottom navigation bar.
   final bool showInBottomNav;
 
+  /// Runtime feature flag (SettingKey name, e.g. `FEATURE_CHAT`) — hidden when
+  /// the deployment turns it off via /api/public/branding.
+  final String? featureFlag;
+
+  /// Backend module code (web menuConfig top-level key, e.g. `helpdesk`)
+  /// gating this item through ENABLED_MODULES. Defaults to the code of the
+  /// item's own [module]; set explicitly for items that belong to a different
+  /// web module (helpdesk/audit entries living under the HRMS grid).
+  final String? moduleCode;
+
   const MobileMenuItem({
     required this.key,
     required this.label,
@@ -52,7 +63,24 @@ class MobileMenuItem {
     this.webOnly = false,
     this.mobileAllowed = true,
     this.showInBottomNav = false,
+    this.featureFlag,
+    this.moduleCode,
   });
+}
+
+/// ENABLED_MODULES code for a mobile module (matches the web menuConfig
+/// top-level keys); null = never toggled off.
+String? _moduleCodeOf(MobileModule m) {
+  switch (m) {
+    case MobileModule.hrms:
+      return 'hrms';
+    case MobileModule.payroll:
+      return 'payroll';
+    case MobileModule.mis:
+      return 'mis';
+    default:
+      return null;
+  }
 }
 
 const List<MobileMenuItem> kMobileMenu = [
@@ -69,14 +97,26 @@ const List<MobileMenuItem> kMobileMenu = [
 
   // ── HRMS module cards ──
   // Dashboard (= Home) is surfaced as the drawer's top tile / Home tab, not an HRMS item.
+  // AI Assistant intentionally has no menu entry — it's the sparkle button
+  // at the top-right of the Home screen app bar (home_shell._AssistantButton),
+  // still gated by FEATURE_AI_ASSISTANT.
   MobileMenuItem(key: 'hrms.profile', label: 'My Profile', route: '/profile', icon: Icons.person_rounded, module: MobileModule.hrms, order: 2),
+  // My Business Card intentionally has no menu entry — it lives inside
+  // My Profile (Documents section), next to My documents.
   MobileMenuItem(key: 'hrms.attendance', label: 'Attendance', route: '/attendance', icon: Icons.fingerprint_rounded, module: MobileModule.hrms, order: 3),
   MobileMenuItem(key: 'hrms.leaves', label: 'Leaves', route: '/leaves', icon: Icons.event_available_rounded, module: MobileModule.hrms, order: 4),
   MobileMenuItem(key: 'hrms.tasks', label: 'Tasks', route: '/tasks', icon: Icons.task_alt_rounded, module: MobileModule.hrms, order: 5),
-  MobileMenuItem(key: 'hrms.chats', label: 'Chats', route: '/chats', icon: Icons.chat_rounded, module: MobileModule.hrms, order: 6),
+  // Field tool: authorised customers around the employee, on a map. Hidden when
+  // the company turns the feature off, and further narrowed server-side to the
+  // employee's own branches and book.
+  MobileMenuItem(key: 'hrms.nearbyCustomers', label: 'Nearby Customers', route: '/nearby-customers', icon: Icons.person_pin_circle_rounded, module: MobileModule.hrms, order: 6, requiredPermissions: ['CUSTOMER_NEARBY_VIEW'], featureFlag: 'FEATURE_NEARBY_CUSTOMERS'),
+  // Chats is a bottom-nav root (order 2) — NOT a drawer/HRMS-grid item.
+  // showInBottomNav also excludes it from menuFor()/allMenuItems(), so it no
+  // longer appears in the left navigation menu.
+  MobileMenuItem(key: 'hrms.chats', label: 'Chats', route: '/chats', icon: Icons.chat_rounded, module: MobileModule.hrms, order: 2, showInBottomNav: true, featureFlag: 'FEATURE_CHAT'),
   MobileMenuItem(key: 'hrms.interviews', label: 'My Interviews', route: '/interviews', icon: Icons.event_note_rounded, module: MobileModule.hrms, order: 7, requiredPermissions: ['INTERVIEW_VIEW']),
   MobileMenuItem(key: 'hrms.requisitions', label: 'Job Requisitions', route: '/requisitions', icon: Icons.work_outline_rounded, module: MobileModule.hrms, order: 8, requiredPermissions: ['REQUISITION_VIEW']),
-  MobileMenuItem(key: 'hrms.helpdesk', label: 'Helpdesk', route: '/helpdesk', icon: Icons.support_agent_rounded, module: MobileModule.hrms, order: 8, requiredPermissions: ['HELPDESK_CREATE_TICKET']),
+  MobileMenuItem(key: 'hrms.helpdesk', label: 'Helpdesk', route: '/helpdesk', icon: Icons.support_agent_rounded, module: MobileModule.hrms, order: 8, requiredPermissions: ['HELPDESK_CREATE_TICKET'], moduleCode: 'helpdesk'),
   // Knowledge Base lives under More (moved from HRMS 2026-07-04).
   // Helpdesk Dashboard intentionally removed from the mobile drawer (2026-07-04)
   // — it stays a web-only view; the /helpdesk/dashboard route still exists for
@@ -85,6 +125,26 @@ const List<MobileMenuItem> kMobileMenu = [
   // travel-claim / travel-plan permission (any of create/view).
   MobileMenuItem(key: 'hrms.travelClaims', label: 'Travel Claims', route: '/travel/claims', icon: Icons.flight_takeoff_rounded, module: MobileModule.hrms, order: 9, requiredPermissions: ['TRAVEL_CLAIM_CREATE', 'TRAVEL_CLAIM_VIEW']),
   MobileMenuItem(key: 'hrms.travelPlans', label: 'Travel Plans', route: '/travel/plans', icon: Icons.luggage_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['TRAVEL_PLAN_CREATE', 'TRAVEL_PLAN_VIEW']),
+  // Admin Tools · Purchase Orders — first of the four ported office-admin apps
+  // (rent, mail, purchase orders, letterhead) to reach mobile. Same
+  // ADMIN_PO_VIEW gate as the web sidebar entry; moduleCode matches the web
+  // top-level "adminTools" menuConfig key for the ENABLED_MODULES toggle.
+  MobileMenuItem(key: 'hrms.purchaseOrders', label: 'Purchase Orders', route: '/admin/purchase-orders', icon: Icons.receipt_long_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['ADMIN_PO_VIEW'], moduleCode: 'adminTools'),
+  // Admin Tools · Rent Management — second of the four ported office-admin apps
+  // (rent, mail, purchase orders, letterhead) to reach mobile. Same
+  // ADMIN_RENT_VIEW gate as the web sidebar entry; moduleCode matches the web
+  // top-level "adminTools" menuConfig key for the ENABLED_MODULES toggle.
+  MobileMenuItem(key: 'hrms.rentManagement', label: 'Rent Management', route: '/admin/rent', icon: Icons.home_work_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['ADMIN_RENT_VIEW'], moduleCode: 'adminTools'),
+  // Admin Tools · Mail Record — third of the four ported office-admin apps
+  // (rent, mail, purchase orders, letterhead) to reach mobile. Same
+  // ADMIN_MAIL_VIEW gate as the web sidebar entry; moduleCode matches the web
+  // top-level "adminTools" menuConfig key for the ENABLED_MODULES toggle.
+  MobileMenuItem(key: 'hrms.mailRecord', label: 'Mail Record', route: '/admin/mail', icon: Icons.mail_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['ADMIN_MAIL_VIEW'], moduleCode: 'adminTools'),
+  // Admin Tools · Letter Head — fourth and last of the ported office-admin apps
+  // (rent, mail, purchase orders, letterhead) to reach mobile. Same
+  // ADMIN_LETTERHEAD_VIEW gate as the web sidebar entry; moduleCode matches the
+  // web top-level "adminTools" menuConfig key for the ENABLED_MODULES toggle.
+  MobileMenuItem(key: 'hrms.letterhead', label: 'Letter Head', route: '/admin/letterhead', icon: Icons.description_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['ADMIN_LETTERHEAD_VIEW'], moduleCode: 'adminTools'),
   MobileMenuItem(key: 'hrms.announcements', label: 'Announcements', route: '/announcements', icon: Icons.campaign_rounded, module: MobileModule.hrms, order: 11),
   MobileMenuItem(key: 'hrms.policies', label: 'Policies', route: '/policies', icon: Icons.description_rounded, module: MobileModule.hrms, order: 12),
   MobileMenuItem(key: 'hrms.meetings', label: 'My Meetings', route: '/my-meetings', icon: Icons.event_rounded, module: MobileModule.hrms, order: 13),
@@ -92,9 +152,43 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'hrms.assets', label: 'My Assets', route: '/assets', icon: Icons.devices_other_rounded, module: MobileModule.hrms, order: 15),
   MobileMenuItem(key: 'hrms.resignation', label: 'My Resignation', route: '/my-resignation', icon: Icons.logout_rounded, module: MobileModule.hrms, order: 16),
   MobileMenuItem(key: 'hrms.performance', label: 'My Performance', route: '/my-performance', icon: Icons.insights_rounded, module: MobileModule.hrms, order: 17, requiredPermissions: ['VIEW_SELF_PERFORMANCE']),
-  MobileMenuItem(key: 'hrms.audit', label: 'Internal Audit', route: '/audit', icon: Icons.fact_check_rounded, module: MobileModule.hrms, order: 18, requiredPermissions: ['AUDIT_PERFORM', 'AUDIT_VIEW_BRANCH', 'AUDIT_VIEW_HIERARCHY', 'AUDIT_VIEW_ALL', 'AUDIT_BM_COMPLIANCE', 'AUDIT_VERIFY']),
+  // Appraisal KPA/KRA/KPI goals — distinct from 'hrms.performance' above, which
+  // is the FO scorecard. Self-service: every employee sees their own goals, so
+  // no permission gate (the endpoint scopes to the caller's employee id).
+  MobileMenuItem(key: 'hrms.goals', label: 'My Goals', route: '/my-goals', icon: Icons.flag_rounded, module: MobileModule.hrms, order: 17),
+  // Supervisor counterpart: approve target changes requested by direct reports.
+  // Manager-only — the endpoint additionally refuses any caller who is not the
+  // manager whose queue is being read.
+  MobileMenuItem(key: 'hrms.targetApprovals', label: 'Target Approvals', route: '/team-target-approvals', icon: Icons.fact_check_rounded, module: MobileModule.hrms, order: 18, employeeAllowed: false, requiredPermissions: ['PERFORMANCE_SCORE_REVIEW']),
+  MobileMenuItem(key: 'hrms.audit', label: 'Internal Audit', route: '/audit', icon: Icons.fact_check_rounded, module: MobileModule.hrms, order: 18, requiredPermissions: ['AUDIT_PERFORM', 'AUDIT_VIEW_BRANCH', 'AUDIT_VIEW_HIERARCHY', 'AUDIT_VIEW_ALL', 'AUDIT_BM_COMPLIANCE', 'AUDIT_VERIFY'], moduleCode: 'audit'),
+  // NP (Navachetana Prathinidhi) Onboarding — the 13-step BM→AM→DM→OPS
+  // candidate workflow. Same NP_CANDIDATE_VIEW gate as the web sidebar; the
+  // server further narrows the list to the caller's NP scope. moduleCode
+  // matches the web top-level "np" menuConfig key; the per-company on/off
+  // switch is App Settings → Features → NP Onboarding.
+  MobileMenuItem(key: 'hrms.npOnboarding', label: 'NP Onboarding', route: '/np', icon: Icons.person_add_alt_1_rounded, module: MobileModule.hrms, order: 19, requiredPermissions: ['NP_CANDIDATE_VIEW'], moduleCode: 'np', featureFlag: 'FEATURE_NP_ONBOARDING'),
   // Whistleblower is intentionally NOT in the menu — reached via the dashboard's
   // "Report a concern" button (keeps the reporting entry low-profile).
+
+  // ── MIS · Grow With Me module (its OWN module, not under HRMS) ──
+  // A separate backend + auto-login (derived from the nava360 identity).
+  // Always visible in the drawer regardless of the user's permissions (no
+  // MIS_VIEW gate) — the backend/API calls behind each screen still enforce
+  // their own access control. Order mirrors the website's MIS menu.
+  MobileMenuItem(key: 'mis.dashboard', label: 'Dashboard', route: '/mis', icon: Icons.dashboard_rounded, module: MobileModule.mis, order: 1),
+  MobileMenuItem(key: 'mis.portfolio', label: 'Portfolio', route: '/mis/portfolio', icon: Icons.pie_chart_rounded, module: MobileModule.mis, order: 2),
+  MobileMenuItem(key: 'mis.collection', label: 'Collection', route: '/mis/collection', icon: Icons.payments_rounded, module: MobileModule.mis, order: 3),
+  MobileMenuItem(key: 'mis.disbursement', label: 'Disbursement', route: '/mis/disbursement', icon: Icons.account_balance_rounded, module: MobileModule.mis, order: 4),
+  MobileMenuItem(key: 'mis.hourly', label: 'Hourly', route: '/mis/hourly', icon: Icons.schedule_rounded, module: MobileModule.mis, order: 5),
+  MobileMenuItem(key: 'mis.comparison', label: 'Comparison', route: '/mis/comparison', icon: Icons.compare_arrows_rounded, module: MobileModule.mis, order: 6),
+  MobileMenuItem(key: 'mis.analytical', label: 'Analytical', route: '/mis/analytical', icon: Icons.query_stats_rounded, module: MobileModule.mis, order: 7),
+  MobileMenuItem(key: 'mis.dailyPlan', label: 'Daily Report', route: '/mis/daily-plan', icon: Icons.edit_note_rounded, module: MobileModule.mis, order: 8),
+  MobileMenuItem(key: 'mis.feedback', label: 'Feedback', route: '/mis/feedback', icon: Icons.forum_rounded, module: MobileModule.mis, order: 9),
+  // Per-branch report card — auto-scoped by the API: a BM/FO only ever sees
+  // their own branch here (mirrors the web sidebar's Branch Report entry).
+  MobileMenuItem(key: 'mis.branchReport', label: 'Branch Report', route: '/mis/branch-report', icon: Icons.assessment_rounded, module: MobileModule.mis, order: 10),
+  MobileMenuItem(key: 'mis.employees', label: 'Directory', route: '/mis/employees', icon: Icons.contacts_rounded, module: MobileModule.mis, order: 11),
+  MobileMenuItem(key: 'mis.locations', label: 'Locations', route: '/mis/locations', icon: Icons.map_rounded, module: MobileModule.mis, order: 12),
 
   // ── Payroll module cards (self-service only) ──
   MobileMenuItem(key: 'pay.payslips', label: 'My Payslips', route: '/my-payslips', icon: Icons.receipt_long_rounded, module: MobileModule.payroll, order: 1),
@@ -117,7 +211,7 @@ const List<MobileMenuItem> kMobileMenu = [
   MobileMenuItem(key: 'more.notifications', label: 'Notifications', route: '/notifications', icon: Icons.notifications_rounded, module: MobileModule.more, order: 1),
   MobileMenuItem(key: 'more.password', label: 'Change Password', route: '/change-password', icon: Icons.lock_rounded, module: MobileModule.more, order: 2),
   MobileMenuItem(key: 'more.support', label: 'Help / Support', route: '/help-support', icon: Icons.help_rounded, module: MobileModule.more, order: 3),
-  MobileMenuItem(key: 'more.helpdeskKb', label: 'Knowledge Base', route: '/helpdesk/kb', icon: Icons.menu_book_rounded, module: MobileModule.more, order: 4),
+  MobileMenuItem(key: 'more.helpdeskKb', label: 'Knowledge Base', route: '/helpdesk/kb', icon: Icons.menu_book_rounded, module: MobileModule.more, order: 4, moduleCode: 'helpdesk'),
 ];
 
 /// True when the signed-in user may see manager-only entries. Heuristic (until
@@ -133,9 +227,17 @@ bool _passesPermissions(MobileMenuItem m, AuthUser? user) =>
 
 bool _visible(MobileMenuItem m, AuthUser? user, bool isManager) {
   if (m.webOnly || !m.mobileAllowed) return false; // (1) drop web-only
+  // (2) runtime deployment config (/api/public/branding): module toggles +
+  // feature flags — same semantics as the web's moduleEnabled/featureEnabled.
+  final branding = Branding.current;
+  final code = m.moduleCode ?? _moduleCodeOf(m.module);
+  if (code != null && !branding.moduleEnabled(code)) return false;
+  if (m.featureFlag != null && !branding.featureEnabled(m.featureFlag!)) {
+    return false;
+  }
   if (!m.employeeAllowed && !isManager) return false; // manager-only gate
   if (!m.managerAllowed && isManager) return false;
-  return _passesPermissions(m, user); // (2) ANY-of permission
+  return _passesPermissions(m, user); // (3) ANY-of permission
 }
 
 /// Cards for a module, filtered for the user and sorted by order. (5)
@@ -192,12 +294,18 @@ const List<MobileModuleInfo> kMobileModules = [
   MobileModuleInfo(module: MobileModule.home, label: 'Home', route: '/home', icon: Icons.home_rounded),
   MobileModuleInfo(module: MobileModule.hrms, label: 'HRMS', route: '/hrms', icon: Icons.groups_rounded),
   MobileModuleInfo(module: MobileModule.payroll, label: 'Payroll', route: '/payroll', icon: Icons.payments_rounded),
+  MobileModuleInfo(module: MobileModule.mis, label: 'MIS', route: '/mis', icon: Icons.query_stats_rounded),
   MobileModuleInfo(module: MobileModule.team, label: 'My Team', route: '/team', icon: Icons.supervisor_account_rounded, managerOnly: true),
   MobileModuleInfo(module: MobileModule.more, label: 'More', route: '/more', icon: Icons.more_horiz_rounded),
 ];
 
-/// Modules visible to the user (My Team only for managers).
+/// Modules visible to the user (My Team only for managers; modules the
+/// deployment disabled via ENABLED_MODULES are dropped for everyone).
 List<MobileModuleInfo> modulesFor(AuthUser? user) {
   final isManager = isManagerUser(user);
-  return kMobileModules.where((m) => !m.managerOnly || isManager).toList();
+  return kMobileModules.where((m) {
+    if (m.managerOnly && !isManager) return false;
+    final code = _moduleCodeOf(m.module);
+    return code == null || Branding.current.moduleEnabled(code);
+  }).toList();
 }

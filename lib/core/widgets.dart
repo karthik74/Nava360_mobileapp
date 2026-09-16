@@ -1,7 +1,88 @@
 import 'dart:ui';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import 'theme.dart';
+
+// ------------------------------------------------------------------
+// Linkified text
+// ------------------------------------------------------------------
+
+/// Plain text whose http(s) URLs are tappable and open in the external
+/// browser. Only http/https ever launches — never intent:/file: schemes.
+class LinkifiedText extends StatefulWidget {
+  const LinkifiedText(this.text, {super.key, this.style, this.linkColor});
+
+  final String text;
+  final TextStyle? style;
+  final Color? linkColor;
+
+  @override
+  State<LinkifiedText> createState() => _LinkifiedTextState();
+}
+
+class _LinkifiedTextState extends State<LinkifiedText> {
+  static final RegExp _urlRe = RegExp("https?://[^\\s<>\"')]+");
+  static final RegExp _trailingPunct = RegExp(r'[.,;:!?]+$');
+
+  final List<TapGestureRecognizer> _recognizers = [];
+
+  @override
+  void dispose() {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Spans are rebuilt every build; retire the previous taps' recognizers.
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    _recognizers.clear();
+
+    final matches = _urlRe.allMatches(widget.text).toList();
+    if (matches.isEmpty) return Text(widget.text, style: widget.style);
+
+    final base = widget.style ?? DefaultTextStyle.of(context).style;
+    final linkStyle = base.copyWith(
+      color: widget.linkColor ?? AppColors.primary,
+      fontWeight: FontWeight.w600,
+      decoration: TextDecoration.underline,
+    );
+    final spans = <InlineSpan>[];
+    var last = 0;
+    for (final m in matches) {
+      if (m.start > last) {
+        spans.add(TextSpan(text: widget.text.substring(last, m.start)));
+      }
+      final raw = m.group(0)!;
+      // Trailing sentence punctuation belongs to the prose, not the URL.
+      final url = raw.replaceFirst(_trailingPunct, '');
+      final recognizer = TapGestureRecognizer()
+        ..onTap = () {
+          final uri = Uri.tryParse(url);
+          if (uri != null && (uri.isScheme('http') || uri.isScheme('https'))) {
+            launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        };
+      _recognizers.add(recognizer);
+      spans.add(TextSpan(text: url, style: linkStyle, recognizer: recognizer));
+      if (url.length < raw.length) {
+        spans.add(TextSpan(text: raw.substring(url.length)));
+      }
+      last = m.end;
+    }
+    if (last < widget.text.length) {
+      spans.add(TextSpan(text: widget.text.substring(last)));
+    }
+    return Text.rich(TextSpan(style: base, children: spans));
+  }
+}
 
 // ------------------------------------------------------------------
 // Empty / Error / Loading states
@@ -378,24 +459,25 @@ class AnimatedGradientCard extends StatelessWidget {
   const AnimatedGradientCard({
     super.key,
     required this.child,
-    this.gradient = AppColors.heroGradient,
+    this.gradient,
     this.height,
   });
 
   final Widget child;
-  final Gradient gradient;
+  final Gradient? gradient;
   final double? height;
 
   @override
   Widget build(BuildContext context) {
+    final effectiveGradient = gradient ?? AppColors.heroGradient;
     return Container(
       height: height,
       decoration: BoxDecoration(
-        gradient: gradient,
+        gradient: effectiveGradient,
         borderRadius: BorderRadius.circular(AppRadii.xl),
         boxShadow: [
           BoxShadow(
-            color: (gradient.colors.first).withOpacity(0.35),
+            color: (effectiveGradient.colors.first).withOpacity(0.35),
             blurRadius: 30,
             offset: const Offset(0, 14),
           ),
@@ -852,7 +934,7 @@ class _HeroCta extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (busy)
-                  const SizedBox(
+                  SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
@@ -861,7 +943,7 @@ class _HeroCta extends StatelessWidget {
                     ),
                   )
                 else
-                  const Icon(
+                  Icon(
                     Icons.fingerprint_rounded,
                     size: 18,
                     color: AppColors.primary,
@@ -869,7 +951,7 @@ class _HeroCta extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppColors.primary,
                     fontSize: 14,
                     fontWeight: FontWeight.w800,
@@ -1161,7 +1243,7 @@ class TodayScheduleList extends StatelessWidget {
                 ),
               ),
               alignment: Alignment.center,
-              child: const Icon(
+              child: Icon(
                 Icons.event_available_rounded,
                 size: 16,
                 color: AppColors.primary,

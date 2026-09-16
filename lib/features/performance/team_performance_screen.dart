@@ -115,7 +115,7 @@ class _TeamPerformanceScreenState extends ConsumerState<TeamPerformanceScreen> {
           ],
 
           if (canTeam) ...[
-            const Row(
+            Row(
               children: [
                 Icon(Icons.groups_2_rounded, size: 17, color: AppColors.primary),
                 SizedBox(width: 8),

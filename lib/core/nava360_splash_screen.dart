@@ -41,13 +41,6 @@ class Nava360SplashScreen extends StatefulWidget {
 class _Nava360SplashScreenState extends State<Nava360SplashScreen>
     with TickerProviderStateMixin {
   // ----------------------------- Tunables ------------------------------------
-  static const Duration _kRevolution = Duration(seconds: 2); // 2s / full turn
-  static const bool _kClockwise = true;
-  // Requested ease-in-out gives a gentle "breathing" rotation. Velocity is ~0
-  // at the seam between revolutions, so it loops smoothly with no jump.
-  // Swap to Curves.linear if you prefer perfectly constant spinner speed.
-  static const Curve _kRotationCurve = Curves.easeInOut;
-
   static const Duration _kEntrance = Duration(milliseconds: 750);
   static const double _kCenterScaleFrom = 0.95; // 95% -> 100%
 
@@ -61,11 +54,9 @@ class _Nava360SplashScreenState extends State<Nava360SplashScreen>
   static const Duration _kGlowPulse = Duration(milliseconds: 1700);
   // ---------------------------------------------------------------------------
 
-  late final AnimationController _spin;     // continuous ring rotation
   late final AnimationController _entrance; // one-shot fade + scale-in
   late final AnimationController _glow;     // subtle glow pulse
 
-  late final Animation<double> _turns;
   late final Animation<double> _centerScale;
   late final Animation<double> _fade;
   late final Animation<double> _glowOpacity;
@@ -73,10 +64,6 @@ class _Nava360SplashScreenState extends State<Nava360SplashScreen>
   @override
   void initState() {
     super.initState();
-
-    _spin = AnimationController(vsync: this, duration: _kRevolution)..repeat();
-    _turns = Tween<double>(begin: 0, end: _kClockwise ? 1 : -1)
-        .animate(CurvedAnimation(parent: _spin, curve: _kRotationCurve));
 
     _entrance = AnimationController(vsync: this, duration: _kEntrance)..forward();
     _centerScale = Tween<double>(begin: _kCenterScaleFrom, end: 1)
@@ -97,7 +84,6 @@ class _Nava360SplashScreenState extends State<Nava360SplashScreen>
 
   @override
   void dispose() {
-    _spin.dispose();
     _entrance.dispose();
     _glow.dispose();
     super.dispose();
@@ -110,61 +96,46 @@ class _Nava360SplashScreenState extends State<Nava360SplashScreen>
       body: Center(
         child: FadeTransition(
           opacity: _fade, // soft fade-in of the whole mark on launch
-          child: SizedBox(
-            width: _kLogoSize,
-            height: _kLogoSize,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // --- Rotating ring (arcs) + matching colour glow -------------
-                RotationTransition(
-                  turns: _turns,
-                  child: RepaintBoundary(
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        if (_kGlowEnabled)
-                          FadeTransition(
-                            opacity: _glowOpacity,
-                            child: Transform.scale(
-                              scale: _kGlowScale,
-                              child: ImageFiltered(
-                                imageFilter: ui.ImageFilter.blur(
-                                  sigmaX: _kGlowBlur,
-                                  sigmaY: _kGlowBlur,
-                                ),
-                                child: const Image(
-                                  image: AssetImage('assets/nava360_ring.png'),
-                                  width: _kLogoSize,
-                                  height: _kLogoSize,
-                                  gaplessPlayback: true,
-                                ),
-                              ),
-                            ),
+          child: ScaleTransition(
+            scale: _centerScale, // gentle scale-in entrance
+            child: SizedBox(
+              width: _kLogoSize,
+              height: _kLogoSize,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Soft brand-coloured glow halo behind the mark (pulses).
+                  if (_kGlowEnabled)
+                    FadeTransition(
+                      opacity: _glowOpacity,
+                      child: Transform.scale(
+                        scale: _kGlowScale,
+                        child: ImageFiltered(
+                          imageFilter: ui.ImageFilter.blur(
+                            sigmaX: _kGlowBlur,
+                            sigmaY: _kGlowBlur,
                           ),
-                        const Image(
-                          image: AssetImage('assets/nava360_ring.png'),
-                          width: _kLogoSize,
-                          height: _kLogoSize,
-                          filterQuality: FilterQuality.high,
-                          gaplessPlayback: true,
+                          child: const Image(
+                            image: AssetImage('assets/images/nava360_logo.png'),
+                            width: _kLogoSize,
+                            height: _kLogoSize,
+                            gaplessPlayback: true,
+                          ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
 
-                // --- Static centre: figures, hands, leaf, icons --------------
-                ScaleTransition(
-                  scale: _centerScale,
-                  child: const Image(
-                    image: AssetImage('assets/nava360_center.png'),
+                  // The full brand logo (already includes the ring/arcs), so no
+                  // separate rotating-ring layer — a second set of arcs on top
+                  // would double up and look broken.
+                  const Image(
+                    image: AssetImage('assets/images/nava360_logo.png'),
                     width: _kLogoSize,
                     height: _kLogoSize,
                     filterQuality: FilterQuality.high,
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

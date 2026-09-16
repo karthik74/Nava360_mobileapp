@@ -19,7 +19,10 @@ val keystoreProperties = Properties().apply {
 android {
     namespace = "com.hrms.nava_360"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Pin to the NDK actually installed on this machine — flutter.ndkVersion
+    // references a version that isn't present, which makes release BUNDLE
+    // builds fail at "strip debug symbols" (APK builds don't hit it).
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -40,6 +43,44 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    // ── Company flavors (white-label) ────────────────────────────────────────
+    // One Play Store listing per company: each flavor has its own application
+    // id, launcher name and icon (src/<flavor>/res/mipmap-*), and Env.dart maps
+    // the flavor to that company's backend URL. EVERY applicationId below must
+    // be registered as an Android app in the same Firebase project and be
+    // present in google-services.json, or that flavor's build fails.
+    // Build:  flutter build appbundle --release --flavor laxmi   (etc.)
+    // Run:    flutter run --flavor livelihoods
+    flavorDimensions += "company"
+    productFlavors {
+        create("livelihoods") {
+            dimension = "company"
+            // The original id — keeps the existing Play listing + installs.
+            applicationId = "com.hrms.nava_360"
+            resValue("string", "app_name", "Nava360")
+        }
+        create("souhardha") {
+            dimension = "company"
+            applicationId = "com.hrms.nava_360.souhardha"
+            resValue("string", "app_name", "Navachetana Souhardha")
+        }
+        create("laxmi") {
+            dimension = "company"
+            applicationId = "com.hrms.nava_360.laxmi"
+            resValue("string", "app_name", "Laxmi Multistate")
+        }
+        create("nmspl") {
+            dimension = "company"
+            applicationId = "com.hrms.nava_360.nmspl"
+            resValue("string", "app_name", "NMSPL")
+        }
+        create("cfspl") {
+            dimension = "company"
+            applicationId = "com.hrms.nava_360.cfspl"
+            resValue("string", "app_name", "CFSPL")
+        }
     }
 
     signingConfigs {

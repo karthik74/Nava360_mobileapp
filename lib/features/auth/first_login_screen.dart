@@ -42,7 +42,7 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
 
   // OTP SMS auto-read (SMS User Consent API — no READ_SMS permission).
   final _smsOtp = SmsOtpListener();
-  final _otpKey = GlobalKey<_OtpInputState>();
+  final _otpKey = GlobalKey<OtpInputState>();
 
   // Resend cooldown.
   Timer? _timer;
@@ -301,7 +301,7 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
         children: [
           const AuthFieldLabel('Verification code'),
           const SizedBox(height: 8),
-          _OtpInput(
+          OtpInput(
             key: _otpKey,
             length: 6,
             onChanged: (v) => setState(() => _otp = v),
@@ -423,18 +423,19 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
 
 // ──────────────────────────────────────────────────────────────────────
 // 6-digit OTP input — auto-advances on type, backspaces to previous.
+// Public so the forgot-password screen can reuse it.
 // ──────────────────────────────────────────────────────────────────────
 
-class _OtpInput extends StatefulWidget {
-  const _OtpInput({super.key, required this.length, required this.onChanged});
+class OtpInput extends StatefulWidget {
+  const OtpInput({super.key, required this.length, required this.onChanged});
   final int length;
   final ValueChanged<String> onChanged;
 
   @override
-  State<_OtpInput> createState() => _OtpInputState();
+  State<OtpInput> createState() => OtpInputState();
 }
 
-class _OtpInputState extends State<_OtpInput> {
+class OtpInputState extends State<OtpInput> {
   late final List<TextEditingController> _controllers =
       List.generate(widget.length, (_) => TextEditingController());
   late final List<FocusNode> _nodes =

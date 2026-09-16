@@ -5,10 +5,15 @@
     <item android:drawable="@android:color/white" />
 
     <!-- Brand logo centered — makes the OS launch window blend into the
-         Flutter branded loader (no blank flash). -->
-    <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@drawable/launch_image" />
+         Flutter branded loader (no blank flash). Pin to a fixed 240dp box
+         (matching the Flutter loader) so the large source isn't density-scaled
+         into an oversized, clipped, off-centre image. -->
+    <item
+        android:width="240dp"
+        android:height="240dp"
+        android:gravity="center">
+        <!-- No bitmap gravity → the (square) image SCALES DOWN to fill this
+             240dp box instead of drawing at full intrinsic size and clipping. -->
+        <bitmap android:src="@drawable/launch_image" />
     </item>
 </layer-list>

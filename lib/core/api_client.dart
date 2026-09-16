@@ -118,6 +118,31 @@ class ApiClient {
     }
   }
 
+  /// POSTs JSON and receives a raw binary body (e.g. synthesized TTS audio).
+  /// Like [getBytes], this does NOT unwrap the JSON `ApiResponse` envelope.
+  /// [receiveTimeout] overrides the client default for latency-sensitive
+  /// callers (e.g. TTS, which would rather fail fast and stay silent).
+  Future<Uint8List> postBytes(
+    String path, {
+    Object? body,
+    Duration? receiveTimeout,
+  }) async {
+    try {
+      final res = await _dio.post<List<int>>(
+        path,
+        data: body,
+        options: Options(
+          responseType: ResponseType.bytes,
+          receiveTimeout: receiveTimeout,
+          sendTimeout: receiveTimeout,
+        ),
+      );
+      return Uint8List.fromList(res.data ?? const []);
+    } on DioException catch (e) {
+      throw _mapError(e);
+    }
+  }
+
   Future<T> post<T>(
     String path, {
     Object? body,

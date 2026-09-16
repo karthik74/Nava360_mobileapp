@@ -1,12 +1,23 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
+import 'core/branding.dart';
 import 'features/notifications/push_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Portrait everywhere by default — the one screen that needs landscape
+  // (the Branch Report card, so its table fits without scrolling) switches
+  // to it on entry and restores this on the way out. Not awaited: it must
+  // not delay the first frame.
+  SystemChrome.setPreferredOrientations(const [
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 
   // Background message handler MUST be registered before runApp.
   // Safe even if Firebase isn't yet initialised — the registration just
@@ -14,6 +25,12 @@ Future<void> main() async {
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
   final container = ProviderContainer();
+
+  // Company branding (name/logo/color/feature flags) — cache-first, then a
+  // background refresh from /api/public/branding. Deliberately NOT awaited so
+  // the first frame is never blocked; the cached copy usually lands before
+  // the splash finishes bootstrapping auth.
+  container.read(brandingProvider.notifier).bootstrap();
 
   // Paint the app (and its branded splash loader) on the very first frame —
   // do NOT await any async init before runApp, otherwise the OS shows a blank

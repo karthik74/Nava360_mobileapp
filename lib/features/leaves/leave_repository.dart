@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/approvals.dart';
 import 'leave_models.dart';
 
 class LeaveRepository {
@@ -21,18 +22,27 @@ class LeaveRepository {
     );
   }
 
-  /// Dates in [from..to] (yyyy-MM-dd) covered by a PENDING leave request for the
-  /// employee, expanded across each request's from→to span. Used to flag
-  /// "Leave request submitted" days on the attendance screen.
-  Future<Set<String>> myPendingLeaveDates(
+  /// Pending and APPROVED leave dates in [from..to] (yyyy-MM-dd) for the employee,
+  /// each expanded across its from→to span, from a single fetch. Pending drives the
+  /// "Leave request submitted" note; approved must render the day as On Leave (not
+  /// Absent) because leave approval never writes an ON_LEAVE attendance row.
+  Future<({Set<String> pending, Set<String> approved})> myLeaveDates(
     int employeeId, {
     String? from,
     String? to,
   }) async {
     final leaves = await listForEmployee(employeeId, size: 100);
-    final out = <String>{};
+    final pending = <String>{};
+    final approved = <String>{};
     for (final lv in leaves) {
-      if (lv.status != 'PENDING') continue;
+      final Set<String> bucket;
+      if (lv.status == 'PENDING') {
+        bucket = pending;
+      } else if (lv.status == 'APPROVED') {
+        bucket = approved;
+      } else {
+        continue;
+      }
       final start = DateTime.tryParse(lv.fromDate);
       final end = DateTime.tryParse(lv.toDate);
       if (start == null || end == null) continue;
@@ -42,10 +52,10 @@ class LeaveRepository {
             '${d.day.toString().padLeft(2, '0')}';
         if (from != null && iso.compareTo(from) < 0) continue;
         if (to != null && iso.compareTo(to) > 0) continue;
-        out.add(iso);
+        bucket.add(iso);
       }
     }
-    return out;
+    return (pending: pending, approved: approved);
   }
 
   Future<List<LeaveRequest>> listForTeam({int page = 0, int size = 50}) async {
@@ -94,6 +104,38 @@ class LeaveRepository {
     );
   }
 
+  /// Leaves waiting on the CALLER as a configured chain approver (Wave 4b
+  /// approval engine). Empty when no chain step is pending on them — chain
+  /// approvers aren't necessarily direct managers, so this is surfaced on the
+  /// employee-facing Leaves screen too.
+  Future<List<LeaveRequest>> pendingMyApproval() {
+    return _api.get<List<LeaveRequest>>(
+      '/api/leaves/pending-my-approval',
+      parse: (d) => ((d as List?) ?? const [])
+          .map((e) => LeaveRequest.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+
+  /// The configured approval chain of one leave (empty = default
+  /// direct-manager flow; hide the chain UI).
+  Future<List<ApprovalStep>> approvalSteps(int id) {
+    return _api.get<List<ApprovalStep>>(
+      '/api/leaves/$id/approval-steps',
+      parse: ApprovalStep.listFromJson,
+    );
+  }
+
+  /// Withdraw a leave request the signed-in employee raised. The backend moves
+  /// it to CANCELLED and cancels any in-flight approval chain; it refuses once
+  /// an APPROVED leave has already started.
+  Future<LeaveRequest> cancel(int id) {
+    return _api.patch<LeaveRequest>(
+      '/api/leaves/$id/cancel',
+      parse: (d) => LeaveRequest.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
   Future<LeaveRequest> review(int id,
       {required String status, int? reviewerEmployeeId, String? reviewComment}) {
     return _api.patch<LeaveRequest>(
@@ -112,3 +154,24 @@ class LeaveRepository {
 final leaveRepositoryProvider = Provider<LeaveRepository>(
   (ref) => LeaveRepository(ref.watch(apiClientProvider)),
 );
+
+/// Leaves pending the signed-in user's chain approval. Errors degrade to an
+/// empty list so the section simply hides.
+final leavesPendingMyApprovalProvider =
+    FutureProvider.autoDispose<List<LeaveRequest>>((ref) async {
+  try {
+    return await ref.watch(leaveRepositoryProvider).pendingMyApproval();
+  } catch (_) {
+    return const [];
+  }
+});
+
+/// Approval chain of one leave request (empty = no custom chain).
+final leaveApprovalStepsProvider = FutureProvider.autoDispose
+    .family<List<ApprovalStep>, int>((ref, id) async {
+  try {
+    return await ref.watch(leaveRepositoryProvider).approvalSteps(id);
+  } catch (_) {
+    return const [];
+  }
+});

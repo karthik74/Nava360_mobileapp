@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/text_formatters.dart';
+import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'helpdesk_models.dart';
@@ -196,7 +197,7 @@ class _HelpdeskTicketDetailScreenState extends ConsumerState<HelpdeskTicketDetai
                               borderRadius: BorderRadius.circular(AppRadii.pill),
                             ),
                             child: Text(t.currentStageName!,
-                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.primary)),
+                                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.primary)),
                           ),
                       ]),
                       if (t.availableActions.where((a) => a != 'REASSIGN').isNotEmpty) ...[
@@ -224,9 +225,9 @@ class _HelpdeskTicketDetailScreenState extends ConsumerState<HelpdeskTicketDetai
               const _SectionTitle('Details'),
               _kv('Raised by', s.raisedByName),
               _kv('Assignee', s.assignedToName ?? 'Unassigned'),
-              _kv('Branch', s.branchName),
-              _kv('Department', s.department),
-              _kv('Region', t.regionName),
+              _kv(Branding.current.term('branch'), s.branchName),
+              _kv(Branding.current.term('department'), s.department),
+              _kv(Branding.current.term('region'), t.regionName),
               _kv('Reporting manager', t.reportingManagerName),
               _kv('Ticket type', t.ticketTypeName),
               _kv('Response due', t.responseDueAt == null ? null : df.format(t.responseDueAt!.toLocal())),
@@ -288,7 +289,7 @@ class _HelpdeskTicketDetailScreenState extends ConsumerState<HelpdeskTicketDetai
               const SizedBox(width: 8),
               IconButton(
                 onPressed: _busy ? null : _reply,
-                icon: const Icon(Icons.send_rounded, color: AppColors.primary),
+                icon: Icon(Icons.send_rounded, color: AppColors.primary),
               ),
             ]),
           ),

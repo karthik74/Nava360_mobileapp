@@ -17,6 +17,7 @@ import 'chat_controller.dart';
 import 'chat_models.dart';
 import 'chat_repository.dart';
 import 'chat_socket_service.dart';
+import 'forward_message_screen.dart';
 import 'group_info_screen.dart';
 
 class ChatThreadScreen extends ConsumerStatefulWidget {
@@ -36,6 +37,11 @@ class ChatThreadScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
+  /// Set once the open group vanishes from the live conversation list (an admin
+  /// deleted it, or we were removed). We swap the body for a notice instead of
+  /// popping, so a concurrent pop from Group Info can't over-pop the stack.
+  bool _conversationGone = false;
+
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   bool _sending = false;
@@ -528,6 +534,17 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     }
   }
 
+  /// Open the forward picker; toast once the copies are sent.
+  Future<void> _forward(ChatMessage msg) async {
+    final count = await Navigator.of(context).push<int>(
+      MaterialPageRoute(builder: (_) => ForwardMessageScreen(message: msg)),
+    );
+    if (!mounted || count == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Forwarded to $count chat${count == 1 ? '' : 's'}')),
+    );
+  }
+
   /// "Reply Privately" / "Message": open (or create) the DM with the sender.
   /// A reply-privately quote of the original rides along when [replyPrivately].
   Future<void> _openDirectWithSender(ChatMessage msg,
@@ -630,6 +647,18 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
                     setState(() => _replyingTo = msg);
                   },
                 ),
+                if (!msg.deletedForEveryone &&
+                    !msg.isSystem &&
+                    msg.type.name != 'ACTION_CARD')
+                  _SheetAction(
+                    icon: Icons.forward_rounded,
+                    label: 'Forward',
+                    color: AppColors.primary,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _forward(msg);
+                    },
+                  ),
                 if (!isMine) ...[
                   _SheetAction(
                     icon: Icons.person_outline_rounded,
@@ -706,9 +735,68 @@ class _ChatThreadScreenState extends ConsumerState<ChatThreadScreen> {
     );
   }
 
+  Widget _goneScaffold(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFE5DDD5),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF008069),
+        foregroundColor: Colors.white,
+        title: Text(widget.conversation.title),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.group_off_rounded,
+                  size: 48, color: AppColors.muted),
+              const SizedBox(height: 14),
+              const Text(
+                'This group is no longer available',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.ink,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'It was deleted by a group admin, or you were removed from it.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: AppColors.inkSoft),
+              ),
+              const SizedBox(height: 18),
+              FilledButton(
+                onPressed: () => Navigator.of(context).maybePop(),
+                child: const Text('Back to chats'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final conv = widget.conversation;
+    // Prefer the live list copy (renames / membership changes arrive over the
+    // socket); fall back to the conversation we were opened with (drafts).
+    final convId = widget.conversation.id;
+    ref.listen<AsyncValue<List<Conversation>>>(conversationsProvider, (prev, next) {
+      if (!widget.conversation.isGroup || _conversationGone) return;
+      final was = prev?.valueOrNull?.any((c) => c.id == convId) ?? false;
+      final now = next.valueOrNull?.any((c) => c.id == convId) ?? true;
+      if (was && !now && mounted) setState(() => _conversationGone = true);
+    });
+    if (_conversationGone) return _goneScaffold(context);
+    final conv = ref
+            .watch(conversationsProvider)
+            .valueOrNull
+            ?.where((c) => c.id == convId)
+            .firstOrNull ??
+        widget.conversation;
     final msgs = ref.watch(chatMessagesProvider(conv.id));
     final user = ref.watch(authUserProvider);
     final myEmpId = user?.employeeId;
@@ -1205,8 +1293,12 @@ class _MessageBubble extends StatelessWidget {
       opaque: false,
       barrierColor: Colors.black,
       transitionDuration: const Duration(milliseconds: 220),
-      pageBuilder: (_, __, ___) =>
-          _ImageViewerScreen(url: url, title: msg.attachmentName ?? 'Image'),
+      pageBuilder: (_, __, ___) => _ImageViewerScreen(
+        url: url,
+        // WhatsApp-style header: who sent it and when (not the file name).
+        title: isMine ? 'You' : msg.senderName,
+        subtitle: DateFormat('d MMM yyyy, h:mm a').format(msg.createdAt),
+      ),
       transitionsBuilder: (_, anim, __, child) => FadeTransition(
         opacity: anim,
         child: ScaleTransition(
@@ -1297,6 +1389,29 @@ class _MessageBubble extends StatelessWidget {
                         ],
                       )
                     else ...[
+                      if (msg.forwarded)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 3),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.forward_rounded,
+                                  size: 13,
+                                  color: const Color(0xFF8696A0)
+                                      .withOpacity(0.9)),
+                              const SizedBox(width: 3),
+                              Text(
+                                'Forwarded',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontStyle: FontStyle.italic,
+                                  color: const Color(0xFF8696A0)
+                                      .withOpacity(0.9),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       if (msg.replyToId != null)
                         // Full bubble width, WhatsApp-style quote block.
                         SizedBox(
@@ -1319,13 +1434,16 @@ class _MessageBubble extends StatelessWidget {
                                 ? _imageWidth
                                 : double.infinity,
                           ),
-                          child: Text(
+                          child: LinkifiedText(
                             msg.content!,
                             style: const TextStyle(
                               fontSize: 13.8,
                               color: Color(0xFF111B21), // WhatsApp dark text color
                               height: 1.3,
                             ),
+                            // WhatsApp-style link blue, readable on both the
+                            // green (mine) and white (theirs) bubbles.
+                            linkColor: const Color(0xFF027EB5),
                           ),
                         ),
                     ],
@@ -2219,9 +2337,11 @@ class _SheetAction extends StatelessWidget {
 /// zoom to the tapped point, 90° rotate, and tap-to-toggle chrome. Mirrors the
 /// web ImageViewer's interaction model, dependency-free.
 class _ImageViewerScreen extends StatefulWidget {
-  const _ImageViewerScreen({required this.url, required this.title});
+  const _ImageViewerScreen({required this.url, required this.title, this.subtitle});
   final String url;
   final String title;
+  /// Secondary line under the title (e.g. when the image was sent).
+  final String? subtitle;
 
   @override
   State<_ImageViewerScreen> createState() => _ImageViewerScreenState();
@@ -2329,11 +2449,27 @@ class _ImageViewerScreenState extends State<_ImageViewerScreen>
                     onPressed: () => Navigator.pop(context),
                   ),
                   Expanded(
-                    child: Text(
-                      widget.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontSize: 15),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600),
+                        ),
+                        if (widget.subtitle != null)
+                          Text(
+                            widget.subtitle!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                      ],
                     ),
                   ),
                   IconButton(

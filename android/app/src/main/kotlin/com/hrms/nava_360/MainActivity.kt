@@ -26,6 +26,7 @@ class MainActivity : FlutterFragmentActivity() {
     private val channelName = "app/downloads"
     private val batteryChannelName = "app/battery"
     private val secureChannelName = "app/secure_screen"
+    private val deviceIdentityChannelName = "app/device_identity"
     private val storageReqCode = 9911
 
     // Held while we wait for the runtime storage-permission dialog (API < 29).
@@ -94,6 +95,38 @@ class MainActivity : FlutterFragmentActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Returns the SSAID (Settings.Secure.ANDROID_ID) used as the key for the
+        // per-shift mobile device lock. This is the closest legitimate stand-in for
+        // an IMEI: a real IMEI needs READ_PRIVILEGED_PHONE_STATE, which is reserved
+        // for system/carrier apps on API 29+, and Play policy forbids collecting it.
+        //
+        // SSAID is scoped to (app signing key, user, device): it survives reinstall
+        // and Clear Data, and resets only on factory reset. No permission required.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, deviceIdentityChannelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getHardwareId" -> result.success(hardwareId())
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    @Suppress("HardwareIds")
+    private fun hardwareId(): String? {
+        return try {
+            val id = android.provider.Settings.Secure.getString(
+                contentResolver,
+                android.provider.Settings.Secure.ANDROID_ID,
+            )
+            // A handful of buggy ROMs return this well-known broken constant, and it
+            // is null before setup completes. Treat both as "no id" so Dart falls
+            // back to the persisted UUID rather than locking every such device to
+            // the same shared value.
+            if (id.isNullOrBlank() || id == "9774d56d682e549c") null else id
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun isBackgroundRestricted(): Boolean {

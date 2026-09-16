@@ -6,6 +6,11 @@ class Resignation {
   Resignation({
     required this.id,
     required this.status,
+    this.employeeName,
+    this.employeeCode,
+    this.designation,
+    this.department,
+    this.branch,
     this.resignationDate,
     this.noticePeriodDays,
     this.lastWorkingDay,
@@ -18,6 +23,12 @@ class Resignation {
 
   final int id;
   final String status; // PENDING | IN_APPROVAL | APPROVED | REJECTED | WITHDRAWN | COMPLETED
+  /// Set on records of other people (an approver's inbox); null on "my" records.
+  final String? employeeName;
+  final String? employeeCode;
+  final String? designation;
+  final String? department;
+  final String? branch;
   final DateTime? resignationDate;
   final int? noticePeriodDays;
   final DateTime? lastWorkingDay;
@@ -37,6 +48,11 @@ class Resignation {
   factory Resignation.fromJson(Map<String, dynamic> j) => Resignation(
         id: (j['id'] as num).toInt(),
         status: j['status'] as String? ?? 'PENDING',
+        employeeName: j['employeeName'] as String?,
+        employeeCode: j['employeeCode'] as String?,
+        designation: j['designation'] as String?,
+        department: j['department'] as String?,
+        branch: j['branch'] as String?,
         resignationDate: _date(j['resignationDate']),
         noticePeriodDays: (j['noticePeriodDays'] as num?)?.toInt(),
         lastWorkingDay: _date(j['lastWorkingDay']),
@@ -64,5 +80,63 @@ class NoticePeriodInfo {
         noticePeriodDays: (j['noticePeriodDays'] as num?)?.toInt() ?? 0,
         resolved: j['resolved'] == true,
         tenureMonths: (j['tenureMonths'] as num?)?.toInt(),
+      );
+}
+
+/// One level of the configurable resignation approval workflow.
+class ResignationApprovalStep {
+  ResignationApprovalStep({
+    required this.id,
+    required this.levelOrder,
+    required this.levelName,
+    required this.stepStatus,
+    this.approverEmployeeId,
+    this.approverEmployeeName,
+    this.approverDesignation,
+    this.remarks,
+    this.actionAt,
+  });
+
+  final int id;
+  final int levelOrder;
+  final String levelName;
+  /// NOT_STARTED | PENDING | APPROVED | REJECTED | SKIPPED
+  final String stepStatus;
+  final int? approverEmployeeId;
+  final String? approverEmployeeName;
+  final String? approverDesignation;
+  final String? remarks;
+  final DateTime? actionAt;
+
+  bool get isPending => stepStatus == 'PENDING';
+
+  factory ResignationApprovalStep.fromJson(Map<String, dynamic> j) =>
+      ResignationApprovalStep(
+        id: (j['id'] as num).toInt(),
+        levelOrder: (j['levelOrder'] as num?)?.toInt() ?? 0,
+        levelName: j['levelName'] as String? ?? 'Approval',
+        stepStatus: j['stepStatus'] as String? ?? 'NOT_STARTED',
+        approverEmployeeId: (j['approverEmployeeId'] as num?)?.toInt(),
+        approverEmployeeName: j['approverEmployeeName'] as String?,
+        approverDesignation: j['approverDesignation'] as String?,
+        remarks: j['remarks'] as String?,
+        actionAt: _date(j['actionAt']),
+      );
+}
+
+/// An approval step plus the resignation it belongs to — one row of the
+/// approver's inbox (`/api/resignations/my-approvals`).
+class ResignationApproval {
+  ResignationApproval({required this.step, required this.resignation});
+
+  final ResignationApprovalStep step;
+  final Resignation resignation;
+
+  factory ResignationApproval.fromJson(Map<String, dynamic> j) =>
+      ResignationApproval(
+        step: ResignationApprovalStep.fromJson(
+            j['step'] as Map<String, dynamic>),
+        resignation:
+            Resignation.fromJson(j['resignation'] as Map<String, dynamic>),
       );
 }

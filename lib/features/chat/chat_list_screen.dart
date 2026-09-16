@@ -2,7 +2,6 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/env.dart';
@@ -48,57 +47,15 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
     return GlassBackdrop(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        appBar: PreferredSize(
-          preferredSize: Size.fromHeight(mq.padding.top + AppChrome.appBarHeight),
-          child: ClipRect(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: GlassBlur.chrome,
-                sigmaY: GlassBlur.chrome,
-              ),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.62),
-                  border: Border(
-                    bottom: BorderSide(color: Colors.white.withOpacity(0.5)),
-                  ),
-                ),
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 4, 12, 4),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                          onPressed: () => context.pop(),
-                          color: AppColors.inkSoft,
-                        ),
-                        const SizedBox(width: 4),
-                        const Expanded(
-                          child: Text(
-                            'Chats',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.ink,
-                              letterSpacing: -0.2,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
+        // Chats is now a bottom-nav tab, so HomeShell supplies the header
+        // (title/hamburger/avatar) and the persistent bottom nav bar — this
+        // screen no longer needs its own app bar / back button.
         body: Column(
           children: [
-            // Search bar
+            // Search bar. Same top gap the Tasks screen uses so it sits just
+            // below the shell's translucent app bar.
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              padding: EdgeInsets.fromLTRB(16, mq.padding.top + 1, 16, 4),
               child: _ChatSearchBar(
                 controller: _searchCtrl,
                 onChanged: (v) => setState(() => _query = v),
@@ -172,20 +129,44 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
             ),
           ],
         ),
-        floatingActionButton: Container(
-          decoration: BoxDecoration(
-            gradient: AppColors.heroGradient,
-            shape: BoxShape.circle,
-            boxShadow: AppShadows.lifted,
-          ),
-          child: FloatingActionButton(
-            heroTag: 'new_chat_fab',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const NewChatScreen()),
+        // Lift the FAB above the shell's bottom nav bar (this Scaffold extends
+        // behind it because the shell uses extendBody: true).
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+        floatingActionButton: Padding(
+          padding: EdgeInsets.only(bottom: mq.padding.bottom + 60),
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: AppColors.heroGradient,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: AppShadows.lifted,
             ),
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            child: const Icon(Icons.edit_rounded, color: Colors.white, size: 22),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const NewChatScreen()),
+                ),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.edit_rounded, color: Colors.white, size: 16),
+                      SizedBox(width: 6),
+                      Text(
+                        'New Chat',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),

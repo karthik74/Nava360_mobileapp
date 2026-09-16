@@ -3,9 +3,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api_client.dart';
+import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../assets/assets_models.dart';
@@ -19,7 +21,6 @@ import '../performance/performance_tab.dart';
 import '../tasks/task_models.dart';
 import '../tasks/task_repository.dart';
 import 'employee_detail_repository.dart';
-import 'team_member_tracking_screen.dart';
 import 'team_tracking_repository.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -43,6 +44,13 @@ final _attendanceProvider =
         to: _ymd(now),
         size: 100,
       );
+});
+
+/// Record change history (Timeline tab). Only fetched for users who may see
+/// the full profile (the endpoint needs EMPLOYEE_VIEW).
+final _changeLogProvider =
+    FutureProvider.autoDispose.family<List<EmployeeChangeLog>, int>((ref, id) {
+  return ref.watch(employeeDetailRepositoryProvider).timeline(id);
 });
 
 final _tasksProvider =
@@ -228,7 +236,10 @@ class EmployeeDetailScreen extends ConsumerWidget {
                   ),
                   _AssetsTab(employeeId: employeeId),
                   _PerformanceTab(employeeId: employeeId),
-                  _TimelineTab(employeeId: employeeId),
+                  _TimelineTab(
+                    employeeId: employeeId,
+                    canViewChanges: canViewSensitive,
+                  ),
                 ],
               ),
             ),
@@ -352,9 +363,12 @@ class _OverviewTab extends ConsumerWidget {
               icon: Icons.person_outline_rounded,
               children: [
                 _InfoRow(Icons.badge_outlined, 'Employee code', e.employeeCode),
-                _InfoRow(Icons.work_outline_rounded, 'Designation', e.designation),
-                _InfoRow(Icons.apartment_rounded, 'Department', e.department),
-                _InfoRow(Icons.location_city_rounded, 'Branch', e.branchLabel),
+                _InfoRow(Icons.work_outline_rounded,
+                    Branding.current.term('designation'), e.designation),
+                _InfoRow(Icons.apartment_rounded,
+                    Branding.current.term('department'), e.department),
+                _InfoRow(Icons.location_city_rounded,
+                    Branding.current.term('branch'), e.branchLabel),
                 _InfoRow(Icons.supervisor_account_rounded, 'Reporting manager',
                     e.reportingManagerName),
                 _InfoRow(Icons.category_rounded, 'Employee type', e.employeeType),
@@ -481,6 +495,14 @@ class _AttendanceTab extends ConsumerWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 12),
+              // Manager / HR: set one day's status by hand (e.g. mark Absent).
+              if (ref.watch(authUserProvider)?.hasPermission('ATTENDANCE_OVERRIDE') ?? false)
+                _MarkAttendanceCard(
+                  employeeId: employeeId,
+                  records: records,
+                  onChanged: () => ref.invalidate(_attendanceProvider(employeeId)),
+                ),
               const SizedBox(height: 4),
               // The attendance API does not expose a per-day "late mark" flag,
               // so late marks can't be derived reliably here.
@@ -493,6 +515,224 @@ class _AttendanceTab extends ConsumerWidget {
           );
         },
       ),
+    );
+  }
+}
+
+/// "Mark attendance": pick a day (today or earlier), Absent or Half day, an
+/// optional note, and save — the manager's decision replaces whatever the
+/// punches produced for that day. Marking Absent also withdraws approved
+/// leave / regularization on that date, which the server reports back in its
+/// message. Marking a day Present is deliberately NOT offered: that goes
+/// through the regularization request/approval flow.
+class _MarkAttendanceCard extends ConsumerStatefulWidget {
+  const _MarkAttendanceCard({
+    required this.employeeId,
+    required this.records,
+    required this.onChanged,
+  });
+  final int employeeId;
+  final List<AttendanceRecord> records;
+  final VoidCallback onChanged;
+
+  @override
+  ConsumerState<_MarkAttendanceCard> createState() => _MarkAttendanceCardState();
+}
+
+class _MarkAttendanceCardState extends ConsumerState<_MarkAttendanceCard> {
+  DateTime _date = DateTime.now();
+  String _status = 'ABSENT';
+  final _notes = TextEditingController();
+  bool _busy = false;
+
+  // No "Present" here on purpose: a missed punch is fixed through the
+  // regularization request/approval flow, not by a manager's override.
+  static const _options = [
+    ('ABSENT', 'Absent', Icons.person_off_rounded),
+    ('HALF_DAY', 'Half day', Icons.hourglass_bottom_rounded),
+  ];
+
+  @override
+  void dispose() {
+    _notes.dispose();
+    super.dispose();
+  }
+
+  String? get _currentStatus {
+    final ymd = _ymd(_date);
+    for (final r in widget.records) {
+      if (r.date == ymd) return r.status;
+    }
+    return null;
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: now.subtract(const Duration(days: 92)),
+      lastDate: now,
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: ColorScheme.light(
+            primary: AppColors.primary,
+            onPrimary: Colors.white,
+            surface: Colors.white,
+            onSurface: AppColors.ink,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null && mounted) setState(() => _date = picked);
+  }
+
+  Future<void> _save() async {
+    if (_busy) return;
+    final label = _options.firstWhere((o) => o.$1 == _status).$2;
+    final day = DateFormat('EEE, d MMM yyyy').format(_date);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Mark $label?'),
+        content: Text(
+          _status == 'ABSENT'
+              ? 'This will record $day as Absent. Any approved leave or '
+                  'regularization on that day will be withdrawn.'
+              : 'This will record $day as $label, replacing whatever the '
+                  'punches produced.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: _status == 'ABSENT'
+                ? FilledButton.styleFrom(backgroundColor: AppColors.danger)
+                : null,
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Mark $label'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      final message =
+          await ref.read(attendanceRepositoryProvider).overrideAttendance(
+                employeeId: widget.employeeId,
+                date: _ymd(_date),
+                status: _status,
+                notes: _notes.text,
+              );
+      if (!mounted) return;
+      _notes.clear();
+      widget.onChanged();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update attendance: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = _currentStatus;
+    final currentTone =
+        current == null ? null : StatusTone.forAttendance(current);
+    return _SectionCard(
+      title: 'Mark attendance',
+      icon: Icons.edit_calendar_rounded,
+      trailing: currentTone == null
+          ? const StatusPill(label: 'No record', color: AppColors.muted)
+          : StatusPill(label: currentTone.label, color: currentTone.color),
+      children: [
+        InkWell(
+          onTap: _busy ? null : _pickDate,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          child: InputDecorator(
+            decoration: const InputDecoration(
+              labelText: 'Day',
+              isDense: true,
+              prefixIcon: Icon(Icons.event_rounded, size: 20),
+            ),
+            child: Text(
+              DateFormat('EEE, d MMM yyyy').format(_date),
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: AppColors.ink,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final o in _options)
+              ChoiceChip(
+                avatar: Icon(o.$3,
+                    size: 16,
+                    color: _status == o.$1
+                        ? StatusTone.forAttendance(o.$1).color
+                        : AppColors.muted),
+                label: Text(o.$2),
+                selected: _status == o.$1,
+                selectedColor:
+                    StatusTone.forAttendance(o.$1).color.withOpacity(0.15),
+                labelStyle: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: _status == o.$1
+                      ? StatusTone.forAttendance(o.$1).color
+                      : AppColors.inkSoft,
+                ),
+                onSelected: _busy ? null : (_) => setState(() => _status = o.$1),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _notes,
+          enabled: !_busy,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            labelText: 'Note (optional)',
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: _busy ? null : _save,
+            style: _status == 'ABSENT'
+                ? FilledButton.styleFrom(backgroundColor: AppColors.danger)
+                : null,
+            icon: _busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.save_rounded, size: 18),
+            label: Text(_busy
+                ? 'Saving…'
+                : 'Mark ${_options.firstWhere((o) => o.$1 == _status).$2}'),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -522,6 +762,67 @@ class _LocationTabState extends ConsumerState<_LocationTab> {
   void dispose() {
     _pollTimer?.cancel();
     super.dispose();
+  }
+
+  bool _routeBusy = false;
+
+  /// "Route map": open today's trail straight in Google Maps as directions
+  /// (origin → up to 8 waypoints → destination), instead of an in-app screen.
+  /// Google's directions URL accepts only a handful of waypoints, so a day's
+  /// trail is thinned evenly first.
+  Future<void> _openTodaysRouteInMaps() async {
+    if (_routeBusy) return;
+    setState(() => _routeBusy = true);
+    try {
+      final pings = await ref
+          .read(teamTrackingRepositoryProvider)
+          .memberDay(widget.employeeId, DateTime.now());
+      if (!mounted) return;
+      if (pings.length < 2) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(pings.isEmpty
+                ? 'No location pings for ${widget.name} today yet.'
+                : 'Only one ping so far today — not enough for a route.'),
+          ),
+        );
+        return;
+      }
+      final pts = _thin(pings, 10); // origin + ≤8 waypoints + destination
+      final origin = pts.first;
+      final dest = pts.last;
+      final waypoints = pts
+          .sublist(1, pts.length - 1)
+          .map((p) => '${p.latitude},${p.longitude}')
+          .join('|');
+      final url = StringBuffer('https://www.google.com/maps/dir/?api=1')
+        ..write('&origin=${origin.latitude},${origin.longitude}')
+        ..write('&destination=${dest.latitude},${dest.longitude}')
+        ..write('&travelmode=driving');
+      if (waypoints.isNotEmpty) url.write('&waypoints=$waypoints');
+      final ok = await launchUrl(Uri.parse(url.toString()),
+          mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open Google Maps')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Could not load today's route: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _routeBusy = false);
+    }
+  }
+
+  /// Evenly picks [max] points from [pts], always keeping the first and last.
+  static List<TrackPing> _thin(List<TrackPing> pts, int max) {
+    if (pts.length <= max) return pts;
+    final step = (pts.length - 1) / (max - 1);
+    return List.generate(max, (i) => pts[(i * step).round()]);
   }
 
   /// Open the given coordinates in Google Maps (external app/browser).
@@ -593,7 +894,6 @@ class _LocationTabState extends ConsumerState<_LocationTab> {
   @override
   Widget build(BuildContext context) {
     final employeeId = widget.employeeId;
-    final name = widget.name;
     final async = ref.watch(_locationProvider(employeeId));
     return _TabScaffold(
       onRefresh: () async => ref.invalidate(_locationProvider(employeeId)),
@@ -698,7 +998,7 @@ class _LocationTabState extends ConsumerState<_LocationTab> {
                         color: AppColors.primary.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(11),
                       ),
-                      child: const Icon(Icons.map_rounded,
+                      child: Icon(Icons.map_rounded,
                           color: AppColors.primary, size: 20),
                     ),
                     const SizedBox(width: 12),
@@ -713,16 +1013,16 @@ class _LocationTabState extends ConsumerState<_LocationTab> {
                       ),
                     ),
                     FilledButton.icon(
-                      onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => TeamMemberTrackingScreen(
-                            employeeId: employeeId,
-                            name: name,
-                          ),
-                        ),
-                      ),
-                      icon: const Icon(Icons.navigation_rounded, size: 16),
-                      label: const Text('Route map'),
+                      onPressed: _routeBusy ? null : _openTodaysRouteInMaps,
+                      icon: _routeBusy
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.navigation_rounded, size: 16),
+                      label: Text(_routeBusy ? 'Opening…' : 'Route map'),
                     ),
                   ],
                 ),
@@ -1230,7 +1530,7 @@ class _BalanceRow extends StatelessWidget {
               ),
               Text(
                 '$balance / $allowance left',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                   color: AppColors.primary,
@@ -1245,7 +1545,7 @@ class _BalanceRow extends StatelessWidget {
               value: ratio,
               minHeight: 6,
               backgroundColor: AppColors.hairline,
-              valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+              valueColor: AlwaysStoppedAnimation(AppColors.primary),
             ),
           ),
         ],
@@ -1565,13 +1865,19 @@ class _TimelineEvent {
 }
 
 class _TimelineTab extends ConsumerWidget {
-  const _TimelineTab({required this.employeeId});
+  const _TimelineTab({required this.employeeId, required this.canViewChanges});
   final int employeeId;
+
+  /// Whether the caller may load the record change history (EMPLOYEE_VIEW).
+  final bool canViewChanges;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Reuse the per-domain providers and merge their data into one feed.
-    // TODO: replace with a dedicated backend activity-feed endpoint when available.
+    // Record changes come from the backend change log; the activity feed below
+    // is still composed client-side from the other domains.
+    final changes = canViewChanges
+        ? ref.watch(_changeLogProvider(employeeId))
+        : const AsyncValue<List<EmployeeChangeLog>>.data(<EmployeeChangeLog>[]);
     final att = ref.watch(_attendanceProvider(employeeId));
     final tasks = ref.watch(_tasksProvider(employeeId));
     final leave = ref.watch(_leaveProvider(employeeId));
@@ -1631,31 +1937,241 @@ class _TimelineTab extends ConsumerWidget {
     events.sort((a, b) => b.time.compareTo(a.time));
     final top = events.take(40).toList();
 
+    final activity = top.isEmpty
+        ? (anyLoading
+            ? const AppLoadingBlock(height: 200)
+            : const AppEmptyState(
+                icon: Icons.timeline_rounded,
+                message: 'No recent activity to show.',
+              ))
+        : GlassCard(
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 14),
+            shadow: AppShadows.soft,
+            child: Column(
+              children: [
+                for (var i = 0; i < top.length; i++)
+                  _TimelineRow(e: top[i], isLast: i == top.length - 1),
+              ],
+            ),
+          );
+
     return _TabScaffold(
       onRefresh: () async {
+        if (canViewChanges) ref.invalidate(_changeLogProvider(employeeId));
         ref.invalidate(_attendanceProvider(employeeId));
         ref.invalidate(_tasksProvider(employeeId));
         ref.invalidate(_leaveProvider(employeeId));
         ref.invalidate(_assetsProvider(employeeId));
         ref.invalidate(_locationProvider(employeeId));
       },
-      child: top.isEmpty
-          ? (anyLoading
-              ? const AppLoadingBlock(height: 200)
-              : const AppEmptyState(
-                  icon: Icons.timeline_rounded,
-                  message: 'No recent activity to show.',
-                ))
-          : GlassCard(
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 14),
-              shadow: AppShadows.soft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (canViewChanges) ...[
+            _ChangeHistoryCard(changes: changes),
+            const SizedBox(height: 14),
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 8),
+              child: Text(
+                'Activity',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.ink,
+                ),
+              ),
+            ),
+          ],
+          activity,
+        ],
+      ),
+    );
+  }
+}
+
+/// "Record changes": every create/update of the employee record — what
+/// changed (old → new), who did it and when. Newest first.
+class _ChangeHistoryCard extends StatelessWidget {
+  const _ChangeHistoryCard({required this.changes});
+  final AsyncValue<List<EmployeeChangeLog>> changes;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SectionCard(
+      title: 'Record changes',
+      icon: Icons.history_rounded,
+      children: [
+        changes.when(
+          loading: () => const AppLoadingBlock(height: 90),
+          error: (e, _) => const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Text(
+              'Could not load change history.',
+              style: TextStyle(fontSize: 12, color: AppColors.danger),
+            ),
+          ),
+          data: (list) {
+            if (list.isEmpty) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 10),
+                child: Text(
+                  'No changes recorded yet. Edits made from now on will appear here.',
+                  style: TextStyle(fontSize: 12, color: AppColors.muted),
+                ),
+              );
+            }
+            return Column(
+              children: [
+                for (var i = 0; i < list.length; i++)
+                  _ChangeLogRow(entry: list[i], isLast: i == list.length - 1),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _ChangeLogRow extends StatelessWidget {
+  const _ChangeLogRow({required this.entry, required this.isLast});
+  final EmployeeChangeLog entry;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = entry.isCreated ? AppColors.success : AppColors.primary;
+    final n = entry.changes.length;
+    final summary = entry.isCreated
+        ? 'created this record'
+        : 'updated $n field${n == 1 ? '' : 's'}';
+    final at = entry.createdAt;
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Column(
+            children: [
+              Container(
+                width: 26,
+                height: 26,
+                margin: const EdgeInsets.only(top: 6),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: color.withOpacity(0.28)),
+                ),
+                child: Icon(
+                  entry.isCreated ? Icons.person_add_alt_1_rounded : Icons.edit_rounded,
+                  size: 13,
+                  color: color,
+                ),
+              ),
+              if (!isLast)
+                Expanded(child: Container(width: 2, color: AppColors.hairline)),
+            ],
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(top: 6, bottom: isLast ? 4 : 14),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (var i = 0; i < top.length; i++)
-                    _TimelineRow(e: top[i], isLast: i == top.length - 1),
+                  Text.rich(
+                    TextSpan(
+                      style: const TextStyle(fontSize: 12.5, color: AppColors.ink),
+                      children: [
+                        TextSpan(
+                          text: entry.actorName,
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        TextSpan(
+                          text: ' $summary',
+                          style: const TextStyle(
+                            color: AppColors.muted,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    at == null ? '—' : _fmtDateTime(at),
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.muted,
+                    ),
+                  ),
+                  if (entry.changes.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: AppColors.bg,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.hairline),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final c in entry.changes)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 3),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    c.label.toUpperCase(),
+                                    style: const TextStyle(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.4,
+                                      color: AppColors.muted,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 1),
+                                  Text.rich(
+                                    TextSpan(
+                                      children: [
+                                        TextSpan(
+                                          text: c.oldValue ?? '—',
+                                          style: const TextStyle(
+                                            color: AppColors.muted,
+                                            decoration: TextDecoration.lineThrough,
+                                          ),
+                                        ),
+                                        const TextSpan(
+                                          text: '  →  ',
+                                          style: TextStyle(color: AppColors.muted),
+                                        ),
+                                        TextSpan(
+                                          text: c.newValue ?? '—',
+                                          style: const TextStyle(
+                                            color: AppColors.ink,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1858,7 +2374,7 @@ class _InfoRow extends StatelessWidget {
           ),
           if (tappable) ...[
             const SizedBox(width: 6),
-            const Icon(Icons.open_in_new_rounded,
+            Icon(Icons.open_in_new_rounded,
                 size: 14, color: AppColors.primary),
           ],
         ],

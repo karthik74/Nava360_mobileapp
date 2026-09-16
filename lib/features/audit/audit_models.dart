@@ -579,11 +579,17 @@ class Verification {
 
 class AuditFindingDetail {
   final AuditFinding finding;
+  final bool complianceSubmitted;
+  final bool canSubmitCompliance;
+  final bool canVerify;
   final List<Capa> capaHistory;
   final List<Verification> verifications;
 
   const AuditFindingDetail({
     required this.finding,
+    this.complianceSubmitted = false,
+    this.canSubmitCompliance = true,
+    this.canVerify = false,
     this.capaHistory = const [],
     this.verifications = const [],
   });
@@ -594,6 +600,9 @@ class AuditFindingDetail {
       finding: f is Map<String, dynamic>
           ? AuditFinding.fromJson(f)
           : AuditFinding.fromJson(j),
+      complianceSubmitted: j['complianceSubmitted'] as bool? ?? false,
+      canSubmitCompliance: j['canSubmitCompliance'] as bool? ?? true,
+      canVerify: j['canVerify'] as bool? ?? false,
       capaHistory: _maps(j['capaHistory']).map(Capa.fromJson).toList(),
       verifications:
           _maps(j['verifications']).map(Verification.fromJson).toList(),

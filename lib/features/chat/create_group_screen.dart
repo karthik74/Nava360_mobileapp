@@ -100,7 +100,7 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final contacts = ref.watch(contactsSearchProvider(_query));
+    final contacts = ref.watch(groupCandidatesProvider(_query));
     final mq = MediaQuery.of(context);
 
     return GlassBackdrop(
@@ -145,7 +145,7 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
                           ),
                         ),
                         _creating
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 22,
                                 height: 22,
                                 child: CircularProgressIndicator(
@@ -417,7 +417,7 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
                   child: AppErrorPanel(
                     message: err.toString(),
                     onRetry: () =>
-                        ref.invalidate(contactsSearchProvider(_query)),
+                        ref.invalidate(groupCandidatesProvider(_query)),
                   ),
                 ),
               ),

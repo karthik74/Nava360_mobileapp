@@ -10,7 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 // them together with the AuthTextField/AuthShell widgets this file provides.
 export '../../core/text_formatters.dart';
 
-import '../../core/env.dart';
+import '../../core/branding.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import 'auth_controller.dart';
@@ -109,10 +109,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final loading = state.isLoading;
     final error = state.hasError ? state.error.toString() : null;
     final bio = ref.watch(biometricControllerProvider);
+    // Deployment-level kill switch from /api/public/branding.
+    final bioFeatureOn = ref
+        .watch(brandingProvider)
+        .featureEnabled('FEATURE_BIOMETRIC_LOGIN');
 
     // Case A: if a biometric enrollment exists and the device can use it, prompt
     // automatically the first time the login screen appears.
-    if (bio.canOfferLogin && !_autoBioTried && !loading && !_justSignedIn) {
+    if (bioFeatureOn &&
+        bio.canOfferLogin &&
+        !_autoBioTried &&
+        !loading &&
+        !_justSignedIn) {
       _autoBioTried = true;
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => _biometricLogin(auto: true),
@@ -270,7 +278,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     : null,
                               ),
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 8),
                             Align(
                               alignment: Alignment.centerRight,
                               child: InkWell(
@@ -279,18 +287,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     ? null
                                     : () => context.push(
                                           '/forgot-password',
-                                          extra: _username.text,
+                                          extra: _username.text.trim(),
                                         ),
-                                child: const Padding(
-                                  padding: EdgeInsets.symmetric(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
                                     horizontal: 4,
                                     vertical: 4,
                                   ),
                                   child: Text(
                                     'Forgot password?',
                                     style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
                                       color: AppColors.primary,
                                     ),
                                   ),
@@ -298,10 +306,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
                             ),
                             if (error != null) ...[
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 12),
                               _FlashError(message: error),
                             ],
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 16),
                             _GradientAuthButton(
                               label: 'Sign in',
                               loading: loading,
@@ -310,11 +318,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ? null
                                   : _submit,
                             ),
-                            _BiometricLoginSection(
-                              state: bio,
-                              busy: _bioBusy,
-                              onTap: () => _biometricLogin(auto: false),
-                            ),
+                            if (bioFeatureOn)
+                              _BiometricLoginSection(
+                                state: bio,
+                                busy: _bioBusy,
+                                onTap: () => _biometricLogin(auto: false),
+                              ),
                             const SizedBox(height: 16),
                             Center(
                               child: InkWell(
@@ -322,7 +331,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 onTap: !formEnabled
                                     ? null
                                     : () => context.push('/first-login'),
-                                child: const Padding(
+                                child: Padding(
                                   padding: EdgeInsets.symmetric(
                                     horizontal: 4,
                                     vertical: 4,
@@ -364,7 +373,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       InkWell(
                         borderRadius: BorderRadius.circular(6),
                         onTap: () => launchUrl(
-                          Uri.parse(Env.privacyPolicyUrl),
+                          Uri.parse(Branding.current.effectivePrivacyUrl),
                           mode: LaunchMode.externalApplication,
                         ),
                         child: Padding(
@@ -381,7 +390,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Secured by Nava360 · v1.0',
+                        'Secured by ${Branding.current.productName} · v1.0',
                         style: TextStyle(
                           color: AppColors.muted.withOpacity(0.85),
                           fontSize: 12,
@@ -409,8 +418,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
 // ──────────────────────────────────────────────────────────────────────
 // Shared auth screen pieces (mesh + gradient band + back button +
-// glass card + fields + flash + gradient CTA). Re-used by ForgotPassword
-// and ResetPassword screens so they share the same chrome.
+// glass card + fields + flash + gradient CTA). Re-used by the first-login
+// screen so it shares the same chrome.
 // ──────────────────────────────────────────────────────────────────────
 
 /// Subtle mesh wallpaper behind the auth screens. Mirrors GlassBackdrop but
@@ -990,7 +999,7 @@ class _BiometricLoginSection extends StatelessWidget {
             onPressed: busy ? null : onTap,
             style: OutlinedButton.styleFrom(
               foregroundColor: AppColors.primary,
-              side: const BorderSide(color: AppColors.primary, width: 1.3),
+              side: BorderSide(color: AppColors.primary, width: 1.3),
               padding: const EdgeInsets.symmetric(vertical: 13),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12)),
@@ -1039,10 +1048,10 @@ class _BiometricLoginSection extends StatelessWidget {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Shared bits exported for the forgot/reset screens.
+// Shared bits exported for the first-login screen.
 // ──────────────────────────────────────────────────────────────────────
 
-/// Shell used by ForgotPasswordScreen / ResetPasswordScreen — same gradient
+/// Shell used by FirstLoginScreen — same gradient
 /// band + back button + small logo chip + title/subtitle + glass card.
 class AuthShell extends StatelessWidget {
   const AuthShell({
@@ -1145,7 +1154,7 @@ class AuthShell extends StatelessWidget {
   }
 }
 
-// Re-export the field, label, flash, and button so the forgot/reset screens
+// Re-export the field, label, flash, and button so the first-login screen
 // can use them without duplicating the styling.
 typedef AuthTextField = _AuthTextField;
 typedef AuthFieldLabel = _FieldLabel;

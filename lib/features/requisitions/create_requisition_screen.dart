@@ -196,7 +196,7 @@ class _CreateRequisitionScreenState
                                             style: const TextStyle(
                                                 fontSize: 11.5)),
                                     trailing: selected
-                                        ? const Icon(Icons.check_rounded,
+                                        ? Icon(Icons.check_rounded,
                                             color: AppColors.primary)
                                         : null,
                                     onTap: () => Navigator.pop(ctx, b.id),

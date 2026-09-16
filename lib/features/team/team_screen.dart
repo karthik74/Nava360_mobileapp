@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
+import '../../core/approvals.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import '../leaves/leave_models.dart';
 import '../leaves/leave_repository.dart';
+import '../resignation/resignation_models.dart';
+import '../resignation/resignation_repository.dart';
 import 'employee_detail_screen.dart';
 import 'team_models.dart';
 import 'team_repository.dart';
@@ -24,7 +28,7 @@ class TeamScreen extends ConsumerStatefulWidget {
 }
 
 class _TeamScreenState extends ConsumerState<TeamScreen> {
-  int _tab = 0; // 0 = Members, 1 = Leaves, 2 = Attendance
+  int _tab = 0; // 0 = Members, 1 = Leaves, 2 = Attendance, 3 = Exits
 
   @override
   Widget build(BuildContext context) {
@@ -36,7 +40,7 @@ class _TeamScreenState extends ConsumerState<TeamScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: _SegmentBar(
             value: _tab,
-            labels: const ['Members', 'Leaves', 'Attendance'],
+            labels: const ['Members', 'Leaves', 'Attendance', 'Exits'],
             onChanged: (v) => setState(() => _tab = v),
           ),
         ),
@@ -48,6 +52,7 @@ class _TeamScreenState extends ConsumerState<TeamScreen> {
               _MembersView(),
               _LeavesView(),
               _AttendanceView(),
+              _ExitsView(),
             ],
           ),
         ),
@@ -489,6 +494,42 @@ class _MemberCard extends StatelessWidget {
 // Leaves tab (approve / reject)
 // ─────────────────────────────────────────────────────────────────────
 
+/// Employee-name search box shared by the Leaves and Attendance approval tabs.
+/// Filters the loaded page in place, exactly as the Members tab does.
+class _EmployeeSearchField extends StatelessWidget {
+  const _EmployeeSearchField({
+    required this.controller,
+    required this.query,
+    required this.onChanged,
+    required this.onClear,
+  });
+  final TextEditingController controller;
+  final String query;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      textCapitalization: TextCapitalization.words,
+      inputFormatters: const [TitleCaseTextFormatter()],
+      decoration: InputDecoration(
+        hintText: 'Search by employee name…',
+        prefixIcon: const Icon(Icons.search_rounded, size: 20),
+        isDense: true,
+        suffixIcon: query.isEmpty
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18),
+                onPressed: onClear,
+              ),
+      ),
+      onChanged: onChanged,
+    );
+  }
+}
+
 class _LeavesView extends ConsumerStatefulWidget {
   const _LeavesView();
 
@@ -498,6 +539,17 @@ class _LeavesView extends ConsumerStatefulWidget {
 
 class _LeavesViewState extends ConsumerState<_LeavesView> {
   String _filter = 'ALL';
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  bool _matchesQuery(LeaveRequest r) =>
+      _query.isEmpty || (r.employeeName ?? '').toLowerCase().contains(_query);
 
   @override
   Widget build(BuildContext context) {
@@ -508,6 +560,13 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
     // approve/reject actions here, matching the web app and the backend rule.
     final canReview = user != null;
     final leaves = ref.watch(_teamLeavesProvider);
+    // Approval-engine queue: chain steps can route leaves of NON-direct
+    // reports to this user — merge them in so the reviewer sees everything
+    // pending on them in one place.
+    final chainQueue = ref.watch(leavesPendingMyApprovalProvider).maybeWhen(
+          data: (rows) => rows,
+          orElse: () => const <LeaveRequest>[],
+        );
     final mq = MediaQuery.of(context);
     final pad = EdgeInsets.fromLTRB(
       16,
@@ -518,7 +577,10 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
 
     return RefreshIndicator(
       color: AppColors.primary,
-      onRefresh: () async => ref.invalidate(_teamLeavesProvider),
+      onRefresh: () async {
+        ref.invalidate(_teamLeavesProvider);
+        ref.invalidate(leavesPendingMyApprovalProvider);
+      },
       child: leaves.when(
         loading: () => const _CenterLoader(),
         error: (e, _) => _ErrorList(
@@ -530,12 +592,17 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
           // Cancelled leaves are not relevant to a reviewer — hide them.
           final rows =
               allRows.where((r) => r.status != 'CANCELLED').toList();
+          for (final q in chainQueue) {
+            if (!rows.any((r) => r.id == q.id)) rows.add(q);
+          }
           final pending = rows.where((r) => r.status == 'PENDING').length;
           final approved = rows.where((r) => r.status == 'APPROVED').length;
           final rejected = rows.where((r) => r.status == 'REJECTED').length;
-          final filtered = _filter == 'ALL'
-              ? rows
-              : rows.where((r) => r.status == _filter).toList();
+          final filtered = (_filter == 'ALL'
+                  ? rows
+                  : rows.where((r) => r.status == _filter).toList())
+              .where(_matchesQuery)
+              .toList();
 
           return ListView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -548,6 +615,17 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
                 rejected: rejected,
               ),
               const SizedBox(height: 16),
+              _EmployeeSearchField(
+                controller: _searchCtrl,
+                query: _query,
+                onChanged: (v) =>
+                    setState(() => _query = v.trim().toLowerCase()),
+                onClear: () {
+                  _searchCtrl.clear();
+                  setState(() => _query = '');
+                },
+              ),
+              const SizedBox(height: 12),
               _FilterBar(
                 value: _filter,
                 onChanged: (v) => setState(() => _filter = v),
@@ -560,9 +638,11 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
               ),
               const SizedBox(height: 14),
               if (filtered.isEmpty)
-                const AppEmptyState(
+                AppEmptyState(
                   icon: Icons.event_available_rounded,
-                  message: 'Nothing here right now.',
+                  message: _query.isNotEmpty
+                      ? 'No leave requests match your search.'
+                      : 'Nothing here right now.',
                 )
               else
                 for (final r in filtered)
@@ -572,7 +652,10 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
                       r: r,
                       canReview: canReview && r.status == 'PENDING',
                       reviewerEmployeeId: user?.employeeId,
-                      onReviewed: () => ref.invalidate(_teamLeavesProvider),
+                      onReviewed: () {
+                        ref.invalidate(_teamLeavesProvider);
+                        ref.invalidate(leavesPendingMyApprovalProvider);
+                      },
                     ),
                   ),
             ],
@@ -596,11 +679,29 @@ class _AttendanceView extends ConsumerStatefulWidget {
 
 class _AttendanceViewState extends ConsumerState<_AttendanceView> {
   String _filter = 'ALL';
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  bool _matchesQuery(RegularizationRequest r) =>
+      _query.isEmpty || (r.employeeName ?? '').toLowerCase().contains(_query);
 
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authUserProvider);
     final async = ref.watch(teamRegularizationsProvider);
+    // Approval-engine queue: chain steps can route regularizations of
+    // NON-direct reports to this user — merge them into the same list.
+    final chainQueue =
+        ref.watch(regularizationsPendingMyApprovalProvider).maybeWhen(
+              data: (rows) => rows,
+              orElse: () => const <RegularizationRequest>[],
+            );
     final mq = MediaQuery.of(context);
     final pad = EdgeInsets.fromLTRB(
       16,
@@ -611,7 +712,10 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
 
     return RefreshIndicator(
       color: AppColors.primary,
-      onRefresh: () async => ref.invalidate(teamRegularizationsProvider),
+      onRefresh: () async {
+        ref.invalidate(teamRegularizationsProvider);
+        ref.invalidate(regularizationsPendingMyApprovalProvider);
+      },
       child: async.when(
         loading: () => const _CenterLoader(),
         error: (e, _) => _ErrorList(
@@ -619,13 +723,19 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
           padding: pad,
           onRetry: () => ref.invalidate(teamRegularizationsProvider),
         ),
-        data: (rows) {
+        data: (teamRows) {
+          final rows = [...teamRows];
+          for (final q in chainQueue) {
+            if (!rows.any((r) => r.id == q.id)) rows.add(q);
+          }
           final pending = rows.where((r) => r.status == 'PENDING').length;
           final approved = rows.where((r) => r.status == 'APPROVED').length;
           final rejected = rows.where((r) => r.status == 'REJECTED').length;
-          final filtered = _filter == 'ALL'
-              ? rows
-              : rows.where((r) => r.status == _filter).toList();
+          final filtered = (_filter == 'ALL'
+                  ? rows
+                  : rows.where((r) => r.status == _filter).toList())
+              .where(_matchesQuery)
+              .toList();
           // Pending first within the current filter.
           final sorted = [
             ...filtered.where((r) => r.isPending),
@@ -643,6 +753,17 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
                 rejected: rejected,
               ),
               const SizedBox(height: 16),
+              _EmployeeSearchField(
+                controller: _searchCtrl,
+                query: _query,
+                onChanged: (v) =>
+                    setState(() => _query = v.trim().toLowerCase()),
+                onClear: () {
+                  _searchCtrl.clear();
+                  setState(() => _query = '');
+                },
+              ),
+              const SizedBox(height: 12),
               _FilterBar(
                 value: _filter,
                 onChanged: (v) => setState(() => _filter = v),
@@ -655,9 +776,11 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
               ),
               const SizedBox(height: 14),
               if (sorted.isEmpty)
-                const AppEmptyState(
+                AppEmptyState(
                   icon: Icons.fact_check_outlined,
-                  message: 'Nothing here right now.',
+                  message: _query.isNotEmpty
+                      ? 'No requests match your search.'
+                      : 'Nothing here right now.',
                 )
               else
                 for (final r in sorted)
@@ -666,8 +789,11 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
                     child: _RegularizationCard(
                       r: r,
                       reviewerEmployeeId: user?.employeeId,
-                      onReviewed: () =>
-                          ref.invalidate(teamRegularizationsProvider),
+                      onReviewed: () {
+                        ref.invalidate(teamRegularizationsProvider);
+                        ref.invalidate(
+                            regularizationsPendingMyApprovalProvider);
+                      },
                     ),
                   ),
             ],
@@ -804,7 +930,7 @@ class _RegularizationCardState extends ConsumerState<_RegularizationCard> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.schedule_rounded,
+                  Icon(Icons.schedule_rounded,
                       size: 13, color: AppColors.primary),
                   const SizedBox(width: 6),
                   Text(
@@ -841,6 +967,18 @@ class _RegularizationCardState extends ConsumerState<_RegularizationCard> {
               ],
             ),
           ],
+          // Configured approval chain (Wave 4b engine); empty = default
+          // direct-manager flow → renders nothing.
+          if (r.isPending)
+            ref.watch(regularizationApprovalStepsProvider(r.id)).maybeWhen(
+                  data: (s) => s.isEmpty
+                      ? const SizedBox.shrink()
+                      : Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: ApprovalChainInline(steps: s),
+                        ),
+                  orElse: () => const SizedBox.shrink(),
+                ),
           if (r.isPending) ...[
             const SizedBox(height: 12),
             Row(
@@ -1292,7 +1430,7 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.calendar_today_rounded,
+                Icon(Icons.calendar_today_rounded,
                     size: 13, color: AppColors.primary),
                 const SizedBox(width: 6),
                 Expanded(
@@ -1330,6 +1468,18 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
               ],
             ),
           ],
+          // Configured approval chain (Wave 4b engine); empty = default
+          // direct-manager flow → renders nothing.
+          if (r.status == 'PENDING')
+            ref.watch(leaveApprovalStepsProvider(r.id)).maybeWhen(
+                  data: (s) => s.isEmpty
+                      ? const SizedBox.shrink()
+                      : Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: ApprovalChainInline(steps: s),
+                        ),
+                  orElse: () => const SizedBox.shrink(),
+                ),
           if (widget.canReview) ...[
             const SizedBox(height: 12),
             Row(
@@ -1412,6 +1562,311 @@ class _ActionButton extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+
+// -------------------------------------------------------------------
+// Exits tab - resignation approvals assigned to this manager
+// -------------------------------------------------------------------
+
+/// The manager's resignation inbox. The steps come from the configurable
+/// resignation approval workflow (Reporting Manager level N), so this needs no
+/// HR resignation permission - only the steps assigned to this user are listed.
+class _ExitsView extends ConsumerStatefulWidget {
+  const _ExitsView();
+
+  @override
+  ConsumerState<_ExitsView> createState() => _ExitsViewState();
+}
+
+class _ExitsViewState extends ConsumerState<_ExitsView> {
+  String _filter = 'ALL';
+
+  @override
+  Widget build(BuildContext context) {
+    final approvals = ref.watch(myResignationApprovalsProvider);
+    final mq = MediaQuery.of(context);
+    final pad = EdgeInsets.fromLTRB(
+      16,
+      4,
+      16,
+      mq.padding.bottom + AppChrome.bottomNavHeight + 16,
+    );
+
+    return RefreshIndicator(
+      color: AppColors.primary,
+      onRefresh: () async => ref.invalidate(myResignationApprovalsProvider),
+      child: approvals.when(
+        loading: () => const _CenterLoader(),
+        error: (e, _) => _ErrorList(
+          message: e.toString(),
+          padding: pad,
+          onRetry: () => ref.invalidate(myResignationApprovalsProvider),
+        ),
+        data: (rows) {
+          final pending = rows.where((r) => r.step.isPending).length;
+          final approved =
+              rows.where((r) => r.step.stepStatus == 'APPROVED').length;
+          final rejected =
+              rows.where((r) => r.step.stepStatus == 'REJECTED').length;
+          final filtered = _filter == 'ALL'
+              ? rows
+              : rows.where((r) => r.step.stepStatus == _filter).toList();
+
+          return ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: pad,
+            children: [
+              _TeamSummary(
+                total: rows.length,
+                pending: pending,
+                approved: approved,
+                rejected: rejected,
+              ),
+              const SizedBox(height: 16),
+              _FilterBar(
+                value: _filter,
+                onChanged: (v) => setState(() => _filter = v),
+                counts: {
+                  'ALL': rows.length,
+                  'PENDING': pending,
+                  'APPROVED': approved,
+                  'REJECTED': rejected,
+                },
+              ),
+              const SizedBox(height: 14),
+              if (filtered.isEmpty)
+                const AppEmptyState(
+                  icon: Icons.logout_rounded,
+                  message: 'No resignation approvals are assigned to you.',
+                )
+              else
+                for (final a in filtered)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _ResignationApprovalCard(
+                      a: a,
+                      onReviewed: () =>
+                          ref.invalidate(myResignationApprovalsProvider),
+                    ),
+                  ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ResignationApprovalCard extends ConsumerStatefulWidget {
+  const _ResignationApprovalCard({required this.a, required this.onReviewed});
+  final ResignationApproval a;
+  final VoidCallback onReviewed;
+
+  @override
+  ConsumerState<_ResignationApprovalCard> createState() =>
+      _ResignationApprovalCardState();
+}
+
+class _ResignationApprovalCardState
+    extends ConsumerState<_ResignationApprovalCard> {
+  bool _busy = false;
+
+  String _fmt(DateTime? d) => d == null ? '-' : DateFormat('d MMM y').format(d);
+
+  Future<void> _act(bool approve) async {
+    final remarks = await _promptRemarks(approve);
+    if (remarks == null) return;
+    setState(() => _busy = true);
+    try {
+      final repo = ref.read(resignationRepositoryProvider);
+      final id = widget.a.resignation.id;
+      if (approve) {
+        await repo.approve(id, remarks: remarks);
+      } else {
+        await repo.reject(id, remarks: remarks);
+      }
+      widget.onReviewed();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<String?> _promptRemarks(bool approve) async {
+    final c = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(approve ? 'Approve resignation' : 'Reject resignation'),
+        content: TextField(
+          controller: c,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(
+            hintText: 'Add remarks (optional)',
+          ),
+          maxLines: 2,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: approve ? AppColors.success : AppColors.danger,
+            ),
+            onPressed: () => Navigator.pop(ctx, c.text),
+            child: Text(approve ? 'Approve' : 'Reject'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.a.resignation;
+    final step = widget.a.step;
+    final tone = StatusTone.forLeave(step.stepStatus);
+    final name = r.employeeName ?? 'Employee';
+
+    return GlassCard(
+      padding: const EdgeInsets.all(14),
+      shadow: AppShadows.soft,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              UserAvatar(name: name, size: 36, radius: 11),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      [
+                        if (r.employeeCode != null) r.employeeCode!,
+                        if (r.designation != null) r.designation!,
+                        step.levelName,
+                      ].join(' \u00b7 '),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              StatusPill(label: tone.label, color: tone.color),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              border: Border.all(color: AppColors.hairline),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.event_busy_rounded,
+                    size: 13, color: AppColors.primary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Resigned ${_fmt(r.resignationDate)}   Last day ${_fmt(r.lastWorkingDay)}',
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (r.reason != null && r.reason!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.format_quote_rounded,
+                    size: 13, color: AppColors.muted),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    r.reason!,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: AppColors.inkSoft,
+                      fontStyle: FontStyle.italic,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (!step.isPending &&
+              step.remarks != null &&
+              step.remarks!.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Your remarks: ${step.remarks!}',
+              style: const TextStyle(
+                fontSize: 11.5,
+                color: AppColors.inkSoft,
+                height: 1.4,
+              ),
+            ),
+          ],
+          if (step.isPending) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _ActionButton(
+                    icon: Icons.check_rounded,
+                    label: 'Approve',
+                    color: AppColors.success,
+                    onTap: _busy ? null : () => _act(true),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _ActionButton(
+                    icon: Icons.close_rounded,
+                    label: 'Reject',
+                    color: AppColors.danger,
+                    outlined: true,
+                    onTap: _busy ? null : () => _act(false),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }

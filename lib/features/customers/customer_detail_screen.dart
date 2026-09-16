@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/text_formatters.dart';
+import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../tasks/task_detail_screen.dart';
@@ -11,6 +13,7 @@ import '../tasks/task_repository.dart';
 import '../tasks/task_status_ui.dart';
 import '../tasks/task_template_models.dart';
 import 'customer_models.dart';
+import 'customer_notice_screen.dart';
 import 'customer_repository.dart';
 
 final customerProvider =
@@ -92,6 +95,20 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
         backgroundColor: Colors.white,
         foregroundColor: AppColors.ink,
         elevation: 0.5,
+        actions: [
+          customerAsync.maybeWhen(
+            data: (customer) => IconButton(
+              tooltip: 'Notices',
+              icon: const Icon(Icons.description_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => CustomerNoticeScreen(customer: customer),
+                ),
+              ),
+            ),
+            orElse: () => const SizedBox.shrink(),
+          ),
+        ],
       ),
       bottomNavigationBar: customerAsync.maybeWhen(
         data: (customer) => SafeArea(
@@ -203,7 +220,7 @@ class _CustomerHeader extends StatelessWidget {
       if (c.branchName != null && c.branchName!.isNotEmpty)
         _InfoRow(
             icon: Icons.store_mall_directory_outlined,
-            label: 'Branch',
+            label: Branding.current.term('branch'),
             value: c.branchName!),
       if (c.assignedEmployeeName != null && c.assignedEmployeeName!.isNotEmpty)
         _InfoRow(
@@ -338,6 +355,27 @@ class _CustomFieldsCard extends StatelessWidget {
     return s.isEmpty ? '—' : s;
   }
 
+  /// Reads a "lat, long" pair out of a value (fields like LatLong are plain
+  /// text). Both halves must carry decimals and sit in geographic range, so
+  /// ordinary numbers never become a map link by accident.
+  static ({double lat, double lng})? _latLng(dynamic v) {
+    if (v == null) return null;
+    final cleaned = v.toString().trim().replaceAll(RegExp(r'^[(\[]|[)\]]$'), '').trim();
+    final m = RegExp(r'^(-?\d{1,2}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)$').firstMatch(cleaned);
+    if (m == null) return null;
+    final lat = double.parse(m.group(1)!);
+    final lng = double.parse(m.group(2)!);
+    if (lat.abs() > 90 || lng.abs() > 180) return null;
+    return (lat: lat, lng: lng);
+  }
+
+  static Future<void> _openMap(double lat, double lng) async {
+    await launchUrl(
+      Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng'),
+      mode: LaunchMode.externalApplication,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final entries = fields.entries.toList();
@@ -372,15 +410,33 @@ class _CustomFieldsCard extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     flex: 5,
-                    child: Text(
-                      _formatValue(entries[i].value),
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        color: AppColors.ink,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    child: Builder(builder: (_) {
+                      final coords = _latLng(entries[i].value);
+                      final text = Text(
+                        _formatValue(entries[i].value),
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: coords == null ? AppColors.ink : AppColors.primary,
+                          fontWeight: FontWeight.w700,
+                          decoration: coords == null ? null : TextDecoration.underline,
+                        ),
+                      );
+                      if (coords == null) return text;
+                      // Coordinates open the location in Google Maps.
+                      return InkWell(
+                        onTap: () => _openMap(coords.lat, coords.lng),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Flexible(child: text),
+                            const SizedBox(width: 4),
+                            Icon(Icons.place_outlined,
+                                size: 14, color: AppColors.primary),
+                          ],
+                        ),
+                      );
+                    }),
                   ),
                 ],
               ),

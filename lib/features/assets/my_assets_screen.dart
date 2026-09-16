@@ -177,6 +177,7 @@ class _AssetCard extends ConsumerWidget {
   final AssetAssignment assignment;
 
   String _fmt(DateTime? d) => d == null ? '—' : DateFormat('d MMM yyyy').format(d);
+  bool _present(String? s) => s != null && s.trim().isNotEmpty;
 
   Future<void> _ack(BuildContext context, WidgetRef ref, bool accept) async {
     String? remarks;
@@ -317,6 +318,40 @@ class _AssetCard extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 14),
+          // ── What it is: type / brand / model (only when the backend sends them) ──
+          if (_present(a.assetType) || _present(a.category) ||
+              _present(a.brand) || _present(a.model)) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: _InfoTile(
+                    icon: Icons.category_rounded,
+                    label: 'TYPE',
+                    value: _present(a.assetType)
+                        ? a.assetType!.trim()
+                        : (_present(a.category) ? a.category!.trim() : '—'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _InfoTile(
+                    icon: Icons.business_rounded,
+                    label: 'BRAND',
+                    value: _present(a.brand) ? a.brand!.trim() : '—',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _InfoTile(
+                    icon: Icons.devices_other_rounded,
+                    label: 'MODEL',
+                    value: _present(a.model) ? a.model!.trim() : '—',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
           // ── Meta: assigned / return-by tiles ─────────────────────────
           Row(
             children: [

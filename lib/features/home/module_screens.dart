@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/navigation/mobile_menu_config.dart';
+import '../attendance/sign_out_guard.dart';
 import '../auth/auth_controller.dart';
 
 /// Generic, config-driven module screen: a responsive grid of menu cards for a
@@ -208,6 +209,9 @@ class MoreScreen extends ConsumerWidget {
   }
 
   Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
+    // An open attendance day has to be closed before the session can end.
+    if (!await ensureCheckedOutBeforeSignOut(context, ref)) return;
+    if (!context.mounted) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(

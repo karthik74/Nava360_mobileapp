@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/api_client.dart';
+import 'core/branding.dart';
 import 'core/nava360_splash_screen.dart';
 import 'core/theme.dart';
 import 'features/app_update/in_app_update_gate.dart';
@@ -16,13 +17,14 @@ import 'features/auth/change_password_screen.dart';
 import 'features/auth/first_login_screen.dart';
 import 'features/auth/forgot_password_screen.dart';
 import 'features/auth/login_screen.dart';
-import 'features/auth/reset_password_screen.dart';
 import 'features/auth/welcome_screen.dart';
+import 'features/assistant/assistant_screen.dart';
 import 'features/interviews/interviews_screen.dart';
 import 'features/requisitions/create_requisition_screen.dart';
 import 'features/requisitions/requisitions_screen.dart';
 import 'features/support/help_support_screen.dart';
 import 'features/customers/customers_screen.dart';
+import 'features/customers/nearby_customers_screen.dart';
 import 'features/home/dashboard_screen.dart';
 import 'features/home/home_shell.dart';
 import 'features/home/module_screens.dart';
@@ -31,6 +33,7 @@ import 'features/notifications/notifications_screen.dart';
 import 'features/notifications/push_lifecycle.dart';
 import 'features/notifications/push_service.dart';
 import 'features/permissions/permission_gate.dart';
+import 'features/profile/business_card_screen.dart';
 import 'features/profile/my_documents_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/team/team_screen.dart';
@@ -38,6 +41,7 @@ import 'features/chat/chat_list_screen.dart';
 import 'features/chat/chat_thread_by_id_screen.dart';
 import 'features/meetings/meetings_screen.dart';
 import 'features/trainings/trainings_screen.dart';
+import 'features/announcements/announcements_repository.dart';
 import 'features/announcements/announcements_screen.dart';
 import 'features/announcements/announcement_detail_screen.dart';
 import 'features/policies/policies_screen.dart';
@@ -46,8 +50,25 @@ import 'features/whistleblower/whistleblower_form_screen.dart';
 import 'features/assets/my_assets_screen.dart';
 import 'features/assets/asset_scan_screen.dart';
 import 'features/payslips/payslips_screen.dart';
+import 'features/goals/my_goals_screen.dart';
+import 'features/goals/team_target_approvals_screen.dart';
 import 'features/performance/my_performance_screen.dart';
 import 'features/performance/team_performance_screen.dart';
+import 'features/mis/mis_dashboard_screen.dart';
+import 'features/mis/mis_collection_screen.dart';
+import 'features/mis/mis_portfolio_screen.dart';
+import 'features/mis/mis_disbursement_screen.dart';
+import 'features/mis/mis_hourly_screen.dart';
+import 'features/mis/mis_comparison_screen.dart';
+import 'features/mis/mis_analytical_screen.dart';
+import 'features/mis/mis_dailyplan_screen.dart';
+import 'features/mis/mis_feedback_screen.dart';
+import 'features/mis/mis_employees_screen.dart';
+import 'features/mis/mis_employee_detail_screen.dart';
+import 'features/mis/mis_locations_screen.dart';
+import 'features/mis/mis_branch_report_screen.dart';
+import 'features/mis/mis_api_client.dart';
+import 'features/mis/mis_auth.dart';
 import 'features/audit/my_audits_screen.dart';
 import 'features/helpdesk/helpdesk_tickets_screen.dart';
 import 'features/helpdesk/helpdesk_raise_screen.dart';
@@ -62,7 +83,27 @@ import 'features/travel/travel_claims_screen.dart';
 import 'features/travel/travel_claim_form_screen.dart';
 import 'features/travel/travel_claim_detail_screen.dart';
 import 'features/travel/travel_approvals_screen.dart';
+import 'features/purchase_orders/po_list_screen.dart';
+import 'features/purchase_orders/po_form_screen.dart';
 import 'features/travel/travel_claim_review_screen.dart';
+import 'features/rent_management/rent_list_screen.dart';
+import 'features/rent_management/rent_branch_form_screen.dart';
+import 'features/rent_management/rent_payable_screen.dart';
+import 'features/rent_management/rent_notice_form_screen.dart';
+import 'features/rent_management/rent_utility_bill_form_screen.dart';
+import 'features/rent_management/rent_repository.dart' show isoPeriod;
+import 'features/mail_record/mail_list_screen.dart';
+import 'features/mail_record/mail_record_form_screen.dart';
+import 'features/mail_record/mail_shipment_screen.dart';
+import 'features/mail_record/mail_complaint_form_screen.dart';
+import 'features/mail_record/mail_complaint_screen.dart';
+import 'features/mail_record/mail_complaint_department_form_screen.dart';
+import 'features/letterhead/letterhead_screen.dart';
+import 'features/np/np_dashboard_screen.dart';
+import 'features/np/np_candidate_form_screen.dart';
+import 'features/np/np_candidate_detail_screen.dart';
+import 'features/np/np_bgv_screen.dart';
+import 'features/np/np_agreement_screen.dart';
 
 final goRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -89,9 +130,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       const authRoutes = {
         '/welcome',
         '/login',
-        '/forgot-password',
-        '/reset-password',
         '/first-login',
+        '/forgot-password',
       };
 
       // Signed-out users.
@@ -118,26 +158,22 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/forgot-password',
+        builder: (_, state) => ForgotPasswordScreen(
+          initialUsername: state.extra is String ? state.extra as String : null,
+        ),
+      ),
+      GoRoute(
         path: '/first-login',
         builder: (_, __) => const FirstLoginScreen(),
       ),
       GoRoute(
-        path: '/forgot-password',
-        builder: (_, state) {
-          final user = state.extra is String ? state.extra as String : null;
-          return ForgotPasswordScreen(initialUsername: user);
-        },
-      ),
-      GoRoute(
-        path: '/reset-password',
-        builder: (_, state) {
-          final user = state.extra is String ? state.extra as String : null;
-          return ResetPasswordScreen(username: user);
-        },
-      ),
-      GoRoute(
         path: '/profile',
         builder: (_, __) => const ProfileScreen(),
+      ),
+      GoRoute(
+        path: '/business-card',
+        builder: (_, __) => const BusinessCardScreen(),
       ),
       GoRoute(
         path: '/profile/documents',
@@ -156,6 +192,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (_, __) => const HelpSupportScreen(),
       ),
       GoRoute(
+        path: '/assistant',
+        builder: (_, __) => const AssistantScreen(),
+      ),
+      GoRoute(
         path: '/interviews',
         builder: (_, __) => const InterviewsScreen(),
       ),
@@ -171,10 +211,15 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '/notifications',
         builder: (_, __) => const NotificationsScreen(),
       ),
+      // Full-screen (outside the shell) so the map gets the whole viewport and
+      // the bottom nav doesn't sit over the customer sheet.
       GoRoute(
-        path: '/chats',
-        builder: (_, __) => const ChatListScreen(),
+        path: '/nearby-customers',
+        builder: (_, __) => const NearbyCustomersScreen(),
       ),
+      // NOTE: /chats (the list) lives INSIDE the ShellRoute below so it renders
+      // as a bottom-nav tab with the persistent nav bar. Only the thread
+      // (/chats/:id) stays top-level as a pushed full-screen route.
       GoRoute(
         path: '/chats/:id',
         builder: (_, state) => ChatThreadByIdScreen(
@@ -232,6 +277,70 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/my-performance',
         builder: (_, __) => const MyPerformanceScreen(),
+      ),
+      GoRoute(
+        path: '/my-goals',
+        builder: (_, __) => const MyGoalsScreen(),
+      ),
+      GoRoute(
+        path: '/team-target-approvals',
+        builder: (_, __) => const TeamTargetApprovalsScreen(),
+      ),
+      // ── MIS · Grow With Me analytics (own login gate + backend) ──
+      GoRoute(
+        path: '/mis',
+        builder: (_, __) => const MisScreen(),
+      ),
+      GoRoute(
+        path: '/mis/collection',
+        builder: (_, __) => const MisCollectionScreen(),
+      ),
+      GoRoute(
+        path: '/mis/portfolio',
+        builder: (_, __) => const MisPortfolioScreen(),
+      ),
+      GoRoute(
+        path: '/mis/disbursement',
+        builder: (_, __) => const MisDisbursementScreen(),
+      ),
+      GoRoute(
+        path: '/mis/hourly',
+        builder: (_, __) => const MisHourlyScreen(),
+      ),
+      GoRoute(
+        path: '/mis/comparison',
+        builder: (_, __) => const MisComparisonScreen(),
+      ),
+      GoRoute(
+        path: '/mis/analytical',
+        builder: (_, __) => const MisAnalyticalScreen(),
+      ),
+      GoRoute(
+        path: '/mis/daily-plan',
+        builder: (_, __) => const MisDailyPlanScreen(),
+      ),
+      GoRoute(
+        path: '/mis/feedback',
+        builder: (_, __) => const MisFeedbackScreen(),
+      ),
+      GoRoute(
+        path: '/mis/locations',
+        builder: (_, __) => const MisLocationsScreen(),
+      ),
+      GoRoute(
+        path: '/mis/branch-report',
+        builder: (_, __) => const MisBranchReportScreen(),
+      ),
+      // Static /mis/employees before the ':id' param route.
+      GoRoute(
+        path: '/mis/employees',
+        builder: (_, __) => const MisEmployeesScreen(),
+      ),
+      GoRoute(
+        path: '/mis/employees/:id',
+        builder: (_, state) => MisEmployeeDetailScreen(
+          empId: Uri.decodeComponent(state.pathParameters['id']!),
+        ),
       ),
       GoRoute(
         path: '/audit',
@@ -308,6 +417,136 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           claimId: int.parse(state.pathParameters['id']!),
         ),
       ),
+      // ── Admin Tools · Purchase Orders ──
+      GoRoute(
+        path: '/admin/purchase-orders',
+        builder: (_, __) => const PoListScreen(),
+      ),
+      // Static sub-route must precede '/admin/purchase-orders/:id' so it
+      // isn't captured as an id.
+      GoRoute(
+        path: '/admin/purchase-orders/new',
+        builder: (_, __) => const PoFormScreen(),
+      ),
+      GoRoute(
+        path: '/admin/purchase-orders/:id',
+        builder: (_, state) => PoFormScreen(
+          poId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      // ── Admin Tools · Rent Management ──
+      GoRoute(
+        path: '/admin/rent',
+        builder: (_, __) => const RentListScreen(),
+      ),
+      // Static sub-routes must precede any '/admin/rent/.../:id' route so
+      // they aren't captured as an id.
+      GoRoute(
+        path: '/admin/rent/branches/new',
+        builder: (_, __) => const RentBranchFormScreen(),
+      ),
+      GoRoute(
+        path: '/admin/rent/branches/:id',
+        builder: (_, state) => RentBranchFormScreen(
+          branchId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/admin/rent/payable/:id',
+        builder: (_, state) => RentPayableScreen(
+          payableId: int.parse(state.pathParameters['id']!),
+          period: state.uri.queryParameters['period'] ?? isoPeriod(DateTime.now()),
+        ),
+      ),
+      GoRoute(
+        path: '/admin/rent/notices/new',
+        builder: (_, __) => const RentNoticeFormScreen(),
+      ),
+      GoRoute(
+        path: '/admin/rent/utility-bills/new',
+        builder: (_, __) => const RentUtilityBillFormScreen(),
+      ),
+      // ── Admin Tools · Mail Record ──
+      GoRoute(
+        path: '/admin/mail',
+        builder: (_, __) => const MailListScreen(),
+      ),
+      // Static sub-routes must precede any '/admin/mail/.../:id' route so
+      // they aren't captured as an id.
+      GoRoute(
+        path: '/admin/mail/records/new',
+        builder: (_, __) => const MailRecordFormScreen(),
+      ),
+      GoRoute(
+        path: '/admin/mail/records/:id',
+        builder: (_, state) => MailRecordFormScreen(
+          recordId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/admin/mail/shipments/new',
+        builder: (_, __) => const MailShipmentScreen(),
+      ),
+      GoRoute(
+        path: '/admin/mail/complaints/new',
+        builder: (_, __) => const MailComplaintFormScreen(),
+      ),
+      GoRoute(
+        path: '/admin/mail/complaints/:id',
+        builder: (_, state) => MailComplaintScreen(
+          complaintId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/admin/mail/complaint-departments/new',
+        builder: (_, __) => const MailComplaintDepartmentFormScreen(),
+      ),
+      GoRoute(
+        path: '/admin/mail/complaint-departments/:id',
+        builder: (_, state) => MailComplaintDepartmentFormScreen(
+          deptId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      // ── Admin Tools · Letter Head ──
+      GoRoute(
+        path: '/admin/letterhead',
+        builder: (_, __) => const LetterheadScreen(),
+      ),
+      // ── NP (Navachetana Prathinidhi) Onboarding ──
+      // 13-step BM→AM→DM→OPS workflow over /api/np. Static '/new' precedes
+      // the ':id' routes so it isn't captured as an id.
+      GoRoute(
+        path: '/np',
+        builder: (_, __) => const NpDashboardScreen(),
+      ),
+      GoRoute(
+        path: '/np/candidates/new',
+        builder: (_, __) => const NpCandidateFormScreen(),
+      ),
+      GoRoute(
+        path: '/np/candidates/:id',
+        builder: (_, state) => NpCandidateDetailScreen(
+          candidateId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/np/candidates/:id/edit',
+        builder: (_, state) => NpCandidateFormScreen(
+          candidateId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/np/candidates/:id/bgv',
+        builder: (_, state) => NpBgvScreen(
+          candidateId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
+      GoRoute(
+        path: '/np/candidates/:id/agreement',
+        builder: (_, state) => NpAgreementScreen(
+          candidateId: int.parse(state.pathParameters['id']!),
+        ),
+      ),
       ShellRoute(
         builder: (_, __, child) => HomeShell(child: child),
         routes: [
@@ -318,6 +557,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(path: '/leaves', builder: (_, __) => const LeavesScreen()),
           GoRoute(path: '/tasks', builder: (_, __) => const CustomerTasksHub()),
+          GoRoute(path: '/chats', builder: (_, __) => const ChatListScreen()),
           GoRoute(path: '/team', builder: (_, __) => const TeamScreen()),
           GoRoute(path: '/performance', builder: (_, __) => const TeamPerformanceScreen()),
           GoRoute(path: '/hrms', builder: (_, __) => const HrmsScreen()),
@@ -355,6 +595,9 @@ class HrmsApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(goRouterProvider);
+    // Rebuild the whole tree (incl. ThemeData built from the runtime-mutable
+    // AppColors tokens) whenever fresh company branding arrives.
+    final branding = ref.watch(brandingProvider);
     // Activate the auth → side-effect bindings once at the app root.
     ref.watch(locationLifecycleProvider);
     ref.watch(pushLifecycleProvider);
@@ -365,11 +608,52 @@ class HrmsApp extends ConsumerWidget {
     api.onUnauthorized ??= () {
       ref.read(authControllerProvider.notifier).sessionExpired();
     };
+    // On a MIS 401, drop just the MIS session (its own backend/token) so the MIS
+    // gate re-authenticates without signing the user out of the whole app.
+    final misApi = ref.read(misApiClientProvider);
+    misApi.onUnauthorized ??= () {
+      ref.read(misAuthControllerProvider.notifier).sessionExpired();
+    };
+    // Eagerly mirror the nava360 login into the MIS (Grow With Me) session so any
+    // MIS screen works from anywhere in the app's nav — not just the MIS
+    // dashboard gate. No-ops when already signed in as the same user. The emp id
+    // is resolved from the login response (username OR email — a few accounts
+    // carry an email/lowercased code as username, which broke the derivation).
+    ref.listen(authUserProvider, (_, next) {
+      final id = misEmpIdFromIdentity(
+        username: next?.username,
+        email: next?.email,
+      );
+      if (id.isNotEmpty) {
+        ref.read(misAuthControllerProvider.notifier).ensureAutoLogin(id);
+      }
+    });
+    final misIdentity = ref.read(authUserProvider);
+    final misEmpId = misEmpIdFromIdentity(
+      username: misIdentity?.username,
+      email: misIdentity?.email,
+    );
+    if (misEmpId.isNotEmpty) {
+      // Deferred: ensureAutoLogin mutates provider state, which is not allowed
+      // synchronously from build.
+      Future(() {
+        ref.read(misAuthControllerProvider.notifier).ensureAutoLogin(misEmpId);
+      });
+    }
     // Let push-notification taps deep-link into a chat thread.
     ref.read(pushServiceProvider).onOpenChat = (id) => router.push('/chats/$id');
     // …and into an announcement.
     ref.read(pushServiceProvider).onOpenAnnouncement =
         (id) => router.push('/announcements/$id');
+    // Every announcement-push tap is reported (fire-and-forget) so admins can
+    // see who clicked — including notification-only nudges that never appear
+    // in the announcements list.
+    ref.read(pushServiceProvider).onAnnouncementTapped = (id) {
+      ref
+          .read(announcementsRepositoryProvider)
+          .markOpened(id)
+          .catchError((Object _) {});
+    };
     // …and into a company policy.
     ref.read(pushServiceProvider).onOpenPolicy =
         (id) => router.push('/policies/$id');
@@ -378,7 +662,7 @@ class HrmsApp extends ConsumerWidget {
     // …and to any explicit in-app route a push carries (announcement actions).
     ref.read(pushServiceProvider).onOpenRoute = (route) => router.push(route);
     return MaterialApp.router(
-      title: 'Nava360',
+      title: branding.productName,
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       routerConfig: router,

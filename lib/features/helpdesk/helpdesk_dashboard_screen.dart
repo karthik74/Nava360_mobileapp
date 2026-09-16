@@ -150,7 +150,7 @@ class HelpdeskDashboardScreen extends ConsumerWidget {
                           value: r.value / max,
                           minHeight: 6,
                           backgroundColor: AppColors.surfaceAlt,
-                          valueColor: const AlwaysStoppedAnimation(AppColors.primary),
+                          valueColor: AlwaysStoppedAnimation(AppColors.primary),
                         ),
                       ),
                     ],

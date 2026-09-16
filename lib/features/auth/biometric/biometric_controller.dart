@@ -158,7 +158,20 @@ class BiometricController extends StateNotifier<BiometricState> {
       final ok = await _service.authenticate('Sign in with biometrics');
       if (!ok) return 'Biometric authentication failed.';
 
-      final res = await _repo.biometricLogin(deviceId: deviceId, biometricToken: token);
+      // Same device-lock key as password login; resolution failure must not
+      // block the exchange, the server decides what a missing id means.
+      DeviceIdentity? hw;
+      try {
+        hw = await _ref.read(deviceInfoServiceProvider).resolve();
+      } catch (_) {
+        hw = null;
+      }
+      final res = await _repo.biometricLogin(
+        deviceId: deviceId,
+        biometricToken: token,
+        hardwareDeviceId: hw?.hardwareId,
+        deviceName: hw?.deviceName,
+      );
       // Persist the new session + rotated credential, then sign in.
       await SecureStorage.writeToken(res.auth.token);
       await SecureStorage.writeUserJson(jsonEncode(res.auth.toJson()));

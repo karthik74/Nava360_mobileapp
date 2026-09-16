@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/branding.dart';
+import '../../core/env.dart';
 import '../../core/theme.dart';
 import 'welcome_seen_controller.dart';
 
@@ -127,11 +129,13 @@ class WelcomeScreen extends ConsumerWidget {
 // Brand row — small logo chip + workspace name
 // ──────────────────────────────────────────────────────────────────────
 
-class _BrandRow extends StatelessWidget {
+class _BrandRow extends ConsumerWidget {
   const _BrandRow();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final b = ref.watch(brandingProvider);
+    final logoUrl = Env.fileUrl(b.logoUrl);
     return Row(
       children: [
         Container(
@@ -149,12 +153,20 @@ class _BrandRow extends StatelessWidget {
             ],
           ),
           padding: const EdgeInsets.all(4),
-          child: Image.asset('assets/logo-mark.png', fit: BoxFit.contain),
+          // Company logo from runtime branding; product mark as fallback.
+          child: logoUrl == null
+              ? Image.asset('assets/logo-mark.png', fit: BoxFit.contain)
+              : Image.network(
+                  logoUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) =>
+                      Image.asset('assets/logo-mark.png', fit: BoxFit.contain),
+                ),
         ),
         const SizedBox(width: 12),
-        const Text(
-          'Nava360',
-          style: TextStyle(
+        Text(
+          b.productName,
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 22,
             fontWeight: FontWeight.w800,
@@ -170,54 +182,60 @@ class _BrandRow extends StatelessWidget {
 // Hero copy — badge + headline + subtitle
 // ──────────────────────────────────────────────────────────────────────
 
-class _HeroCopy extends StatelessWidget {
+class _HeroCopy extends ConsumerWidget {
   const _HeroCopy();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final companyName = ref.watch(brandingProvider).companyName;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // "By Navachetana Livelihoods" pill.
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.16),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: Colors.white.withOpacity(0.30)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 7,
-                height: 7,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF34D399),
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Color(0xFF34D399),
-                      blurRadius: 8,
-                      spreadRadius: 0,
+        // "By <company>" pill — from runtime branding; hidden when the
+        // deployment hasn't configured a company name.
+        if (companyName.isNotEmpty) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.16),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: Colors.white.withOpacity(0.30)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF34D399),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Color(0xFF34D399),
+                        blurRadius: 8,
+                        spreadRadius: 0,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Flexible(
+                  child: Text(
+                    'BY ${companyName.toUpperCase()}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
                     ),
-                  ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 7),
-              const Text(
-                'BY NAVACHETANA LIVELIHOODS',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 18),
+          const SizedBox(height: 18),
+        ],
         const Text(
           'Field work,\nfully handled.',
           style: TextStyle(
@@ -383,7 +401,7 @@ class _GetStartedButton extends StatelessWidget {
                 ),
               ],
             ),
-            child: const Row(
+            child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(

@@ -121,6 +121,8 @@ class Conversation {
 
   /// Returns a copy with mutated fields (for live-updating from WS events).
   Conversation copyWith({
+    String? title,
+    List<ChatContact>? members,
     String? lastMessagePreview,
     DateTime? lastMessageAt,
     int? unreadCount,
@@ -130,10 +132,10 @@ class Conversation {
       Conversation(
         id: id,
         type: type,
-        title: title,
+        title: title ?? this.title,
         createdByEmployeeId: createdByEmployeeId,
         otherEmployeeId: otherEmployeeId,
-        members: members,
+        members: members ?? this.members,
         lastMessagePreview: lastMessagePreview ?? this.lastMessagePreview,
         lastMessageAt: lastMessageAt ?? this.lastMessageAt,
         unreadCount: unreadCount ?? this.unreadCount,
@@ -224,6 +226,9 @@ class ChatMessage {
   final String? replyToPreview;
   final bool replyToDeleted;
 
+  /// True when the message was forwarded from another chat.
+  final bool forwarded;
+
   /// Per-employee emoji reactions (group by emoji for display).
   final List<MessageReaction> reactions;
 
@@ -246,6 +251,7 @@ class ChatMessage {
     this.replyToPreview,
     this.replyToDeleted = false,
     this.reactions = const [],
+    this.forwarded = false,
   });
 
   bool get isSystem => type == ChatMessageType.SYSTEM;
@@ -270,6 +276,7 @@ class ChatMessage {
         replyToPreview: replyToPreview,
         replyToDeleted: replyToDeleted,
         reactions: reactions,
+        forwarded: forwarded,
       );
 
   /// A short one-line preview of this message (for reply quotes / previews).
@@ -298,6 +305,7 @@ class ChatMessage {
         replyToSenderName: j['replyToSenderName'] as String?,
         replyToPreview: j['replyToPreview'] as String?,
         replyToDeleted: j['replyToDeleted'] == true,
+        forwarded: j['forwarded'] == true,
         reactions: (j['reactions'] as List<dynamic>?)
                 ?.map((e) => MessageReaction.fromJson(e as Map<String, dynamic>))
                 .toList() ??

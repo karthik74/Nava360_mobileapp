@@ -36,30 +36,6 @@ class AuthRepository {
     );
   }
 
-  Future<void> forgotPassword(String username) async {
-    await _api.post<void>(
-      '/api/auth/forgot-password',
-      body: {'username': username},
-      parse: (_) {},
-    );
-  }
-
-  Future<void> resetPassword({
-    required String username,
-    required String otp,
-    required String newPassword,
-  }) async {
-    await _api.post<void>(
-      '/api/auth/reset-password',
-      body: {
-        'username': username,
-        'otp': otp,
-        'newPassword': newPassword,
-      },
-      parse: (_) {},
-    );
-  }
-
   // ── First-time login (account activation) ─────────────────────────────────
 
   /// Step 1 — locate the account by employee code and send an OTP to the
@@ -122,6 +98,36 @@ class AuthRepository {
         'newPassword': newPassword,
         'confirmPassword': confirmPassword,
       },
+      parse: (_) {},
+    );
+  }
+
+  /// Forgot password, step 1: send a 6-digit one-time code to the mobile on
+  /// the employee record (WhatsApp). Returns the masked number and TTL.
+  Future<({String? maskedPhone, int expiresInSeconds})> forgotPassword(
+      String username) {
+    return _api.post(
+      '/api/auth/forgot-password',
+      body: {'username': username},
+      parse: (d) {
+        final m = (d as Map<String, dynamic>?) ?? const {};
+        return (
+          maskedPhone: m['maskedPhone'] as String?,
+          expiresInSeconds: (m['expiresInSeconds'] as num?)?.toInt() ?? 0,
+        );
+      },
+    );
+  }
+
+  /// Forgot password, step 2: verify the code and set the new password.
+  Future<void> resetPassword({
+    required String username,
+    required String otp,
+    required String newPassword,
+  }) {
+    return _api.post<void>(
+      '/api/auth/reset-password',
+      body: {'username': username, 'otp': otp, 'newPassword': newPassword},
       parse: (_) {},
     );
   }

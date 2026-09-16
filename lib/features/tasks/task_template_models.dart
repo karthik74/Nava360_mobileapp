@@ -17,6 +17,7 @@ class TaskTemplate {
     this.estimatedHours,
     this.defaultRequiresReview = true,
     this.defaultAllowAttachments = true,
+    this.hierarchyCanPerform = false,
   });
 
   final int id;
@@ -33,6 +34,10 @@ class TaskTemplate {
   final double? estimatedHours;
   final bool defaultRequiresReview;
   final bool defaultAllowAttachments;
+
+  /// Tasks from this template are also visible to / performable by the
+  /// managers above the assignee in the reporting line.
+  final bool hierarchyCanPerform;
 
   bool get isCustomer => taskType.toUpperCase() == 'CUSTOMER';
 
@@ -51,5 +56,6 @@ class TaskTemplate {
         estimatedHours: (j['estimatedHours'] as num?)?.toDouble(),
         defaultRequiresReview: j['defaultRequiresReview'] != false,
         defaultAllowAttachments: j['defaultAllowAttachments'] != false,
+        hierarchyCanPerform: j['hierarchyCanPerform'] == true,
       );
 }

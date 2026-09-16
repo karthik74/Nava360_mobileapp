@@ -126,6 +126,63 @@ class EmployeeDocument {
       );
 }
 
+/// One field change inside a timeline entry (old → new).
+class EmployeeChangeItem {
+  EmployeeChangeItem({
+    required this.field,
+    required this.label,
+    this.oldValue,
+    this.newValue,
+  });
+  final String field;
+  final String label;
+  final String? oldValue;
+  final String? newValue;
+
+  factory EmployeeChangeItem.fromJson(Map<String, dynamic> j) => EmployeeChangeItem(
+        field: (j['field'] as String?) ?? '',
+        label: (j['label'] as String?) ?? '',
+        oldValue: j['oldValue'] as String?,
+        newValue: j['newValue'] as String?,
+      );
+}
+
+/// Employee-details timeline entry: who changed what on the record, and when.
+/// Mirror of the backend EmployeeChangeLogResponse.
+class EmployeeChangeLog {
+  EmployeeChangeLog({
+    required this.id,
+    required this.action,
+    required this.actorName,
+    required this.changes,
+    this.actorUsername,
+    this.createdAt,
+  });
+  final int id;
+
+  /// CREATED | UPDATED
+  final String action;
+  final String actorName;
+  final String? actorUsername;
+  final DateTime? createdAt;
+  final List<EmployeeChangeItem> changes;
+
+  bool get isCreated => action == 'CREATED';
+
+  factory EmployeeChangeLog.fromJson(Map<String, dynamic> j) => EmployeeChangeLog(
+        id: (j['id'] as num).toInt(),
+        action: (j['action'] as String?) ?? 'UPDATED',
+        actorName: (j['actorName'] as String?) ?? 'System',
+        actorUsername: j['actorUsername'] as String?,
+        createdAt: j['createdAt'] == null
+            ? null
+            : DateTime.tryParse(j['createdAt'] as String)?.toLocal(),
+        changes: ((j['changes'] as List?) ?? const [])
+            .map((e) => EmployeeChangeItem.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
 class EmployeeDetailRepository {
   EmployeeDetailRepository(this._api);
   final ApiClient _api;
@@ -136,6 +193,24 @@ class EmployeeDetailRepository {
     return _api.get<EmployeeDetail>(
       '/api/employees/$id',
       parse: (d) => EmployeeDetail.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
+  /// Change history of [id], newest first: what changed on the record, by
+  /// whom and when. Backend: GET /api/employees/{id}/timeline (EMPLOYEE_VIEW,
+  /// scoped like the profile). Paged — one large page is enough for the app.
+  Future<List<EmployeeChangeLog>> timeline(int id, {int size = 100}) {
+    return _api.get<List<EmployeeChangeLog>>(
+      '/api/employees/$id/timeline',
+      query: {'size': '$size'},
+      parse: (d) {
+        final content = d is List
+            ? d
+            : ((d as Map<String, dynamic>)['content'] as List<dynamic>? ?? const []);
+        return content
+            .map((e) => EmployeeChangeLog.fromJson(e as Map<String, dynamic>))
+            .toList();
+      },
     );
   }
 

@@ -52,14 +52,36 @@ class EmployeeDocument {
 }
 
 /// A configured document type (code + label) for the upload dropdown.
+/// A selectable document type, with the extra details it captures on upload.
+///
+/// The three `requires*` flags are configured per type in Settings → Document
+/// types. When one is set the server REFUSES an upload that omits the value, so
+/// the app has to ask for it — otherwise the employee gets an error they cannot
+/// act on.
 class DocTypeOption {
-  DocTypeOption({required this.code, required this.label});
+  DocTypeOption({
+    required this.code,
+    required this.label,
+    this.requiresDocumentNumber = false,
+    this.requiresStartDate = false,
+    this.requiresEndDate = false,
+  });
+
   final String code;
   final String label;
+  final bool requiresDocumentNumber;
+  final bool requiresStartDate;
+  final bool requiresEndDate;
+
+  bool get capturesExtraFields =>
+      requiresDocumentNumber || requiresStartDate || requiresEndDate;
 
   factory DocTypeOption.fromJson(Map<String, dynamic> j) => DocTypeOption(
         code: j['code'] as String,
         label: j['label'] as String? ?? j['code'] as String,
+        requiresDocumentNumber: j['requiresDocumentNumber'] == true,
+        requiresStartDate: j['requiresStartDate'] == true,
+        requiresEndDate: j['requiresEndDate'] == true,
       );
 }
 
@@ -92,9 +114,14 @@ class ProfileRepository {
   }
 
   /// Active document types for the upload dropdown.
+  ///
+  /// Reads the POLICY endpoint, not `/api/lookups/document-types`: the plain
+  /// lookup returns only code + label, so the app would not know which extra
+  /// details a type requires and every such upload would be rejected. GET on
+  /// this endpoint needs no special permission.
   Future<List<DocTypeOption>> documentTypes() async {
     final res = await _api.raw.get<Map<String, dynamic>>(
-      '/api/lookups/document-types',
+      '/api/document-types',
       queryParameters: {'activeOnly': true},
     );
     final list = res.data?['data'] as List? ?? const [];
@@ -104,16 +131,25 @@ class ProfileRepository {
   }
 
   /// Uploads a document onto the signed-in employee's own record.
+  /// [documentNumber], [startDate] (yyyy-MM-dd) and [endDate] are sent only when
+  /// the chosen document type asks for them; the server requires them in that case.
   Future<EmployeeDocument> uploadMyDocument({
     required String filePath,
     required String docType,
     String? label,
     String? filename,
+    String? documentNumber,
+    String? startDate,
+    String? endDate,
   }) async {
     final form = FormData.fromMap({
       'file': await MultipartFile.fromFile(filePath, filename: filename),
       'docType': docType,
       if (label != null && label.trim().isNotEmpty) 'label': label.trim(),
+      if (documentNumber != null && documentNumber.trim().isNotEmpty)
+        'documentNumber': documentNumber.trim(),
+      if (startDate != null && startDate.isNotEmpty) 'startDate': startDate,
+      if (endDate != null && endDate.isNotEmpty) 'endDate': endDate,
     });
     final res = await _api.raw.post<Map<String, dynamic>>(
       '/api/employees/me/documents',

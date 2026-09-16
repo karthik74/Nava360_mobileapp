@@ -103,10 +103,26 @@ class LoginRequest {
   /// Backend field name is `username` but it also accepts an email.
   final String username;
   final String password;
-  const LoginRequest({required this.username, required this.password});
+
+  /// Stable per-device id (Android SSAID / iOS identifierForVendor). The backend
+  /// binds the per-shift device lock to it. Null only if the platform could not
+  /// supply one at all; the server then rejects the login when the lock is on.
+  final String? hardwareDeviceId;
+
+  /// Human-readable device label stored with the lock so HR can identify it.
+  final String? deviceName;
+
+  const LoginRequest({
+    required this.username,
+    required this.password,
+    this.hardwareDeviceId,
+    this.deviceName,
+  });
 
   Map<String, dynamic> toJson() => {
         'username': username,
         'password': password,
+        if (hardwareDeviceId != null) 'hardwareDeviceId': hardwareDeviceId,
+        if (deviceName != null) 'deviceName': deviceName,
       };
 }

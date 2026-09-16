@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/text_formatters.dart';
+import '../../core/branding.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -177,7 +178,9 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
           icon: Icons.assignment_rounded,
           children: [
             AuditKeyValueRow(label: 'Code', value: plan.code ?? '—'),
-            AuditKeyValueRow(label: 'Branch', value: plan.branchName ?? '—'),
+            AuditKeyValueRow(
+                label: Branding.current.term('branch'),
+                value: plan.branchName ?? '—'),
             AuditKeyValueRow(
                 label: 'Template', value: plan.templateName ?? '—'),
             AuditKeyValueRow(
@@ -256,6 +259,8 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
     final canSubmit = user?.hasPermission('AUDIT_SUBMIT') ?? false;
     final canBm = user?.hasPermission('AUDIT_BM_COMPLIANCE') ?? false;
     final canVerify = user?.hasPermission('AUDIT_VERIFY') ?? false;
+    final canSupervisorApprove =
+        user?.hasPermission('AUDIT_SUPERVISOR_APPROVE') ?? false;
 
     final btns = <Widget>[];
 
@@ -284,7 +289,39 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
       ));
     }
 
-    if (canBm && status == 'SENT_TO_BM') {
+    // The auditor's supervisor approves a submitted audit (with findings) before
+    // the branch manager can act. Only the reporting manager / AUDIT_ADMIN passes
+    // the backend guard; the button just needs the permission to appear.
+    if (canSupervisorApprove && status == 'SUPERVISOR_APPROVAL_PENDING') {
+      btns.add(_SecondaryAction(
+        label: 'Approve (supervisor)',
+        icon: Icons.verified_rounded,
+        busy: _busy,
+        onTap: () => _run(
+          () => ref.read(auditRepositoryProvider).supervisorApprove(widget.planId),
+          successMsg: 'Approved — branch action pending',
+        ),
+      ));
+      btns.add(_DangerAction(
+        label: 'Reject',
+        icon: Icons.close_rounded,
+        busy: _busy,
+        onTap: () async {
+          final reason = await _askReason('Reject audit');
+          if (reason == null) return;
+          await _run(
+            () => ref
+                .read(auditRepositoryProvider)
+                .supervisorReject(widget.planId, reason),
+            successMsg: 'Sent back to auditor',
+          );
+        },
+      ));
+    }
+
+    // Backend statuses: BM_ACTION_PENDING (sent to BM; REOPENED also accepts a
+    // BM re-submission) and VERIFICATION_PENDING (BM submitted, awaiting close).
+    if (canBm && (status == 'BM_ACTION_PENDING' || status == 'REOPENED')) {
       btns.add(_SecondaryAction(
         label: 'Submit BM compliance',
         icon: Icons.assignment_turned_in_rounded,
@@ -296,7 +333,7 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
       ));
     }
 
-    if (canVerify && status == 'BM_SUBMITTED') {
+    if (canVerify && status == 'VERIFICATION_PENDING') {
       btns.add(_SecondaryAction(
         label: 'Close audit',
         icon: Icons.check_circle_rounded,
