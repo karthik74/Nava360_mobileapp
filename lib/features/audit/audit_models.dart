@@ -78,6 +78,8 @@ class AuditPlan {
   final String? branchName;
   final int? templateVersionId;
   final String? templateName;
+  final int? templateVersionNo;
+  final String? closedAt;
   final int? assignedAuditorId;
   final String? assignedAuditorName;
   final String? plannedStartDate;
@@ -99,6 +101,8 @@ class AuditPlan {
     this.branchName,
     this.templateVersionId,
     this.templateName,
+    this.templateVersionNo,
+    this.closedAt,
     this.assignedAuditorId,
     this.assignedAuditorName,
     this.plannedStartDate,
@@ -121,6 +125,8 @@ class AuditPlan {
         branchName: _s(j['branchName']),
         templateVersionId: _i(j['templateVersionId']),
         templateName: _s(j['templateName']),
+        templateVersionNo: _i(j['templateVersionNo']),
+        closedAt: _s(j['closedAt']),
         assignedAuditorId: _i(j['assignedAuditorId']),
         assignedAuditorName: _s(j['assignedAuditorName']),
         plannedStartDate: _s(j['plannedStartDate']),

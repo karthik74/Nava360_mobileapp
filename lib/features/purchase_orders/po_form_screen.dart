@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'po_models.dart';
+import 'po_pdf.dart';
 import 'po_repository.dart';
 import 'po_status_ui.dart';
 
@@ -38,8 +39,19 @@ class _PoFormScreenState extends ConsumerState<PoFormScreen> {
   late final TextEditingController _shippingName;
   late final TextEditingController _shippingAddress;
   late final TextEditingController _remarks;
+  // Company block — editable; what is saved becomes this user's own default.
+  late final TextEditingController _coAddress;
+  late final TextEditingController _coGstin;
+  late final TextEditingController _coCin;
+  late final TextEditingController _coMobile;
+  late final TextEditingController _coEmail;
+  /// Typed by the user; left blank, a PO-YYYY-NNNN number is assigned when it is saved.
+  late final TextEditingController _poNumberInput;
 
   DateTime _poDate = DateTime.now();
+  /// Only today … today + 30 days can be picked, counted from the day the PO is being made.
+  DateTime? _deliveryByDate;
+  static const _deliveryWindowDays = 30;
   String? _poNumber;
   String? _createdByUsername;
   List<_ItemRow> _items = [_ItemRow.empty()];
@@ -59,8 +71,44 @@ class _PoFormScreenState extends ConsumerState<PoFormScreen> {
     _shippingName = TextEditingController();
     _shippingAddress = TextEditingController();
     _remarks = TextEditingController();
-    if (widget.poId != null) _load(widget.poId!);
+    _coAddress = TextEditingController();
+    _coGstin = TextEditingController();
+    _coCin = TextEditingController();
+    _coMobile = TextEditingController();
+    _coEmail = TextEditingController();
+    _poNumberInput = TextEditingController();
+    if (widget.poId != null) {
+      _load(widget.poId!);
+    } else {
+      _loadMyDetails();
+    }
   }
+
+  void _fillCompany(Map<String, String> c) {
+    _coAddress.text = c['address'] ?? '';
+    _coGstin.text = c['gstin'] ?? '';
+    _coCin.text = c['cin'] ?? '';
+    _coMobile.text = c['mobile'] ?? '';
+    _coEmail.text = c['email'] ?? '';
+  }
+
+  /// A new PO starts with this user's own saved company details.
+  Future<void> _loadMyDetails() async {
+    try {
+      final c = await ref.read(poRepositoryProvider).myDetails();
+      if (mounted) setState(() => _fillCompany(c));
+    } catch (_) {
+      // The fields just stay blank and can be typed in.
+    }
+  }
+
+  Map<String, String> get _companyPayload => {
+        'address': _coAddress.text.trim(),
+        'gstin': _coGstin.text.trim(),
+        'cin': _coCin.text.trim(),
+        'mobile': _coMobile.text.trim(),
+        'email': _coEmail.text.trim(),
+      };
 
   Future<void> _load(int id) async {
     setState(() => _loading = true);
@@ -69,6 +117,9 @@ class _PoFormScreenState extends ConsumerState<PoFormScreen> {
       if (!mounted) return;
       setState(() {
         _poDate = po.poDate ?? DateTime.now();
+        _deliveryByDate = po.deliveryByDate;
+        _fillCompany(po.company);
+        _poNumberInput.text = po.poNumber;
         _supplierName.text = po.supplierName ?? '';
         _supplierAddress.text = po.supplierAddress ?? '';
         _supplierGstin.text = po.supplierGstin ?? '';
@@ -95,7 +146,13 @@ class _PoFormScreenState extends ConsumerState<PoFormScreen> {
     _supplierGstin.dispose();
     _shippingName.dispose();
     _shippingAddress.dispose();
+    _coAddress.dispose();
+    _coGstin.dispose();
+    _coCin.dispose();
+    _coMobile.dispose();
+    _coEmail.dispose();
     _remarks.dispose();
+    _poNumberInput.dispose();
     for (final it in _items) {
       it.description.dispose();
       it.quantity.dispose();
@@ -124,6 +181,21 @@ class _PoFormScreenState extends ConsumerState<PoFormScreen> {
       lastDate: DateTime(2035),
     );
     if (d != null) setState(() => _poDate = d);
+  }
+
+  Future<void> _pickDeliveryDate() async {
+    final today = DateUtils.dateOnly(DateTime.now());
+    final last = today.add(const Duration(days: _deliveryWindowDays));
+    var initial = _deliveryByDate ?? today;
+    if (initial.isBefore(today) || initial.isAfter(last)) initial = today;
+    final d = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: today,
+      lastDate: last,
+      helpText: 'Please do delivery before this date (next $_deliveryWindowDays days)',
+    );
+    if (d != null) setState(() => _deliveryByDate = d);
   }
 
   ({double subtotal, double gstTotal, double grandTotal}) _totals() {
@@ -157,13 +229,20 @@ class _PoFormScreenState extends ConsumerState<PoFormScreen> {
       setState(() => _error = 'Add at least one item with a description.');
       return;
     }
+    if (_deliveryByDate == null) {
+      setState(() => _error = 'Pick the date the products should be delivered by.');
+      return;
+    }
     setState(() => _saving = true);
     final repo = ref.read(poRepositoryProvider);
     try {
       final saved = _isEdit
           ? await repo.update(
               widget.poId!,
+              poNumber: _emptyToNull(_poNumberInput.text),
               poDate: _poDate,
+              deliveryByDate: _deliveryByDate,
+              company: _companyPayload,
               supplierName: _emptyToNull(_supplierName.text),
               supplierAddress: _emptyToNull(_supplierAddress.text),
               supplierGstin: _emptyToNull(_supplierGstin.text),
@@ -173,7 +252,10 @@ class _PoFormScreenState extends ConsumerState<PoFormScreen> {
               items: items,
             )
           : await repo.create(
+              poNumber: _emptyToNull(_poNumberInput.text),
               poDate: _poDate,
+              deliveryByDate: _deliveryByDate,
+              company: _companyPayload,
               supplierName: _emptyToNull(_supplierName.text),
               supplierAddress: _emptyToNull(_supplierAddress.text),
               supplierGstin: _emptyToNull(_supplierGstin.text),
@@ -240,6 +322,12 @@ class _PoFormScreenState extends ConsumerState<PoFormScreen> {
           actions: [
             if (_isEdit)
               IconButton(
+                onPressed: () => downloadPoPdf(context, () => ref.read(poRepositoryProvider).get(widget.poId!)),
+                icon: Icon(Icons.picture_as_pdf_rounded, color: AppColors.primary),
+                tooltip: 'Download PDF',
+              ),
+            if (_isEdit)
+              IconButton(
                 onPressed: _delete,
                 icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
                 tooltip: 'Delete',
@@ -258,6 +346,13 @@ class _PoFormScreenState extends ConsumerState<PoFormScreen> {
                           style: const TextStyle(fontSize: 12, color: AppColors.muted)),
                     ),
                   const AppSectionHeader(title: 'Order details'),
+                  const SizedBox(height: 10),
+                  _label('PO number'),
+                  TextField(
+                    controller: _poNumberInput,
+                    maxLength: 30,
+                    decoration: const InputDecoration(hintText: 'Leave blank for an automatic number', counterText: ''),
+                  ),
                   const SizedBox(height: 10),
                   _label('Date *'),
                   InkWell(
@@ -282,6 +377,36 @@ class _PoFormScreenState extends ConsumerState<PoFormScreen> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  const AppSectionHeader(title: 'Company details'),
+                  const SizedBox(height: 8),
+                  _label('Address'),
+                  TextField(controller: _coAddress, minLines: 2, maxLines: 3, maxLength: 500, decoration: const InputDecoration(counterText: '')),
+                  const SizedBox(height: 10),
+                  _label('GSTIN'),
+                  TextField(
+                    controller: _coGstin,
+                    maxLength: 30,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(counterText: ''),
+                  ),
+                  const SizedBox(height: 10),
+                  _label('CIN'),
+                  TextField(
+                    controller: _coCin,
+                    maxLength: 40,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(counterText: ''),
+                  ),
+                  const SizedBox(height: 10),
+                  _label('Mobile'),
+                  TextField(controller: _coMobile, keyboardType: TextInputType.phone, maxLength: 30, decoration: const InputDecoration(counterText: '')),
+                  const SizedBox(height: 10),
+                  _label('Email'),
+                  TextField(controller: _coEmail, keyboardType: TextInputType.emailAddress, maxLength: 150, decoration: const InputDecoration(counterText: '')),
+                  const SizedBox(height: 4),
+                  Text('Saved with this order and kept as your own default for the next one.',
+                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
                   const SizedBox(height: 16),
                   const AppSectionHeader(title: 'Supplier'),
                   const SizedBox(height: 8),
@@ -344,6 +469,28 @@ class _PoFormScreenState extends ConsumerState<PoFormScreen> {
                   const SizedBox(height: 16),
                   _label('Remarks / payment instructions'),
                   TextField(controller: _remarks, minLines: 2, maxLines: 4),
+                  const SizedBox(height: 10),
+                  _label('Please do delivery before this date *'),
+                  InkWell(
+                    onTap: _pickDeliveryDate,
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(AppRadii.md),
+                        border: Border.all(color: AppColors.hairline),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.event_available_rounded, size: 15, color: AppColors.primary),
+                          const SizedBox(width: 8),
+                          Text(_deliveryByDate == null ? 'Pick a date (next $_deliveryWindowDays days)' : df.format(_deliveryByDate!),
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                        ],
+                      ),
+                    ),
+                  ),
                   if (_error != null) ...[
                     const SizedBox(height: 14),
                     AppErrorPanel(message: _error!),

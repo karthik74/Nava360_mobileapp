@@ -145,6 +145,9 @@ const List<MobileMenuItem> kMobileMenu = [
   // ADMIN_LETTERHEAD_VIEW gate as the web sidebar entry; moduleCode matches the
   // web top-level "adminTools" menuConfig key for the ENABLED_MODULES toggle.
   MobileMenuItem(key: 'hrms.letterhead', label: 'Letter Head', route: '/admin/letterhead', icon: Icons.description_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['ADMIN_LETTERHEAD_VIEW'], moduleCode: 'adminTools'),
+  // ADMIN_IT_ASSET_VIEW/FILL as the web sidebar entry; moduleCode matches the
+  // web Admin Tools group so a company that disables it there also loses it here.
+  MobileMenuItem(key: 'hrms.itAssets', label: 'IT Assets', route: '/admin/it-assets', icon: Icons.laptop_mac_rounded, module: MobileModule.hrms, order: 10, requiredPermissions: ['ADMIN_IT_ASSET_VIEW', 'ADMIN_IT_ASSET_FILL'], moduleCode: 'adminTools'),
   MobileMenuItem(key: 'hrms.announcements', label: 'Announcements', route: '/announcements', icon: Icons.campaign_rounded, module: MobileModule.hrms, order: 11),
   MobileMenuItem(key: 'hrms.policies', label: 'Policies', route: '/policies', icon: Icons.description_rounded, module: MobileModule.hrms, order: 12),
   MobileMenuItem(key: 'hrms.meetings', label: 'My Meetings', route: '/my-meetings', icon: Icons.event_rounded, module: MobileModule.hrms, order: 13),

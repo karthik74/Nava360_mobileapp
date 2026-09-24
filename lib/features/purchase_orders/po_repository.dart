@@ -44,6 +44,11 @@ class PoRepository {
     );
   }
 
+  /// The caller's own saved company block (or the standard one if they never saved).
+  Future<Map<String, String>> myDetails() {
+    return _api.get<Map<String, String>>('$_base/my-details', parse: companyFromJson);
+  }
+
   Future<PurchaseOrder> get(int id) {
     return _api.get<PurchaseOrder>(
       '$_base/$id',
@@ -52,7 +57,10 @@ class PoRepository {
   }
 
   Future<PurchaseOrder> create({
+    String? poNumber,
     required DateTime poDate,
+    DateTime? deliveryByDate,
+    Map<String, String>? company,
     String? supplierName,
     String? supplierAddress,
     String? supplierGstin,
@@ -64,7 +72,10 @@ class PoRepository {
     return _api.post<PurchaseOrder>(
       _base,
       body: _body(
+        poNumber: poNumber,
         poDate: poDate,
+        deliveryByDate: deliveryByDate,
+        company: company,
         supplierName: supplierName,
         supplierAddress: supplierAddress,
         supplierGstin: supplierGstin,
@@ -79,7 +90,10 @@ class PoRepository {
 
   Future<PurchaseOrder> update(
     int id, {
+    String? poNumber,
     required DateTime poDate,
+    DateTime? deliveryByDate,
+    Map<String, String>? company,
     String? supplierName,
     String? supplierAddress,
     String? supplierGstin,
@@ -91,7 +105,10 @@ class PoRepository {
     return _api.put<PurchaseOrder>(
       '$_base/$id',
       body: _body(
+        poNumber: poNumber,
         poDate: poDate,
+        deliveryByDate: deliveryByDate,
+        company: company,
         supplierName: supplierName,
         supplierAddress: supplierAddress,
         supplierGstin: supplierGstin,
@@ -127,7 +144,10 @@ class PoRepository {
   // ── Request-body builder ──────────────────────────────────────────────
 
   Map<String, dynamic> _body({
+    String? poNumber,
     required DateTime poDate,
+    DateTime? deliveryByDate,
+    Map<String, String>? company,
     String? supplierName,
     String? supplierAddress,
     String? supplierGstin,
@@ -137,7 +157,10 @@ class PoRepository {
     required List<PoItem> items,
   }) =>
       {
+        'poNumber': poNumber,
         'poDate': _isoDate(poDate),
+        'deliveryByDate': deliveryByDate == null ? null : _isoDate(deliveryByDate),
+        'company': company,
         'supplierName': supplierName,
         'supplierAddress': supplierAddress,
         'supplierGstin': supplierGstin,

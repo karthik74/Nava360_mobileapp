@@ -2,11 +2,11 @@
 // `AdminMail*`/`AdminComplaint*` DTOs (see nava360-web `src/types.ts` lines
 // ~3425-3613 and `src/api/adminMail.ts`, and the Spring Mail controller/DTOs).
 // Ported near-verbatim from the standalone office "Mail_Record" app: an
-// inward/outward mail register with per-record edit history, a monthly
-// branch-audit workflow (start → complete), stationery stock per branch with
+// inward/outward mail register with per-record edit history, stationery
+// stock per branch with
 // inter-branch shipments (dispatch → partially received → received),
 // configurable complaint departments, a complaint workflow (pending →
-// in-progress → resolved/escalated/rejected) with a status-change history,
+// in-progress → resolved/rejected) with a status-change history,
 // and a shared audit trail — the biggest/most complex of the four Admin
 // Tools screens, mirroring `AdminMailPage.tsx`'s six tabs.
 
@@ -25,14 +25,6 @@ class MailType {
   static const values = <String>[inward, outward];
 }
 
-/// Branch-month audit workflow states (`AdminMailAuditStatus`).
-class MailAuditStatus {
-  MailAuditStatus._();
-  static const pending = 'PENDING';
-  static const inProgress = 'IN_PROGRESS';
-  static const completed = 'COMPLETED';
-}
-
 /// Inter-branch stationery shipment workflow states (`AdminMailShipmentStatus`).
 class MailShipmentStatus {
   MailShipmentStatus._();
@@ -47,9 +39,8 @@ class MailComplaintStatus {
   static const pending = 'PENDING';
   static const inProgress = 'IN_PROGRESS';
   static const resolved = 'RESOLVED';
-  static const escalated = 'ESCALATED';
   static const rejected = 'REJECTED';
-  static const values = <String>[pending, inProgress, resolved, escalated, rejected];
+  static const values = <String>[pending, inProgress, resolved, rejected];
 }
 
 /// Lightweight branch option for pickers (`/api/org/branches`), shared
@@ -74,7 +65,12 @@ class MailRecord {
   final String mailType;
   final DateTime? date;
   final int? branchId;
+  /// The branch label, or the free-text "Others" party when there's no branch.
   final String? branchLabel;
+  /// Free-text counterparty when the mail isn't from/to a listed branch.
+  final String? otherParty;
+  /// Outward entries only.
+  final double? amount;
   final int? employeeId;
   final String? employeeName;
   final String? department;
@@ -94,6 +90,8 @@ class MailRecord {
     this.date,
     this.branchId,
     this.branchLabel,
+    this.otherParty,
+    this.amount,
     this.employeeId,
     this.employeeName,
     this.department,
@@ -114,6 +112,8 @@ class MailRecord {
         date: _date(j['date']),
         branchId: _int(j['branchId']),
         branchLabel: j['branchLabel'] as String?,
+        otherParty: j['otherParty'] as String?,
+        amount: (j['amount'] as num?)?.toDouble(),
         employeeId: _int(j['employeeId']),
         employeeName: j['employeeName'] as String?,
         department: j['department'] as String?,
@@ -160,43 +160,6 @@ class MailEditLog {
       );
 }
 
-/// One branch's audit status for a given month (`AdminMailAuditBranchMonth`).
-class MailAuditBranchMonth {
-  final int id;
-  final String auditMonth;
-  final int branchId;
-  final String branchLabel;
-  final String status;
-  final String? startedBy;
-  final DateTime? startedAt;
-  final String? completedBy;
-  final DateTime? completedAt;
-
-  MailAuditBranchMonth({
-    required this.id,
-    required this.auditMonth,
-    required this.branchId,
-    required this.branchLabel,
-    required this.status,
-    this.startedBy,
-    this.startedAt,
-    this.completedBy,
-    this.completedAt,
-  });
-
-  factory MailAuditBranchMonth.fromJson(Map<String, dynamic> j) => MailAuditBranchMonth(
-        id: (j['id'] as num).toInt(),
-        auditMonth: j['auditMonth'] as String? ?? '',
-        branchId: (j['branchId'] as num?)?.toInt() ?? 0,
-        branchLabel: j['branchLabel'] as String? ?? '',
-        status: j['status'] as String? ?? MailAuditStatus.pending,
-        startedBy: j['startedBy'] as String?,
-        startedAt: _date(j['startedAt']),
-        completedBy: j['completedBy'] as String?,
-        completedAt: _date(j['completedAt']),
-      );
-}
-
 /// One branch's stock level for one item (`AdminMailStockEntry`).
 class MailStockEntry {
   final int id;
@@ -204,7 +167,9 @@ class MailStockEntry {
   final String branchLabel;
   final String itemName;
   final num quantity;
-  final String? unit;
+  /// Invoice this item was bought on.
+  final String? invoice;
+  final bool lowStock;
   final String? updatedBy;
   final DateTime? updatedAt;
 
@@ -214,7 +179,8 @@ class MailStockEntry {
     required this.branchLabel,
     required this.itemName,
     required this.quantity,
-    this.unit,
+    this.invoice,
+    this.lowStock = false,
     this.updatedBy,
     this.updatedAt,
   });
@@ -225,9 +191,38 @@ class MailStockEntry {
         branchLabel: j['branchLabel'] as String? ?? '',
         itemName: j['itemName'] as String? ?? '',
         quantity: (j['quantity'] as num?) ?? 0,
-        unit: j['unit'] as String?,
+        invoice: j['invoice'] as String?,
+        lowStock: j['lowStock'] as bool? ?? false,
         updatedBy: j['updatedBy'] as String?,
         updatedAt: _date(j['updatedAt']),
+      );
+}
+
+/// One (branch, item) at or below the item's low-stock threshold (`AdminMailStockLowStockResponse.Row`).
+class MailLowStockRow {
+  final int branchId;
+  final String branchLabel;
+  final String itemName;
+  final String? invoice;
+  final int quantity;
+  final int lowStockThreshold;
+
+  MailLowStockRow({
+    required this.branchId,
+    required this.branchLabel,
+    required this.itemName,
+    this.invoice,
+    required this.quantity,
+    required this.lowStockThreshold,
+  });
+
+  factory MailLowStockRow.fromJson(Map<String, dynamic> j) => MailLowStockRow(
+        branchId: (j['branchId'] as num?)?.toInt() ?? 0,
+        branchLabel: j['branchLabel'] as String? ?? '',
+        itemName: j['itemName'] as String? ?? '',
+        invoice: j['invoice'] as String?,
+        quantity: (j['quantity'] as num?)?.toInt() ?? 0,
+        lowStockThreshold: (j['lowStockThreshold'] as num?)?.toInt() ?? 0,
       );
 }
 
@@ -285,59 +280,31 @@ class MailShipment {
       );
 }
 
-/// One configured complaint department (`AdminComplaintDeptConfig`).
-class MailComplaintDept {
-  final int id;
-  final String deptKey;
-  final String name;
-  final String? icon;
-  final String? problemsJson;
-  final String? deptCode;
-  final int sortOrder;
-  final bool active;
-
-  MailComplaintDept({
-    required this.id,
-    required this.deptKey,
-    required this.name,
-    this.icon,
-    this.problemsJson,
-    this.deptCode,
-    this.sortOrder = 0,
-    this.active = true,
-  });
-
-  factory MailComplaintDept.fromJson(Map<String, dynamic> j) => MailComplaintDept(
-        id: (j['id'] as num).toInt(),
-        deptKey: j['deptKey'] as String? ?? '',
-        name: j['name'] as String? ?? '',
-        icon: j['icon'] as String?,
-        problemsJson: j['problemsJson'] as String?,
-        deptCode: j['deptCode'] as String?,
-        sortOrder: (j['sortOrder'] as num?)?.toInt() ?? 0,
-        active: j['active'] as bool? ?? true,
-      );
-}
-
-/// One complaint (`AdminComplaint`). Workflow: PENDING → IN_PROGRESS →
-/// (RESOLVED | ESCALATED | REJECTED); the web allows a direct jump to any
-/// other status from the "Change status…" dropdown, so this app mirrors
-/// that — every non-current status is offered as a transition, not a
-/// strict linear state machine.
+/// One complaint (`AdminComplaint`). Workflow: PENDING → IN_PROGRESS → (RESOLVED | REJECTED); only a
+/// full-access admin moves it, and the server sends exactly which moves are allowed from the current status
+/// ([allowedNext]), so this app never guesses at the state machine.
 class MailComplaint {
   final int id;
   final int branchId;
   final String branchLabel;
+  final String? stateName;
+  final String? regionName;
+  final String? divisionName;
+  final String? areaName;
   final DateTime? date;
-  final int? deptId;
-  final String? deptName;
+  /// Department name from the HR department list.
+  final String? department;
   final String subject;
   final String? content;
   final int? raisedByEmployeeId;
   final String? raisedByName;
+  final String? raisedByCode;
   final String? phone;
   final String status;
+  final List<String> allowedNext;
   final String? resolutionNote;
+  final String? resolvedBy;
+  final DateTime? resolvedAt;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -345,16 +312,23 @@ class MailComplaint {
     required this.id,
     required this.branchId,
     required this.branchLabel,
+    this.stateName,
+    this.regionName,
+    this.divisionName,
+    this.areaName,
     this.date,
-    this.deptId,
-    this.deptName,
+    this.department,
     required this.subject,
     this.content,
     this.raisedByEmployeeId,
     this.raisedByName,
+    this.raisedByCode,
     this.phone,
     required this.status,
+    this.allowedNext = const [],
     this.resolutionNote,
+    this.resolvedBy,
+    this.resolvedAt,
     this.createdAt,
     this.updatedAt,
   });
@@ -363,18 +337,81 @@ class MailComplaint {
         id: (j['id'] as num).toInt(),
         branchId: (j['branchId'] as num?)?.toInt() ?? 0,
         branchLabel: j['branchLabel'] as String? ?? '',
+        stateName: j['stateName'] as String?,
+        regionName: j['regionName'] as String?,
+        divisionName: j['divisionName'] as String?,
+        areaName: j['areaName'] as String?,
         date: _date(j['date']),
-        deptId: _int(j['deptId']),
-        deptName: j['deptName'] as String?,
+        department: j['department'] as String?,
         subject: j['subject'] as String? ?? '',
         content: j['content'] as String?,
         raisedByEmployeeId: _int(j['raisedByEmployeeId']),
         raisedByName: j['raisedByName'] as String?,
+        raisedByCode: j['raisedByCode'] as String?,
         phone: j['phone'] as String?,
         status: j['status'] as String? ?? MailComplaintStatus.pending,
+        allowedNext: ((j['allowedNext'] as List?) ?? const []).map((e) => '$e').toList(),
         resolutionNote: j['resolutionNote'] as String?,
+        resolvedBy: j['resolvedBy'] as String?,
+        resolvedAt: _date(j['resolvedAt']),
         createdAt: _date(j['createdAt']),
         updatedAt: _date(j['updatedAt']),
+      );
+}
+
+/// How many complaints were raised on one day (`AdminComplaintDateCount`) — shows the user where the data is.
+class MailComplaintDate {
+  final DateTime date;
+  final int count;
+
+  MailComplaintDate({required this.date, required this.count});
+
+  factory MailComplaintDate.fromJson(Map<String, dynamic> j) => MailComplaintDate(
+        date: _date(j['date']) ?? DateTime.now(),
+        count: (j['count'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// What the raise-complaint form pre-fills from the signed-in user's own record and the HR department list.
+class MailComplaintFormDefaults {
+  final String? raisedByName;
+  final String? employeeCode;
+  final int? branchId;
+  final String? branchLabel;
+  final String? stateName;
+  final String? regionName;
+  final String? divisionName;
+  final String? areaName;
+  final String? phone;
+  final String? department;
+  final List<String> departments;
+
+  MailComplaintFormDefaults({
+    this.raisedByName,
+    this.employeeCode,
+    this.branchId,
+    this.branchLabel,
+    this.stateName,
+    this.regionName,
+    this.divisionName,
+    this.areaName,
+    this.phone,
+    this.department,
+    this.departments = const [],
+  });
+
+  factory MailComplaintFormDefaults.fromJson(Map<String, dynamic> j) => MailComplaintFormDefaults(
+        raisedByName: j['raisedByName'] as String?,
+        employeeCode: j['employeeCode'] as String?,
+        branchId: _int(j['branchId']),
+        branchLabel: j['branchLabel'] as String?,
+        stateName: j['stateName'] as String?,
+        regionName: j['regionName'] as String?,
+        divisionName: j['divisionName'] as String?,
+        areaName: j['areaName'] as String?,
+        phone: j['phone'] as String?,
+        department: j['department'] as String?,
+        departments: ((j['departments'] as List?) ?? const []).map((e) => '$e').toList(),
       );
 }
 
@@ -412,45 +449,38 @@ class MailComplaintLog {
       );
 }
 
-/// One row of `/api/admin/mail/audit` (`AdminMailAuditLog`).
-class MailAuditLog {
-  final int id;
-  final String entityType;
-  final int? entityId;
-  final String action;
-  final int? actorUserId;
-  final String? actorName;
-  final String? actorRole;
-  final String? beforeJson;
-  final String? afterJson;
-  final String? metaJson;
-  final DateTime? createdAt;
 
-  MailAuditLog({
-    required this.id,
-    required this.entityType,
-    required this.action,
-    this.entityId,
-    this.actorUserId,
-    this.actorName,
-    this.actorRole,
-    this.beforeJson,
-    this.afterJson,
-    this.metaJson,
-    this.createdAt,
+/// Per-branch dashboard summary (`AdminMailDashboard`).
+class MailDashboard {
+  final String fyLabel;
+  final int outwardFyCount;
+  final int inwardFyCount;
+  final int todayOutwardCount;
+  final int todayInwardCount;
+  final List<MailRecord> recentOutward;
+  final List<MailRecord> recentInward;
+
+  MailDashboard({
+    required this.fyLabel,
+    required this.outwardFyCount,
+    required this.inwardFyCount,
+    required this.todayOutwardCount,
+    required this.todayInwardCount,
+    required this.recentOutward,
+    required this.recentInward,
   });
 
-  factory MailAuditLog.fromJson(Map<String, dynamic> j) => MailAuditLog(
-        id: (j['id'] as num).toInt(),
-        entityType: j['entityType'] as String? ?? '',
-        entityId: _int(j['entityId']),
-        action: j['action'] as String? ?? '',
-        actorUserId: _int(j['actorUserId']),
-        actorName: j['actorName'] as String?,
-        actorRole: j['actorRole'] as String?,
-        beforeJson: j['beforeJson'] as String?,
-        afterJson: j['afterJson'] as String?,
-        metaJson: j['metaJson'] as String?,
-        createdAt: _date(j['createdAt']),
-      );
+  factory MailDashboard.fromJson(Map<String, dynamic> j) {
+    List<MailRecord> recs(dynamic v) =>
+        ((v as List?) ?? const []).cast<Map<String, dynamic>>().map(MailRecord.fromJson).toList();
+    return MailDashboard(
+      fyLabel: j['fyLabel'] as String? ?? '',
+      outwardFyCount: _int(j['outwardFyCount']) ?? 0,
+      inwardFyCount: _int(j['inwardFyCount']) ?? 0,
+      todayOutwardCount: _int(j['todayOutwardCount']) ?? 0,
+      todayInwardCount: _int(j['todayInwardCount']) ?? 0,
+      recentOutward: recs(j['recentOutward']),
+      recentInward: recs(j['recentInward']),
+    );
+  }
 }

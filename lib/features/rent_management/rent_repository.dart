@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
@@ -45,6 +47,10 @@ class RentRepository {
     DateTime? startDate,
     bool? gstApplicable,
     bool active = true,
+    int? orgBranchId,
+    DateTime? gstLockedUntil,
+    double? gstRatePercent,
+    double? tdsRatePercent,
   }) {
     return _api.post<RentBranch>(
       '$_base/branches',
@@ -58,6 +64,10 @@ class RentRepository {
         startDate: startDate,
         gstApplicable: gstApplicable,
         active: active,
+        orgBranchId: orgBranchId,
+        gstLockedUntil: gstLockedUntil,
+        gstRatePercent: gstRatePercent,
+        tdsRatePercent: tdsRatePercent,
       ),
       parse: (d) => RentBranch.fromJson(d as Map<String, dynamic>),
     );
@@ -74,6 +84,10 @@ class RentRepository {
     DateTime? startDate,
     bool? gstApplicable,
     bool active = true,
+    int? orgBranchId,
+    DateTime? gstLockedUntil,
+    double? gstRatePercent,
+    double? tdsRatePercent,
   }) {
     return _api.put<RentBranch>(
       '$_base/branches/$id',
@@ -87,10 +101,33 @@ class RentRepository {
         startDate: startDate,
         gstApplicable: gstApplicable,
         active: active,
+        orgBranchId: orgBranchId,
+        gstLockedUntil: gstLockedUntil,
+        gstRatePercent: gstRatePercent,
+        tdsRatePercent: tdsRatePercent,
       ),
       parse: (d) => RentBranch.fromJson(d as Map<String, dynamic>),
     );
   }
+
+  /// Re-saves [b] unchanged except for the GST preference + lock (the "Apply GST?" prompt).
+  Future<RentBranch> saveGstPreference(RentBranch b, {required bool apply, required DateTime lockedUntil}) =>
+      updateBranch(
+        b.id,
+        branchName: b.branchName,
+        branchCode: b.branchCode,
+        ownerName: b.ownerName,
+        address: b.address,
+        rent: b.rent,
+        rentAdvance: b.rentAdvance,
+        startDate: b.startDate,
+        gstApplicable: apply,
+        active: b.active,
+        orgBranchId: b.orgBranchId,
+        gstLockedUntil: lockedUntil,
+        gstRatePercent: b.gstRatePercent,
+        tdsRatePercent: b.tdsRatePercent,
+      );
 
   Future<void> deleteBranch(int id) {
     return _api.raw.delete('$_base/branches/$id');
@@ -106,6 +143,10 @@ class RentRepository {
     DateTime? startDate,
     bool? gstApplicable,
     bool active = true,
+    int? orgBranchId,
+    DateTime? gstLockedUntil,
+    double? gstRatePercent,
+    double? tdsRatePercent,
   }) =>
       {
         'branchName': branchName,
@@ -117,7 +158,33 @@ class RentRepository {
         'startDate': startDate == null ? null : _isoDate(startDate),
         'gstApplicable': gstApplicable,
         'active': active,
+        'orgBranchId': orgBranchId,
+        'gstLockedUntil': gstLockedUntil == null ? null : _isoDate(gstLockedUntil),
+        'gstRatePercent': gstRatePercent,
+        'tdsRatePercent': tdsRatePercent,
       };
+
+  // ── GST / TDS rate options ───────────────────────────────────────────────
+
+  RentRateOptions _rates(dynamic d) => RentRateOptions.fromJson(d as Map<String, dynamic>);
+
+  Future<RentRateOptions> getRateOptions() =>
+      _api.get<RentRateOptions>('$_base/branches/rate-options', parse: _rates);
+
+  Future<RentRateOptions> addRateOption(String type, double value) => _api.post<RentRateOptions>(
+      '$_base/branches/rate-options',
+      body: {'type': type, 'value': value},
+      parse: _rates);
+
+  Future<RentRateOptions> editRateOption(String type, double oldValue, double newValue) =>
+      _api.put<RentRateOptions>('$_base/branches/rate-options',
+          body: {'type': type, 'oldValue': oldValue, 'newValue': newValue}, parse: _rates);
+
+  Future<RentRateOptions> deleteRateOption(String type, double value) async {
+    final res = await _api.raw.delete('$_base/branches/rate-options', queryParameters: {'type': type, 'value': value});
+    final data = res.data;
+    return _rates(data is Map ? data['data'] : data);
+  }
 
   // ── Rent payable ─────────────────────────────────────────────────────────
 
@@ -205,6 +272,14 @@ class RentRepository {
 
   // ── Utility bills ────────────────────────────────────────────────────────
 
+  /// Styled Excel of utility bills for a date range — the server limits it to what the caller may see.
+  Future<Uint8List> downloadUtilityReport(String from, String to) =>
+      _api.getBytes('$_base/utility-bills/export', query: {'from': from, 'to': to});
+
+  /// Styled Excel of rent payable for a month (`yyyy-MM-01`).
+  Future<Uint8List> downloadPayableReport(String period) =>
+      _api.getBytes('$_base/payable/export', query: {'period': period});
+
   Future<List<RentUtilityBill>> listUtilityBillsForPeriod(String period) {
     return _api.get<List<RentUtilityBill>>(
       '$_base/utility-bills',
@@ -224,12 +299,16 @@ class RentRepository {
     DateTime? billDate,
     DateTime? dueDate,
     String? notes,
+    DateTime? periodEnd,
+    int? documentAssetId,
   }) {
     return _api.post<RentUtilityBill>(
       '$_base/utility-bills',
       body: {
         'branchId': branchId,
         'period': period,
+        'periodEnd': periodEnd == null ? null : _isoDate(periodEnd),
+        'documentAssetId': documentAssetId,
         'kind': kind,
         'amount': amount,
         'billNumber': billNumber,
@@ -240,6 +319,24 @@ class RentRepository {
       parse: (d) => RentUtilityBill.fromJson(d as Map<String, dynamic>),
     );
   }
+
+  Future<RentUtilityBill> approveUtilityBill(int id) => _api.post<RentUtilityBill>(
+        '$_base/utility-bills/$id/approve',
+        parse: (d) => RentUtilityBill.fromJson(d as Map<String, dynamic>),
+      );
+
+  Future<RentUtilityBill> rejectUtilityBill(int id, String reason) => _api.post<RentUtilityBill>(
+        '$_base/utility-bills/$id/reject',
+        body: {'reason': reason},
+        parse: (d) => RentUtilityBill.fromJson(d as Map<String, dynamic>),
+      );
+
+  Future<RentUtilityBill> markUtilityBillUnpaid(int id) => _api.post<RentUtilityBill>(
+        '$_base/utility-bills/$id/mark-unpaid',
+        parse: (d) => RentUtilityBill.fromJson(d as Map<String, dynamic>),
+      );
+
+  Future<void> deleteUtilityBill(int id) => _api.raw.delete('$_base/utility-bills/$id');
 
   Future<RentUtilityBill> markUtilityBillPaid(int id, String paidUtr) {
     return _api.post<RentUtilityBill>(

@@ -10,6 +10,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/download_saver.dart';
+import '../../core/employee_lookup.dart';
+import '../../core/report_download.dart';
 import '../../core/text_formatters.dart';
 import '../../core/branding.dart';
 import '../../core/theme.dart';
@@ -166,6 +169,127 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
     );
   }
 
+  // ── Reports ────────────────────────────────────────────────────────────────
+
+  Future<void> _downloadExcel() async {
+    await downloadExcelReport(
+      context,
+      () => ref.read(auditRepositoryProvider).downloadReport(widget.planId, 'excel'),
+      'Audit_${widget.planId}.xlsx',
+    );
+    ref.invalidate(_reportHistoryProvider(widget.planId));
+  }
+
+  Future<void> _downloadPdf() async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('Preparing report…')));
+    try {
+      final bytes =
+          await ref.read(auditRepositoryProvider).downloadReport(widget.planId, 'pdf');
+      final name = 'Audit_${widget.planId}.pdf';
+      final saved =
+          await DownloadSaver.save(name, bytes, mimeType: 'application/pdf');
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(
+        content: Text('Saved to ${saved.locationLabel}: $name'),
+        action: saved.canOpen
+            ? SnackBarAction(label: 'Open', onPressed: () => saved.open())
+            : null,
+      ));
+      ref.invalidate(_reportHistoryProvider(widget.planId));
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+          SnackBar(content: Text('Could not download the report: $e')));
+    }
+  }
+
+  Widget _reportsCard(AuthUser? user) {
+    bool has(List<String> p) => p.any((x) => user?.hasPermission(x) ?? false);
+    final canExcel =
+        has(const ['AUDIT_REPORT_DOWNLOAD', 'AUDIT_EXPORT_EXCEL', 'AUDIT_ADMIN']);
+    final canPdf =
+        has(const ['AUDIT_REPORT_DOWNLOAD', 'AUDIT_EXPORT_PDF', 'AUDIT_ADMIN']);
+    if (!canExcel && !canPdf) return const SizedBox.shrink();
+    final history = ref.watch(_reportHistoryProvider(widget.planId));
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: AuditSectionCard(
+        title: 'Reports',
+        icon: Icons.download_rounded,
+        children: [
+          Row(children: [
+            if (canExcel)
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _downloadExcel,
+                  icon: const Icon(Icons.table_chart_rounded, size: 18),
+                  label: const Text('Excel'),
+                ),
+              ),
+            if (canExcel && canPdf) const SizedBox(width: 10),
+            if (canPdf)
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _downloadPdf,
+                  icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+                  label: const Text('PDF'),
+                ),
+              ),
+          ]),
+          const SizedBox(height: 8),
+          history.when(
+            loading: () => const SizedBox.shrink(),
+            error: (_, __) => const SizedBox.shrink(),
+            data: (rows) => rows.isEmpty
+                ? const Text('No reports generated yet.',
+                    style: TextStyle(fontSize: 12, color: AppColors.muted))
+                : Column(children: [
+                    for (final r in rows)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(children: [
+                          const Icon(Icons.insert_drive_file_outlined,
+                              size: 15, color: AppColors.muted),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              (r['fileName'] ??
+                                      '${r['reportType'] ?? 'Report'} (${r['format'] ?? ''})')
+                                  .toString(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 12, color: AppColors.ink),
+                            ),
+                          ),
+                          Text(_fmt(r['generatedAt']?.toString()) ?? '',
+                              style: const TextStyle(
+                                  fontSize: 11, color: AppColors.muted)),
+                        ]),
+                      ),
+                  ]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Assign / reassign auditor ──────────────────────────────────────────────
+
+  Future<void> _assign(AuditPlan plan) async {
+    final picked = await showModalBottomSheet<EmployeeLookup>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const _AuditorPickerSheet(),
+    );
+    if (picked == null) return;
+    await _run(
+      () => ref.read(auditRepositoryProvider).assignAuditor(widget.planId, picked.id),
+      successMsg: 'Auditor assigned: ${picked.name}',
+    );
+  }
+
   Widget _body(AuditPlan plan, AuthUser? user) {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -247,6 +371,7 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
             ),
           ),
         ),
+        _reportsCard(user),
         const SizedBox(height: 18),
         ..._actions(plan, user),
       ],
@@ -255,25 +380,40 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
 
   List<Widget> _actions(AuditPlan plan, AuthUser? user) {
     final status = plan.status;
-    final canPerform = user?.hasPermission('AUDIT_PERFORM') ?? false;
-    final canSubmit = user?.hasPermission('AUDIT_SUBMIT') ?? false;
-    final canBm = user?.hasPermission('AUDIT_BM_COMPLIANCE') ?? false;
-    final canVerify = user?.hasPermission('AUDIT_VERIFY') ?? false;
+    // Same gates as the web plan-detail page (AuditPlanDetailPage.tsx).
+    bool has(List<String> p) => p.any((x) => user?.hasPermission(x) ?? false);
+    final canPerform = has(const ['AUDIT_PERFORM', 'AUDIT_ADMIN']);
+    final canSubmit = has(const ['AUDIT_SUBMIT', 'AUDIT_PERFORM', 'AUDIT_ADMIN']);
+    final canBm = has(const ['AUDIT_BM_COMPLIANCE', 'AUDIT_ADMIN']);
+    final canAssign = has(const ['AUDIT_ASSIGN', 'AUDIT_ADMIN']);
+    final canClose = has(const ['AUDIT_CLOSE', 'AUDIT_ADMIN']);
+    final canReopen = has(const ['AUDIT_REOPEN', 'AUDIT_ADMIN']);
+    final canCancel =
+        has(const ['AUDIT_ASSIGN', 'AUDIT_PLAN_CREATE', 'AUDIT_ADMIN']);
     final canSupervisorApprove =
-        user?.hasPermission('AUDIT_SUPERVISOR_APPROVE') ?? false;
+        has(const ['AUDIT_SUPERVISOR_APPROVE', 'AUDIT_ADMIN']);
 
     final btns = <Widget>[];
 
+    // Web shows Start/Continue only for ASSIGNED, IN_PROGRESS and REOPENED.
     final isFillable = status == 'IN_PROGRESS' || status == 'REOPENED';
-    final notStarted =
-        status == 'DRAFT' || status == 'PLANNED' || status == null;
 
-    if (canPerform && (isFillable || notStarted)) {
+    if (canPerform && (isFillable || status == 'ASSIGNED')) {
       btns.add(_PrimaryAction(
-        label: plan.executionId == null ? 'Start audit' : 'Continue audit',
+        label: status == 'ASSIGNED' ? 'Start audit' : 'Continue audit',
         icon: Icons.play_circle_fill_rounded,
         busy: _busy,
         onTap: () => _startOrContinue(plan),
+      ));
+    }
+
+    if (canAssign &&
+        const ['DRAFT', 'PLANNED', 'ASSIGNED', 'REOPENED'].contains(status)) {
+      btns.add(_SecondaryAction(
+        label: plan.assignedAuditorId != null ? 'Reassign auditor' : 'Assign auditor',
+        icon: Icons.person_add_alt_1_rounded,
+        busy: _busy,
+        onTap: () => _assign(plan),
       ));
     }
 
@@ -321,7 +461,7 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
 
     // Backend statuses: BM_ACTION_PENDING (sent to BM; REOPENED also accepts a
     // BM re-submission) and VERIFICATION_PENDING (BM submitted, awaiting close).
-    if (canBm && (status == 'BM_ACTION_PENDING' || status == 'REOPENED')) {
+    if (canBm && status == 'BM_ACTION_PENDING') {
       btns.add(_SecondaryAction(
         label: 'Submit BM compliance',
         icon: Icons.assignment_turned_in_rounded,
@@ -333,7 +473,9 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
       ));
     }
 
-    if (canVerify && status == 'VERIFICATION_PENDING') {
+    if (canClose &&
+        const ['SUBMITTED', 'BM_ACTION_SUBMITTED', 'VERIFICATION_PENDING']
+            .contains(status)) {
       btns.add(_SecondaryAction(
         label: 'Close audit',
         icon: Icons.check_circle_rounded,
@@ -345,7 +487,7 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
       ));
     }
 
-    if (canVerify && status == 'CLOSED') {
+    if (canReopen && status == 'CLOSED') {
       btns.add(_SecondaryAction(
         label: 'Reopen audit',
         icon: Icons.lock_open_rounded,
@@ -362,8 +504,7 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
       ));
     }
 
-    if ((canVerify || canPerform) &&
-        (notStarted || isFillable || status == 'SUBMITTED')) {
+    if (canCancel && status != 'CLOSED' && status != 'CANCELLED') {
       btns.add(_DangerAction(
         label: 'Cancel audit',
         icon: Icons.cancel_rounded,
@@ -386,6 +527,104 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
       const SizedBox(height: 10),
       for (final b in btns) ...[b, const SizedBox(height: 10)],
     ];
+  }
+}
+
+final _reportHistoryProvider =
+    FutureProvider.autoDispose.family<List<Map<String, dynamic>>, int>(
+  (ref, planId) => ref.watch(auditRepositoryProvider).reportHistory(planId),
+);
+
+/// Bottom sheet: search employees with the AUDITOR role and pick one.
+class _AuditorPickerSheet extends ConsumerStatefulWidget {
+  const _AuditorPickerSheet();
+
+  @override
+  ConsumerState<_AuditorPickerSheet> createState() =>
+      _AuditorPickerSheetState();
+}
+
+class _AuditorPickerSheetState extends ConsumerState<_AuditorPickerSheet> {
+  final _ctrl = TextEditingController();
+  Future<List<EmployeeLookup>>? _future;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _search(String q) {
+    setState(() {
+      _future = q.trim().length < 2
+          ? null
+          : ref.read(auditRepositoryProvider).searchAuditors(q.trim());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          16, 16, 16, MediaQuery.of(context).viewInsets.bottom + 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('Select auditor',
+              style: TextStyle(
+                  fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.ink)),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _ctrl,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: 'Search auditor by name',
+              prefixIcon: Icon(Icons.search_rounded, size: 20),
+            ),
+            onChanged: _search,
+          ),
+          const SizedBox(height: 8),
+          if (_future != null)
+            FutureBuilder<List<EmployeeLookup>>(
+              future: _future,
+              builder: (context, snap) {
+                if (snap.connectionState != ConnectionState.done) {
+                  return const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: LinearProgressIndicator(minHeight: 2));
+                }
+                if (snap.hasError) {
+                  return Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text('${snap.error}',
+                          style: const TextStyle(
+                              fontSize: 12, color: AppColors.danger)));
+                }
+                final list = snap.data ?? const [];
+                if (list.isEmpty) {
+                  return const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Text('No matching auditors',
+                          style:
+                              TextStyle(fontSize: 12, color: AppColors.muted)));
+                }
+                return ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 260),
+                  child: ListView(shrinkWrap: true, children: [
+                    for (final e in list)
+                      ListTile(
+                        dense: true,
+                        title: Text(e.label, style: const TextStyle(fontSize: 13)),
+                        onTap: () => Navigator.pop(context, e),
+                      ),
+                  ]),
+                );
+              },
+            ),
+        ],
+      ),
+    );
   }
 }
 

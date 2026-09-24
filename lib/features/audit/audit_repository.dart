@@ -9,10 +9,13 @@
 //  ApiClient, so we go through raw Dio and map errors to ApiException.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/employee_lookup.dart';
 import 'audit_models.dart';
 
 /// Filter for the audit-plans listing. `auditorId` set ⇒ "My Audits".
@@ -75,6 +78,19 @@ class AuditPlansQuery {
   @override
   int get hashCode =>
       Object.hash(status, branchId, auditorId, from, to, q, page, size);
+}
+
+class AuditCategoryScore {
+  final String sectionCode;
+  final String sectionName;
+  final double? averagePercentage;
+  final int auditCount;
+  const AuditCategoryScore({
+    required this.sectionCode,
+    required this.sectionName,
+    required this.averagePercentage,
+    required this.auditCount,
+  });
 }
 
 /// Filter for the findings listing.
@@ -316,6 +332,129 @@ class AuditRepository {
       '/api/audit/findings/$id/verify',
       body: body,
       parse: (d) => d,
+    );
+  }
+
+  // ── Plan create / assign ──────────────────────────────────────────────────
+
+  Future<AuditPlan> createPlan(Map<String, dynamic> body) {
+    return _api.post<AuditPlan>(
+      '/api/audit/plans',
+      body: body,
+      parse: (d) => AuditPlan.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
+  Future<AuditPlan> assignAuditor(int planId, int auditorEmployeeId) {
+    return _api.post<AuditPlan>(
+      '/api/audit/plans/$planId/assign',
+      body: {'auditorEmployeeId': auditorEmployeeId},
+      parse: (d) => AuditPlan.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
+  /// Published template versions (only these can be scheduled): id + "Name · vN".
+  Future<List<({int id, String label})>> publishedTemplateVersions() {
+    return _api.get<List<({int id, String label})>>(
+      '/api/audit/templates',
+      parse: (d) {
+        final out = <({int id, String label})>[];
+        for (final t
+            in (d is List ? d : const []).whereType<Map<String, dynamic>>()) {
+          final versions = t['versions'] is List ? t['versions'] as List : const [];
+          for (final v in versions.whereType<Map<String, dynamic>>()) {
+            if (v['published'] == true && v['id'] is num) {
+              out.add((
+                id: (v['id'] as num).toInt(),
+                label: '${t['name'] ?? 'Template'} · v${v['versionNo'] ?? ''}',
+              ));
+            }
+          }
+        }
+        return out;
+      },
+    );
+  }
+
+  /// Employees holding the AUDITOR role (web EmployeePicker role=AUDITOR); falls
+  /// back to the open directory lookup when the caller cannot use /search.
+  Future<List<EmployeeLookup>> searchAuditors(String q) async {
+    try {
+      return await _api.get<List<EmployeeLookup>>(
+        '/api/employees/search',
+        query: {'q': q, 'page': 0, 'size': 10, 'role': 'AUDITOR'},
+        parse: (d) {
+          final content =
+              (d is Map && d['content'] is List) ? d['content'] as List : const [];
+          return content.whereType<Map<String, dynamic>>().map((e) {
+            final name = '${e['firstName'] ?? ''} ${e['lastName'] ?? ''}'.trim();
+            return EmployeeLookup(
+              id: (e['id'] as num).toInt(),
+              code: e['employeeCode'] as String?,
+              name: name.isEmpty ? (e['name'] ?? '').toString() : name,
+            );
+          }).toList();
+        },
+      );
+    } catch (_) {
+      return EmployeeLookupRepository(_api).search(q);
+    }
+  }
+
+  // ── Dashboard ──────────────────────────────────────────────────────────────
+
+  static const _sweepPage = 200; // server max-page-size
+  static const _sweepMaxPages = 50;
+
+  /// Every plan the caller may see (walks the pager, capped like the web).
+  Future<({List<AuditPlan> rows, bool truncated})> sweepPlans() async {
+    final rows = <AuditPlan>[];
+    for (var p = 0; p < _sweepMaxPages; p++) {
+      final res = await plans(AuditPlansQuery(page: p, size: _sweepPage));
+      rows.addAll(res.content);
+      if (res.last || res.content.isEmpty) return (rows: rows, truncated: false);
+    }
+    return (rows: rows, truncated: true);
+  }
+
+  Future<({List<AuditFinding> rows, bool truncated})> sweepFindings() async {
+    final rows = <AuditFinding>[];
+    for (var p = 0; p < _sweepMaxPages; p++) {
+      final res = await findings(AuditFindingsQuery(page: p, size: _sweepPage));
+      rows.addAll(res.content);
+      if (res.last || res.content.isEmpty) return (rows: rows, truncated: false);
+    }
+    return (rows: rows, truncated: true);
+  }
+
+  /// Average score per "Branch Administration Observations" subsection.
+  Future<List<AuditCategoryScore>> categoryScores({int? month, int? year}) {
+    return _api.get<List<AuditCategoryScore>>(
+      '/api/audit/dashboard/category-scores',
+      query: {if (month != null) 'month': month, if (year != null) 'year': year},
+      parse: (d) => (d is List ? d : const [])
+          .whereType<Map<String, dynamic>>()
+          .map((e) => AuditCategoryScore(
+                sectionCode: (e['sectionCode'] ?? '').toString(),
+                sectionName: (e['sectionName'] ?? '').toString(),
+                averagePercentage: (e['averagePercentage'] as num?)?.toDouble(),
+                auditCount: (e['auditCount'] as num?)?.toInt() ?? 0,
+              ))
+          .toList(),
+    );
+  }
+
+  // ── Reports ────────────────────────────────────────────────────────────────
+
+  /// [format] is 'excel' or 'pdf'.
+  Future<Uint8List> downloadReport(int planId, String format) =>
+      _api.getBytes('/api/audit/plans/$planId/report/$format');
+
+  Future<List<Map<String, dynamic>>> reportHistory(int planId) {
+    return _api.get<List<Map<String, dynamic>>>(
+      '/api/audit/plans/$planId/report/history',
+      parse: (d) =>
+          (d is List ? d : const []).whereType<Map<String, dynamic>>().toList(),
     );
   }
 

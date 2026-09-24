@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
@@ -37,6 +39,14 @@ class MailRepository {
 
   // ── Branches (for pickers) ─────────────────────────────────────────────
 
+  /// Register report (Summary + Outward/Inward sheets); the server limits it to what the caller may see.
+  Future<Uint8List> exportRecords({String? mailType}) =>
+      _api.getBytes('$_base/records/export', query: {if (mailType != null) 'mailType': mailType});
+
+  /// Stock report (Summary + Inventory + Transactions) for one branch.
+  Future<Uint8List> exportStock({int? branchId}) =>
+      _api.getBytes('$_base/stock/export', query: {if (branchId != null) 'branchId': branchId});
+
   Future<List<MailBranchOption>> listBranches() {
     return _api.get<List<MailBranchOption>>(
       '/api/org/branches',
@@ -45,6 +55,12 @@ class MailRepository {
   }
 
   // ── Mail register ────────────────────────────────────────────────────────
+
+  /// Dashboard KPIs + recent records for one branch.
+  Future<MailDashboard> dashboardForBranch(int branchId) => _api.get<MailDashboard>(
+        '$_base/records/dashboard/branch/$branchId',
+        parse: (d) => MailDashboard.fromJson(d as Map<String, dynamic>),
+      );
 
   Future<List<MailRecord>> listRecords({
     int? branchId,
@@ -99,7 +115,11 @@ class MailRepository {
   Map<String, dynamic> recordBody({
     required String mailType,
     required DateTime date,
-    required int branchId,
+    /// Null when the counterparty is "Others" — then [otherParty] is required.
+    int? branchId,
+    String? otherParty,
+    /// Outward entries only; ignored for inward.
+    double? amount,
     int? employeeId,
     String? department,
     String? documents,
@@ -113,6 +133,8 @@ class MailRepository {
         'mailType': mailType,
         'date': _isoDate(date),
         'branchId': branchId,
+        'otherParty': otherParty,
+        'amount': amount,
         'employeeId': employeeId,
         'department': department,
         'documents': documents,
@@ -123,42 +145,40 @@ class MailRepository {
         'customersJson': customersJson,
       };
 
-  // ── Branch-month audits ──────────────────────────────────────────────────
-
-  Future<List<MailAuditBranchMonth>> listAuditMonths(String month) {
-    return _api.get<List<MailAuditBranchMonth>>(
-      '$_base/audit-branch-months',
-      query: {'month': month},
-      parse: (d) => _asList(d).map(MailAuditBranchMonth.fromJson).toList(),
-    );
-  }
-
-  Future<MailAuditBranchMonth> startAuditMonth(String month, int branchId) {
-    return _api.post<MailAuditBranchMonth>(
-      '$_base/audit-branch-months/start',
-      query: {'month': month, 'branchId': branchId},
-      parse: (d) => MailAuditBranchMonth.fromJson(d as Map<String, dynamic>),
-    );
-  }
-
-  Future<MailAuditBranchMonth> completeAuditMonth(int id) {
-    return _api.post<MailAuditBranchMonth>(
-      '$_base/audit-branch-months/$id/complete',
-      parse: (d) => MailAuditBranchMonth.fromJson(d as Map<String, dynamic>),
-    );
-  }
-
   // ── Stock & shipments ────────────────────────────────────────────────────
 
-  Future<MailStockEntry> setStock({
+  /// Adds an item to the shared list every branch sees — full-access admins only. It carries no branch and
+  /// no quantity: each branch starts at 0 and changes its own quantity only through [adjustStock].
+  Future<void> addItem({
+    required String itemName,
+    String? invoice,
+    int? lowStockThreshold,
+  }) {
+    return _api.post<void>(
+      '$_base/stock/items',
+      body: {'itemName': itemName, 'invoice': invoice, 'lowStockThreshold': lowStockThreshold},
+      parse: (_) {},
+    );
+  }
+
+  /// Which branches are low on which items — full-access admins only.
+  Future<List<MailLowStockRow>> lowStock() {
+    return _api.get<List<MailLowStockRow>>(
+      '$_base/stock/low-stock',
+      parse: (d) => _asList((d as Map<String, dynamic>)['rows']).map(MailLowStockRow.fromJson).toList(),
+    );
+  }
+
+  /// Stock in / out ([type] is `IN` or `OUT`) against an existing item.
+  Future<MailStockEntry> adjustStock({
     required int branchId,
     required String itemName,
-    required num quantity,
-    String? unit,
+    required String type,
+    required int quantity,
   }) {
     return _api.post<MailStockEntry>(
-      '$_base/stock/entries',
-      body: {'branchId': branchId, 'itemName': itemName, 'quantity': quantity, 'unit': unit},
+      '$_base/stock/entries/adjust',
+      body: {'branchId': branchId, 'itemName': itemName, 'type': type, 'quantity': quantity},
       parse: (d) => MailStockEntry.fromJson(d as Map<String, dynamic>),
     );
   }
@@ -210,93 +230,23 @@ class MailRepository {
     );
   }
 
-  // ── Complaint departments ────────────────────────────────────────────────
-
-  Future<List<MailComplaintDept>> listComplaintDepartments({bool activeOnly = false}) {
-    return _api.get<List<MailComplaintDept>>(
-      '$_base/complaint-departments',
-      query: {'activeOnly': activeOnly},
-      parse: (d) => _asList(d).map(MailComplaintDept.fromJson).toList(),
-    );
-  }
-
-  Future<MailComplaintDept> createComplaintDepartment({
-    required String deptKey,
-    required String name,
-    String? icon,
-    String? problemsJson,
-    String? deptCode,
-    int? sortOrder,
-    bool? active,
-  }) {
-    return _api.post<MailComplaintDept>(
-      '$_base/complaint-departments',
-      body: _deptBody(
-        deptKey: deptKey,
-        name: name,
-        icon: icon,
-        problemsJson: problemsJson,
-        deptCode: deptCode,
-        sortOrder: sortOrder,
-        active: active,
-      ),
-      parse: (d) => MailComplaintDept.fromJson(d as Map<String, dynamic>),
-    );
-  }
-
-  Future<MailComplaintDept> updateComplaintDepartment(
-    int id, {
-    required String deptKey,
-    required String name,
-    String? icon,
-    String? problemsJson,
-    String? deptCode,
-    int? sortOrder,
-    bool? active,
-  }) {
-    return _api.put<MailComplaintDept>(
-      '$_base/complaint-departments/$id',
-      body: _deptBody(
-        deptKey: deptKey,
-        name: name,
-        icon: icon,
-        problemsJson: problemsJson,
-        deptCode: deptCode,
-        sortOrder: sortOrder,
-        active: active,
-      ),
-      parse: (d) => MailComplaintDept.fromJson(d as Map<String, dynamic>),
-    );
-  }
-
-  Future<void> deleteComplaintDepartment(int id) {
-    return _api.raw.delete('$_base/complaint-departments/$id');
-  }
-
-  Map<String, dynamic> _deptBody({
-    required String deptKey,
-    required String name,
-    String? icon,
-    String? problemsJson,
-    String? deptCode,
-    int? sortOrder,
-    bool? active,
-  }) =>
-      {
-        'deptKey': deptKey,
-        'name': name,
-        'icon': icon,
-        'problemsJson': problemsJson,
-        'deptCode': deptCode,
-        'sortOrder': sortOrder,
-        'active': active,
-      };
-
   // ── Complaints ───────────────────────────────────────────────────────────
 
+  /// The raise form's pre-filled values: the caller's own name/branch/phone/department and the HR department list.
+  Future<MailComplaintFormDefaults> complaintFormDefaults() {
+    return _api.get<MailComplaintFormDefaults>(
+      '$_base/complaints/form-defaults',
+      parse: (d) => MailComplaintFormDefaults.fromJson(d as Map<String, dynamic>),
+    );
+  }
+
+  /// A full-access admin gets every complaint; anyone else only the ones they raised (the server decides).
   Future<List<MailComplaint>> listComplaints({
     int? branchId,
     String? status,
+    /// Inclusive dates filtering on the day the complaint was raised.
+    DateTime? from,
+    DateTime? to,
     int page = 0,
     int size = 100,
   }) {
@@ -305,6 +255,8 @@ class MailRepository {
       query: {
         if (branchId != null) 'branchId': branchId,
         if (status != null) 'status': status,
+        if (from != null) 'from': _isoDate(from),
+        if (to != null) 'to': _isoDate(to),
         'page': page,
         'size': size,
       },
@@ -312,26 +264,29 @@ class MailRepository {
     );
   }
 
+  /// The days that have complaints (in the caller's own view) and how many on each.
+  Future<List<MailComplaintDate>> complaintDates() {
+    return _api.get<List<MailComplaintDate>>(
+      '$_base/complaints/dates',
+      parse: (d) => _asList(d).map(MailComplaintDate.fromJson).toList(),
+    );
+  }
+
+  /// Name, branch, phone and department come from the raiser's own record — these only override them.
   Future<MailComplaint> raiseComplaint({
-    required int branchId,
-    required DateTime date,
-    int? deptId,
+    int? branchId,
+    String? department,
     required String subject,
     String? content,
-    int? raisedByEmployeeId,
-    String? raisedByName,
     String? phone,
   }) {
     return _api.post<MailComplaint>(
       '$_base/complaints',
       body: {
         'branchId': branchId,
-        'date': _isoDate(date),
-        'deptId': deptId,
+        'department': department,
         'subject': subject,
         'content': content,
-        'raisedByEmployeeId': raisedByEmployeeId,
-        'raisedByName': raisedByName,
         'phone': phone,
       },
       parse: (d) => MailComplaint.fromJson(d as Map<String, dynamic>),
@@ -350,15 +305,6 @@ class MailRepository {
     return _api.get<List<MailComplaintLog>>(
       '$_base/complaints/$id/history',
       parse: (d) => _asList(d).map(MailComplaintLog.fromJson).toList(),
-    );
-  }
-
-  // ── Audit trail ──────────────────────────────────────────────────────────
-
-  Future<List<MailAuditLog>> auditTrail() {
-    return _api.get<List<MailAuditLog>>(
-      '$_base/audit',
-      parse: (d) => _asList(d).map(MailAuditLog.fromJson).toList(),
     );
   }
 }

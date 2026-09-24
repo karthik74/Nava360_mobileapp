@@ -27,12 +27,18 @@ import 'audit_widgets.dart';
 // list endpoint fail with "Failed to convert…".
 const _kStatusFilters = <({String? value, String label})>[
   (value: null, label: 'All'),
+  (value: 'DRAFT', label: 'Draft'),
+  (value: 'PLANNED', label: 'Planned'),
+  (value: 'ASSIGNED', label: 'Assigned'),
   (value: 'IN_PROGRESS', label: 'In Progress'),
   (value: 'SUBMITTED', label: 'Submitted'),
   (value: 'SUPERVISOR_APPROVAL_PENDING', label: 'Supervisor Approval'),
   (value: 'BM_ACTION_PENDING', label: 'Sent to BM'),
-  (value: 'VERIFICATION_PENDING', label: 'BM Submitted'),
+  (value: 'BM_ACTION_SUBMITTED', label: 'BM Action Submitted'),
+  (value: 'VERIFICATION_PENDING', label: 'Verification'),
+  (value: 'REOPENED', label: 'Reopened'),
   (value: 'CLOSED', label: 'Closed'),
+  (value: 'CANCELLED', label: 'Cancelled'),
 ];
 
 /// Active branches with their org hierarchy, for the Region → Division → Area →
@@ -48,7 +54,22 @@ final auditBranchesProvider =
 });
 
 class MyAuditsScreen extends ConsumerStatefulWidget {
-  const MyAuditsScreen({super.key});
+  const MyAuditsScreen({
+    super.key,
+    this.embedded = false,
+    this.mine,
+    this.initialStatus,
+    this.initialBranchId,
+  });
+
+  /// Render without Scaffold/AppBar (hosted inside the audit home tabs).
+  final bool embedded;
+
+  /// true = only the signed-in auditor's audits ("My Audits"), false = the
+  /// server's permission-scoped list ("Audit Plans"), null = auto-detect.
+  final bool? mine;
+  final String? initialStatus;
+  final int? initialBranchId;
 
   @override
   ConsumerState<MyAuditsScreen> createState() => _MyAuditsScreenState();
@@ -57,6 +78,21 @@ class MyAuditsScreen extends ConsumerStatefulWidget {
 class _MyAuditsScreenState extends ConsumerState<MyAuditsScreen> {
   String? _status;
   int _page = 0;
+  String _q = '';
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _status = widget.initialStatus;
+    _branchId = widget.initialBranchId;
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   // Org filter cascade. The upper three levels are matched by label, not id,
   // because GET /api/org/branches carries hierarchy labels only.
@@ -98,9 +134,10 @@ class _MyAuditsScreenState extends ConsumerState<MyAuditsScreen> {
     final user = ref.watch(authUserProvider);
     // Auditors see only their own assigned audits; broader viewers get the
     // server's branch/hierarchy-scoped list (no auditorId filter).
-    final isAuditorOnly = (user?.hasPermission('AUDIT_PERFORM') ?? false) &&
-        !(user?.hasPermission('AUDIT_VIEW_ALL') ?? false) &&
-        !(user?.hasPermission('AUDIT_VIEW_HIERARCHY') ?? false);
+    final isAuditorOnly = widget.mine ??
+        ((user?.hasPermission('AUDIT_PERFORM') ?? false) &&
+            !(user?.hasPermission('AUDIT_VIEW_ALL') ?? false) &&
+            !(user?.hasPermission('AUDIT_VIEW_HIERARCHY') ?? false));
     final auditorId = isAuditorOnly ? user?.employeeId : null;
 
     final branches = ref.watch(auditBranchesProvider).asData?.value ??
@@ -113,21 +150,13 @@ class _MyAuditsScreenState extends ConsumerState<MyAuditsScreen> {
       // upper levels narrow the Branch dropdown instead of filtering directly.
       branchId: _branchId,
       auditorId: auditorId,
+      q: _q,
       page: _page,
       size: 20,
     );
     final async = ref.watch(myAuditsProvider(query));
 
-    return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: const Text('Internal Audit'),
-        backgroundColor: AppColors.surface,
-        foregroundColor: AppColors.ink,
-        elevation: 0,
-      ),
-      body: SafeArea(
-        child: RefreshIndicator(
+    final content = RefreshIndicator(
           color: AppColors.primary,
           onRefresh: () async {
             ref.invalidate(myAuditsProvider);
@@ -137,6 +166,31 @@ class _MyAuditsScreenState extends ConsumerState<MyAuditsScreen> {
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
             children: [
+              TextField(
+                controller: _searchCtrl,
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: 'Search code or title',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  suffixIcon: _q.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            setState(() {
+                              _q = '';
+                              _page = 0;
+                            });
+                          },
+                        ),
+                ),
+                onSubmitted: (v) => setState(() {
+                  _q = v.trim();
+                  _page = 0;
+                }),
+              ),
+              const SizedBox(height: 10),
               _StatusFilterBar(
                 selected: _status,
                 onChanged: (v) => setState(() {
@@ -189,8 +243,17 @@ class _MyAuditsScreenState extends ConsumerState<MyAuditsScreen> {
               ),
             ],
           ),
-        ),
+        );
+    if (widget.embedded) return content;
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        title: Text(widget.mine == true ? 'My Audits' : 'Audit Plans'),
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.ink,
+        elevation: 0,
       ),
+      body: SafeArea(child: content),
     );
   }
 

@@ -35,8 +35,12 @@ class FindingDetailScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(findingDetailProvider(findingId));
     final user = ref.watch(authUserProvider);
-    final canBm = user?.hasPermission('AUDIT_BM_COMPLIANCE') ?? false;
-    final canVerify = user?.hasPermission('AUDIT_VERIFY') ?? false;
+    // Same gates as web AuditFindingsPage (ADMIN fallback + close/reopen roles).
+    bool has(List<String> p) => p.any((x) => user?.hasPermission(x) ?? false);
+    final canBm = has(const ['AUDIT_BM_COMPLIANCE', 'AUDIT_ADMIN']);
+    final canVerify = has(const [
+      'AUDIT_VERIFY', 'AUDIT_REOPEN', 'AUDIT_CLOSE', 'AUDIT_ADMIN',
+    ]);
 
     return Scaffold(
       backgroundColor: AppColors.bg,

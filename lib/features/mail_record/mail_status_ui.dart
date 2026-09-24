@@ -14,21 +14,6 @@ StatusTone mailTypeTone(String mailType) {
   }
 }
 
-/// (color, label) tone for a branch-month audit status
-/// (`AdminMailAuditStatus` — PENDING → IN_PROGRESS → COMPLETED).
-StatusTone mailAuditStatusTone(String status) {
-  switch (status.toUpperCase()) {
-    case MailAuditStatus.pending:
-      return const StatusTone(AppColors.muted, 'Pending');
-    case MailAuditStatus.inProgress:
-      return const StatusTone(AppColors.info, 'In progress');
-    case MailAuditStatus.completed:
-      return const StatusTone(AppColors.success, 'Completed');
-    default:
-      return StatusTone(AppColors.muted, status);
-  }
-}
-
 /// (color, label) tone for a stationery-shipment status
 /// (`AdminMailShipmentStatus` — DISPATCHED → PARTIALLY_RECEIVED → RECEIVED).
 StatusTone mailShipmentStatusTone(String status) {
@@ -46,7 +31,7 @@ StatusTone mailShipmentStatusTone(String status) {
 
 /// (color, label) tone for a complaint status
 /// (`AdminComplaintStatus` — PENDING → IN_PROGRESS →
-/// RESOLVED/ESCALATED/REJECTED).
+/// RESOLVED/REJECTED).
 StatusTone mailComplaintStatusTone(String status) {
   switch (status.toUpperCase()) {
     case MailComplaintStatus.pending:
@@ -55,8 +40,6 @@ StatusTone mailComplaintStatusTone(String status) {
       return const StatusTone(AppColors.info, 'In progress');
     case MailComplaintStatus.resolved:
       return const StatusTone(AppColors.success, 'Resolved');
-    case MailComplaintStatus.escalated:
-      return const StatusTone(AppColors.warning, 'Escalated');
     case MailComplaintStatus.rejected:
       return const StatusTone(AppColors.danger, 'Rejected');
     default:
@@ -68,23 +51,6 @@ StatusTone mailComplaintStatusTone(String status) {
 /// "change status…" picker (mirrors [mailComplaintStatusTone]'s labels).
 String mailComplaintStatusLabel(String status) => mailComplaintStatusTone(status).label;
 
-/// (color, label) tone for a mail audit-trail action
-/// (`AdminMailAuditLog.action`, e.g. `CREATE`/`UPDATE`/`DELETE`).
-StatusTone mailAuditActionTone(String action) {
-  switch (action.toUpperCase()) {
-    case 'CREATE':
-    case 'CREATED':
-      return const StatusTone(AppColors.success, 'Created');
-    case 'UPDATE':
-    case 'UPDATED':
-      return const StatusTone(AppColors.info, 'Updated');
-    case 'DELETE':
-    case 'DELETED':
-      return const StatusTone(AppColors.danger, 'Deleted');
-    default:
-      return StatusTone(AppColors.muted, action);
-  }
-}
 
 /// Icon for a mail record's list-card thumbnail / detail header.
 const IconData mailRecordIcon = Icons.mail_rounded;

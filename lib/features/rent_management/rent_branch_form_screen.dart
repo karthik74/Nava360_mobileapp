@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import 'rent_models.dart';
 import 'rent_repository.dart';
 
 /// Create or edit a rent branch (landlord record). Pass an existing
@@ -30,6 +31,10 @@ class _RentBranchFormScreenState extends ConsumerState<RentBranchFormScreen> {
   DateTime? _startDate;
   bool? _gstApplicable;
   bool _active = true;
+  RentBranch? _loaded; // preserves orgBranchId / gstLockedUntil on edit
+  double? _gstRate; // null = system default (18%)
+  double? _tdsRate; // null = system default (10% once rent >= 50,000)
+  RentRateOptions _rateOptions = RentRateOptions.fallback;
 
   bool _loading = false;
   bool _saving = false;
@@ -46,6 +51,9 @@ class _RentBranchFormScreenState extends ConsumerState<RentBranchFormScreen> {
     _address = TextEditingController();
     _rent = TextEditingController();
     _rentAdvance = TextEditingController();
+    ref.read(rentRepositoryProvider).getRateOptions().then((o) {
+      if (mounted) setState(() => _rateOptions = o);
+    }).catchError((_) {});
     if (widget.branchId != null) _load(widget.branchId!);
   }
 
@@ -65,6 +73,9 @@ class _RentBranchFormScreenState extends ConsumerState<RentBranchFormScreen> {
         _startDate = b.startDate;
         _gstApplicable = b.gstApplicable;
         _active = b.active;
+        _loaded = b;
+        _gstRate = b.gstRatePercent == 18 ? null : b.gstRatePercent;
+        _tdsRate = b.tdsRatePercent == 10 ? null : b.tdsRatePercent;
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -116,6 +127,10 @@ class _RentBranchFormScreenState extends ConsumerState<RentBranchFormScreen> {
           startDate: _startDate,
           gstApplicable: _gstApplicable,
           active: _active,
+          orgBranchId: _loaded?.orgBranchId,
+          gstLockedUntil: _loaded?.gstLockedUntil,
+          gstRatePercent: _gstApplicable == true ? _gstRate : null,
+          tdsRatePercent: _tdsRate,
         );
       } else {
         await repo.createBranch(
@@ -128,6 +143,8 @@ class _RentBranchFormScreenState extends ConsumerState<RentBranchFormScreen> {
           startDate: _startDate,
           gstApplicable: _gstApplicable,
           active: _active,
+          gstRatePercent: _gstApplicable == true ? _gstRate : null,
+          tdsRatePercent: _tdsRate,
         );
       }
       if (!mounted) return;
@@ -166,6 +183,8 @@ class _RentBranchFormScreenState extends ConsumerState<RentBranchFormScreen> {
       if (mounted) setState(() => _error = '$e');
     }
   }
+
+  String _fmtRate(double v) => v == v.roundToDouble() ? v.toInt().toString() : v.toString();
 
   String? _emptyToNull(String s) => s.trim().isEmpty ? null : s.trim();
 
@@ -274,7 +293,42 @@ class _RentBranchFormScreenState extends ConsumerState<RentBranchFormScreen> {
                         DropdownMenuItem(value: true, child: Text('Yes')),
                         DropdownMenuItem(value: false, child: Text('No')),
                       ],
-                      onChanged: (v) => setState(() => _gstApplicable = v),
+                      onChanged: (v) => setState(() {
+                        _gstApplicable = v;
+                        if (v != true) _gstRate = null; // no stale custom rate when GST isn't charged
+                      }),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _label('GST rate'),
+                  SizedBox(
+                    width: double.infinity,
+                    child: DropdownButtonFormField<double?>(
+                      value: _gstRate,
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('18% (default)')),
+                        for (final r in _rateOptions.gstRates.where((r) => r != 18))
+                          DropdownMenuItem(value: r, child: Text('${_fmtRate(r)}%')),
+                        if (_gstRate != null && _gstRate != 18 && !_rateOptions.gstRates.contains(_gstRate))
+                          DropdownMenuItem(value: _gstRate, child: Text('${_fmtRate(_gstRate!)}%')),
+                      ],
+                      onChanged: _gstApplicable == true ? (v) => setState(() => _gstRate = v) : null,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _label('TDS rate'),
+                  SizedBox(
+                    width: double.infinity,
+                    child: DropdownButtonFormField<double?>(
+                      value: _tdsRate,
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('10% (default)')),
+                        for (final r in _rateOptions.tdsRates.where((r) => r != 10))
+                          DropdownMenuItem(value: r, child: Text(r == 0 ? 'Not applicable' : '${_fmtRate(r)}%')),
+                        if (_tdsRate != null && _tdsRate != 10 && !_rateOptions.tdsRates.contains(_tdsRate))
+                          DropdownMenuItem(value: _tdsRate, child: Text('${_fmtRate(_tdsRate!)}%')),
+                      ],
+                      onChanged: (v) => setState(() => _tdsRate = v),
                     ),
                   ),
                   const SizedBox(height: 6),

@@ -19,7 +19,22 @@ import 'audit_widgets.dart';
 import 'finding_detail_screen.dart';
 
 class FindingsListScreen extends ConsumerStatefulWidget {
-  const FindingsListScreen({super.key, this.executionId});
+  const FindingsListScreen({
+    super.key,
+    this.executionId,
+    this.embedded = false,
+    this.initialStatus,
+    this.initialSeverity,
+    this.initialOverdue,
+    this.initialBranchId,
+  });
+
+  /// Render without Scaffold/AppBar (hosted inside the audit home tabs).
+  final bool embedded;
+  final String? initialStatus;
+  final String? initialSeverity;
+  final bool? initialOverdue;
+  final int? initialBranchId;
 
   /// When set, lists findings for that single execution. When null, shows the
   /// paged/filtered assigned findings list.
@@ -31,20 +46,21 @@ class FindingsListScreen extends ConsumerStatefulWidget {
 
 class _FindingsListScreenState extends ConsumerState<FindingsListScreen> {
   String? _severity;
+  String? _status;
+  bool _overdue = false;
   int _page = 0;
 
   @override
+  void initState() {
+    super.initState();
+    _severity = widget.initialSeverity;
+    _status = widget.initialStatus;
+    _overdue = widget.initialOverdue ?? false;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: const Text('Findings'),
-        backgroundColor: AppColors.surface,
-        foregroundColor: AppColors.ink,
-        elevation: 0,
-      ),
-      body: SafeArea(
-        child: RefreshIndicator(
+    final content = RefreshIndicator(
           color: AppColors.primary,
           onRefresh: () async {
             ref.invalidate(findingsForExecutionProvider);
@@ -54,8 +70,17 @@ class _FindingsListScreenState extends ConsumerState<FindingsListScreen> {
           child: widget.executionId != null
               ? _executionList(widget.executionId!)
               : _pagedList(),
-        ),
+        );
+    if (widget.embedded) return content;
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(
+        title: const Text('Findings'),
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.ink,
+        elevation: 0,
       ),
+      body: SafeArea(child: content),
     );
   }
 
@@ -91,7 +116,14 @@ class _FindingsListScreenState extends ConsumerState<FindingsListScreen> {
 
   Widget _pagedList() {
     final query =
-        AuditFindingsQuery(severity: _severity, page: _page, size: 20);
+        AuditFindingsQuery(
+      status: _status,
+      severity: _severity,
+      branchId: widget.initialBranchId,
+      overdue: _overdue ? true : null,
+      page: _page,
+      size: 20,
+    );
     final async = ref.watch(findingsProvider(query));
     return async.when(
       loading: () => _scroll([
@@ -165,10 +197,26 @@ class _FindingsListScreenState extends ConsumerState<FindingsListScreen> {
       (value: 'MODERATE', label: 'Moderate'),
       (value: 'LOW', label: 'Low'),
     ];
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
+    const statuses = <({String? value, String label})>[
+      (value: null, label: 'Any status'),
+      (value: 'OPEN', label: 'Open'),
+      (value: 'ACTION_PENDING', label: 'Action pending'),
+      (value: 'ACTION_SUBMITTED', label: 'Action submitted'),
+      (value: 'VERIFICATION_PENDING', label: 'Verification'),
+      (value: 'REOPENED', label: 'Reopened'),
+      (value: 'ESCALATED', label: 'Escalated'),
+      (value: 'OVERDUE', label: 'Overdue'),
+      (value: 'CLOSED', label: 'Closed'),
+      (value: 'WAIVED', label: 'Waived'),
+    ];
+    Widget row(List<Widget> chips) => SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: chips),
+        );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        row([
           for (final o in opts) ...[
             ChoiceChip(
               label: Text(o.label),
@@ -180,8 +228,30 @@ class _FindingsListScreenState extends ConsumerState<FindingsListScreen> {
             ),
             const SizedBox(width: 8),
           ],
-        ],
-      ),
+          FilterChip(
+            label: const Text('Overdue only'),
+            selected: _overdue,
+            onSelected: (v) => setState(() {
+              _overdue = v;
+              _page = 0;
+            }),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        row([
+          for (final o in statuses) ...[
+            ChoiceChip(
+              label: Text(o.label),
+              selected: _status == o.value,
+              onSelected: (_) => setState(() {
+                _status = o.value;
+                _page = 0;
+              }),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ]),
+      ],
     );
   }
 

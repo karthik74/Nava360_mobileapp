@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import 'rent_gst_dialog.dart';
 import 'rent_models.dart';
 import 'rent_repository.dart';
 import 'rent_status_ui.dart';
@@ -173,6 +174,9 @@ class _RentPayableScreenState extends ConsumerState<RentPayableScreen> {
                                   style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
                               const Divider(height: 22),
                               _kv('Rent amount', rentMoney(row.rentAmount)),
+                              if (row.gstAmount != null) _kv('GST', rentMoney(row.gstAmount)),
+                              if (row.tdsAmount != null) _kv('TDS', rentMoney(row.tdsAmount)),
+                              if (row.netAmount != null) _kv('Net payable', rentMoney(row.netAmount)),
                               if (row.submittedAt != null)
                                 _kv('Submitted', '${df.format(row.submittedAt!)} · ${row.submittedBy ?? '—'}'),
                               if (row.approvedAt != null)
@@ -194,7 +198,11 @@ class _RentPayableScreenState extends ConsumerState<RentPayableScreen> {
                           children: [
                             if (row.status == RentPayableStatus.pending)
                               _actionButton('Submit', Icons.send_rounded,
-                                  () => _act(() => ref.read(rentRepositoryProvider).submitPayable(row.id))),
+                                  () async {
+                                final repo = ref.read(rentRepositoryProvider);
+                                if (!await confirmGstBeforeSubmit(context, repo, row.branchId)) return;
+                                await _act(() => repo.submitPayable(row.id));
+                              }),
                             if (row.status == RentPayableStatus.submitted)
                               _actionButton('Approve', Icons.check_circle_outline_rounded,
                                   () => _act(() => ref.read(rentRepositoryProvider).approvePayable(row.id))),

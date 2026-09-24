@@ -4,7 +4,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
-import 'mail_list_screen.dart' show mailBranchesProvider, mailRecordsProvider;
+import 'mail_list_screen.dart' show mailBranchesProvider, mailMyBranchIdProvider, mailNewRecordTypeProvider, mailRecordsProvider;
 import 'mail_models.dart';
 import 'mail_repository.dart';
 
@@ -28,10 +28,14 @@ class _MailRecordFormScreenState extends ConsumerState<MailRecordFormScreen> {
   late final TextEditingController _particular;
   late final TextEditingController _details;
   late final TextEditingController _employeeId;
+  late final TextEditingController _otherParty;
+  late final TextEditingController _amount;
 
   String _mailType = MailType.inward;
   DateTime _date = DateTime.now();
   int? _branchId;
+  /// false = a listed branch; true = "Others" (vendor, head office, customer…) with a free-text name.
+  bool _isOther = false;
 
   bool _loading = false;
   bool _saving = false;
@@ -49,7 +53,22 @@ class _MailRecordFormScreenState extends ConsumerState<MailRecordFormScreen> {
     _particular = TextEditingController();
     _details = TextEditingController();
     _employeeId = TextEditingController();
-    if (widget.recordId != null) _load(widget.recordId!);
+    _otherParty = TextEditingController();
+    _amount = TextEditingController();
+    if (widget.recordId != null) {
+      _load(widget.recordId!);
+    } else {
+      // Opened from the Outward / Inward tab: start on that type.
+      final t = ref.read(mailNewRecordTypeProvider);
+      if (t != null) {
+        _mailType = t;
+        Future.microtask(() => ref.read(mailNewRecordTypeProvider.notifier).state = null);
+      }
+      // A new entry starts on the signed-in user's own branch (still changeable).
+      ref.read(mailMyBranchIdProvider.future).then((id) {
+        if (mounted && id != null) setState(() => _branchId ??= id);
+      });
+    }
   }
 
   Future<void> _load(int id) async {
@@ -64,6 +83,9 @@ class _MailRecordFormScreenState extends ConsumerState<MailRecordFormScreen> {
         _mailType = r.mailType;
         _date = r.date ?? DateTime.now();
         _branchId = r.branchId;
+        _isOther = r.branchId == null;
+        _otherParty.text = r.otherParty ?? '';
+        _amount.text = r.amount == null ? '' : r.amount!.toString();
         _employeeId.text = r.employeeId?.toString() ?? '';
         _department.text = r.department ?? '';
         _documents.text = r.documents ?? '';
@@ -88,6 +110,8 @@ class _MailRecordFormScreenState extends ConsumerState<MailRecordFormScreen> {
     _particular.dispose();
     _details.dispose();
     _employeeId.dispose();
+    _otherParty.dispose();
+    _amount.dispose();
     super.dispose();
   }
 
@@ -103,8 +127,19 @@ class _MailRecordFormScreenState extends ConsumerState<MailRecordFormScreen> {
 
   Future<void> _save() async {
     setState(() => _error = null);
-    if (_branchId == null) {
-      setState(() => _error = 'Select a branch.');
+    final isOutward = _mailType == MailType.outward;
+    if (!_isOther && _branchId == null) {
+      setState(() => _error = 'Select a branch, or choose Others.');
+      return;
+    }
+    if (_isOther && _otherParty.text.trim().isEmpty) {
+      setState(() => _error = 'Enter who the mail is ${isOutward ? 'to' : 'from'}.');
+      return;
+    }
+    final amountText = _amount.text.trim();
+    final amount = amountText.isEmpty ? null : double.tryParse(amountText);
+    if (isOutward && amountText.isNotEmpty && (amount == null || amount < 0)) {
+      setState(() => _error = 'Enter a valid amount.');
       return;
     }
     setState(() => _saving = true);
@@ -112,7 +147,9 @@ class _MailRecordFormScreenState extends ConsumerState<MailRecordFormScreen> {
     final body = repo.recordBody(
       mailType: _mailType,
       date: _date,
-      branchId: _branchId!,
+      branchId: _isOther ? null : _branchId,
+      otherParty: _isOther ? _otherParty.text.trim() : null,
+      amount: isOutward ? amount : null,
       employeeId: int.tryParse(_employeeId.text.trim()),
       department: _emptyToNull(_department.text),
       documents: _emptyToNull(_documents.text),
@@ -158,7 +195,7 @@ class _MailRecordFormScreenState extends ConsumerState<MailRecordFormScreen> {
     if (confirmed != true) return;
     try {
       await ref.read(mailRepositoryProvider).deleteRecord(widget.recordId!);
-      ref.invalidate(mailRecordsProvider(null));
+      ref.invalidate(mailRecordsProvider);
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -227,18 +264,43 @@ class _MailRecordFormScreenState extends ConsumerState<MailRecordFormScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  _label('Branch *'),
-                  branchesAsync.when(
-                    data: (branches) => DropdownButtonFormField<int>(
-                      value: branches.any((b) => b.id == _branchId) ? _branchId : null,
-                      items: [
-                        for (final b in branches) DropdownMenuItem(value: b.id, child: Text(b.label)),
+                  _label(_mailType == MailType.outward ? 'To *' : 'From *'),
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(value: false, label: Text('Branch')),
+                        ButtonSegment(value: true, label: Text('Others')),
                       ],
-                      onChanged: (v) => setState(() => _branchId = v),
+                      selected: {_isOther},
+                      onSelectionChanged: (s) => setState(() => _isOther = s.first),
                     ),
-                    loading: () => const LinearProgressIndicator(),
-                    error: (e, _) => Text('$e', style: const TextStyle(color: AppColors.danger, fontSize: 12)),
                   ),
+                  const SizedBox(height: 8),
+                  if (_isOther)
+                    TextField(
+                      controller: _otherParty,
+                      maxLength: 200,
+                      decoration: InputDecoration(
+                        hintText: _mailType == MailType.outward
+                            ? 'Who is this mail going to? (vendor, head office, customer…)'
+                            : 'Who is this mail from? (vendor, head office, customer…)',
+                      ),
+                    )
+                  else
+                    branchesAsync.when(
+                      data: (branches) => DropdownButtonFormField<int>(
+                        isExpanded: true,
+                        value: branches.any((b) => b.id == _branchId) ? _branchId : null,
+                        items: [
+                          for (final b in branches)
+                            DropdownMenuItem(value: b.id, child: Text(b.label, overflow: TextOverflow.ellipsis)),
+                        ],
+                        onChanged: (v) => setState(() => _branchId = v),
+                      ),
+                      loading: () => const LinearProgressIndicator(),
+                      error: (e, _) => Text('$e', style: const TextStyle(color: AppColors.danger, fontSize: 12)),
+                    ),
                   const SizedBox(height: 10),
                   _label('Employee ID'),
                   TextField(
@@ -259,6 +321,15 @@ class _MailRecordFormScreenState extends ConsumerState<MailRecordFormScreen> {
                   _label('Courier status'),
                   TextField(controller: _courierStatus),
                   const SizedBox(height: 10),
+                  if (_mailType == MailType.outward) ...[
+                    _label('Amount (₹)'),
+                    TextField(
+                      controller: _amount,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(hintText: 'Optional'),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
                   _label('Particular'),
                   TextField(controller: _particular),
                   const SizedBox(height: 10),

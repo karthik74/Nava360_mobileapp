@@ -3,10 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/report_download.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
+import 'rent_dashboard_tab.dart';
+import 'rent_gst_dialog.dart';
 import 'rent_models.dart';
+import 'rent_rate_options_card.dart';
+import 'rent_reports_tab.dart';
 import 'rent_repository.dart';
 import 'rent_status_ui.dart';
 
@@ -32,7 +37,15 @@ final rentAuditTrailProvider = FutureProvider.autoDispose<List<RentAuditLog>>((r
   return ref.watch(rentRepositoryProvider).auditTrail();
 });
 
-enum _RentTab { branches, payable, notices, utility, audit }
+final rentRateOptionsProvider = FutureProvider.autoDispose<RentRateOptions>((ref) async {
+  try {
+    return await ref.watch(rentRepositoryProvider).getRateOptions();
+  } catch (_) {
+    return RentRateOptions.fallback;
+  }
+});
+
+enum _RentTab { dashboard, branches, payable, notices, utility, reports, audit }
 
 /// Admin Tools · Rent Management — branches / monthly payable workflow /
 /// notices / utility bills / audit trail, mirroring `AdminRentPage.tsx`'s
@@ -45,7 +58,7 @@ class RentListScreen extends ConsumerStatefulWidget {
 }
 
 class _RentListScreenState extends ConsumerState<RentListScreen> {
-  _RentTab _tab = _RentTab.branches;
+  _RentTab _tab = _RentTab.dashboard;
 
   @override
   Widget build(BuildContext context) {
@@ -57,13 +70,16 @@ class _RentListScreenState extends ConsumerState<RentListScreen> {
     final mq = MediaQuery.of(context);
 
     final tabs = <_RentTab, String>{
+      _RentTab.dashboard: 'Dashboard',
       _RentTab.branches: 'Branches',
       _RentTab.payable: 'Payables',
       _RentTab.notices: 'Notices',
       _RentTab.utility: 'Utility Bills',
+      _RentTab.reports: 'Reports',
       if (canViewAudit) _RentTab.audit: 'Audit trail',
     };
-    if (!tabs.containsKey(_tab)) _tab = _RentTab.branches;
+    if (!tabs.containsKey(_tab)) _tab = _RentTab.dashboard;
+    final isFullAccess = user?.hasPermission('DATA_SCOPE_ALL') ?? false;
 
     Future<void> Function()? fab;
     String? fabLabel;
@@ -101,6 +117,8 @@ class _RentListScreenState extends ConsumerState<RentListScreen> {
           };
         }
         break;
+      case _RentTab.dashboard:
+      case _RentTab.reports:
       case _RentTab.payable:
       case _RentTab.audit:
         break;
@@ -141,8 +159,11 @@ class _RentListScreenState extends ConsumerState<RentListScreen> {
             ),
             Expanded(
               child: switch (_tab) {
+                _RentTab.dashboard => RentDashboardTab(bottomPadding: mq.padding.bottom + 24),
+                _RentTab.reports => RentReportsTab(bottomPadding: mq.padding.bottom + 24),
                 _RentTab.branches => _BranchesTab(
                     canManage: canManageBranch,
+                    isFullAccess: isFullAccess,
                     bottomPadding: mq.padding.bottom + 90,
                   ),
                 _RentTab.payable => _PayableTab(bottomPadding: mq.padding.bottom + 24),
@@ -195,8 +216,9 @@ class _TabChip extends StatelessWidget {
 // ── Branches tab ─────────────────────────────────────────────────────────────
 
 class _BranchesTab extends ConsumerWidget {
-  const _BranchesTab({required this.canManage, required this.bottomPadding});
+  const _BranchesTab({required this.canManage, required this.isFullAccess, required this.bottomPadding});
   final bool canManage;
+  final bool isFullAccess;
   final double bottomPadding;
 
   Future<void> _open(BuildContext context, WidgetRef ref, RentBranch b) async {
@@ -214,6 +236,18 @@ class _BranchesTab extends ConsumerWidget {
         physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
         padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
         children: [
+          if (isFullAccess)
+            ref.watch(rentRateOptionsProvider).maybeWhen(
+                  data: (opts) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: RentRateOptionsCard(
+                      repo: ref.read(rentRepositoryProvider),
+                      options: opts,
+                      onChanged: (_) => ref.invalidate(rentRateOptionsProvider),
+                    ),
+                  ),
+                  orElse: () => const SizedBox.shrink(),
+                ),
           async.when(
             data: (rows) {
               if (rows.isEmpty) {
@@ -501,7 +535,18 @@ class _PayableTabState extends ConsumerState<_PayableTab> {
               ],
             ],
           ),
-          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () => downloadExcelReport(
+                context,
+                () => ref.read(rentRepositoryProvider).downloadPayableReport(_periodIso),
+                'rent-payable-${_periodIso.substring(0, 7)}.xlsx',
+              ),
+              icon: const Icon(Icons.download_rounded, size: 18),
+              label: const Text('Download report'),
+            ),
+          ),
           async.when(
             data: (rows) {
               if (rows.isEmpty) {
@@ -523,7 +568,11 @@ class _PayableTabState extends ConsumerState<_PayableTab> {
                         canPay: canPay,
                         canManage: canManage,
                         onTap: () => _open(p),
-                        onSubmit: () => _act(p.id, () => ref.read(rentRepositoryProvider).submitPayable(p.id)),
+                        onSubmit: () => _act(p.id, () async {
+                          final repo = ref.read(rentRepositoryProvider);
+                          if (!await confirmGstBeforeSubmit(context, repo, p.branchId)) return;
+                          await repo.submitPayable(p.id);
+                        }),
                         onApprove: () => _act(p.id, () => ref.read(rentRepositoryProvider).approvePayable(p.id)),
                         onMarkPaid: () => _markPaid(p),
                         onHold: () => _hold(p),
@@ -762,6 +811,57 @@ class _UtilityTabState extends ConsumerState<_UtilityTab> {
     }
   }
 
+  Future<void> _open(RentUtilityBill bill) async {
+    final ok = await context.push<bool>('/admin/rent/utility-bills/new', extra: bill);
+    if (ok == true) ref.invalidate(rentUtilityBillsProvider(_periodIso));
+  }
+
+  Future<void> _approve(RentUtilityBill bill) async {
+    try {
+      await ref.read(rentRepositoryProvider).approveUtilityBill(bill.id);
+      ref.invalidate(rentUtilityBillsProvider(_periodIso));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _reject(RentUtilityBill bill) async {
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reject bill'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 4,
+          decoration: InputDecoration(labelText: 'Reason for rejecting ${bill.branchName} — ${rentUtilityKindLabel(bill.kind)}'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('Reject')),
+        ],
+      ),
+    );
+    if (reason == null || reason.isEmpty) return;
+    try {
+      await ref.read(rentRepositoryProvider).rejectUtilityBill(bill.id, reason);
+      ref.invalidate(rentUtilityBillsProvider(_periodIso));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _markUnpaid(RentUtilityBill bill) async {
+    try {
+      await ref.read(rentRepositoryProvider).markUtilityBillUnpaid(bill.id);
+      ref.invalidate(rentUtilityBillsProvider(_periodIso));
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
   Future<void> _markPaid(RentUtilityBill bill) async {
     final controller = TextEditingController();
     final utr = await showDialog<String>(
@@ -791,7 +891,7 @@ class _UtilityTabState extends ConsumerState<_UtilityTab> {
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authUserProvider);
-    final canManage = user?.hasPermission('ADMIN_RENT_UTILITY_MANAGE') ?? false;
+    final isFullAccess = user?.hasPermission('DATA_SCOPE_ALL') ?? false;
     final async = ref.watch(rentUtilityBillsProvider(_periodIso));
     final dfMonth = DateFormat('MMMM yyyy');
     final dfDay = DateFormat('d MMM');
@@ -822,7 +922,22 @@ class _UtilityTabState extends ConsumerState<_UtilityTab> {
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () {
+                final last = DateTime(_period.year, _period.month + 1, 0);
+                downloadExcelReport(
+                  context,
+                  () => ref.read(rentRepositoryProvider).downloadUtilityReport(isoPeriod(_period), isoPeriod(last)),
+                  'utility-bills-${_periodIso.substring(0, 7)}.xlsx',
+                );
+              },
+              icon: const Icon(Icons.download_rounded, size: 18),
+              label: const Text('Download report'),
+            ),
+          ),
           async.when(
             data: (rows) {
               if (rows.isEmpty) {
@@ -851,11 +966,34 @@ class _UtilityTabState extends ConsumerState<_UtilityTab> {
                                       style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800)),
                                 ),
                                 StatusPill(
-                                  label: b.paidAt != null ? 'Paid' : 'Unpaid',
-                                  color: b.paidAt != null ? AppColors.success : AppColors.muted,
+                                  label: b.status == 'APPROVED' ? (b.paidAt != null ? 'Paid' : 'Approved') : (b.status == 'REJECTED' ? 'Rejected' : 'Pending'),
+                                  color: b.status == 'REJECTED'
+                                      ? AppColors.danger
+                                      : b.status == 'APPROVED'
+                                          ? AppColors.success
+                                          : AppColors.muted,
+                                ),
+                                IconButton(
+                                  visualDensity: VisualDensity.compact,
+                                  tooltip: "View / edit",
+                                  icon: const Icon(Icons.edit_outlined, size: 18),
+                                  onPressed: () => _open(b),
                                 ),
                               ],
                             ),
+                            if (b.kind == RentUtilityKind.internet && b.periodEnd != null && isoPeriod(b.periodEnd!) != b.period) ...[
+                              const SizedBox(height: 4),
+                              Text('Covers ${DateFormat('MMM yyyy').format(DateTime.tryParse(b.period) ?? _period)} – ${DateFormat('MMM yyyy').format(b.periodEnd!)}',
+                                  style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+                            ],
+                            if (b.status == 'REJECTED' && (b.rejectionReason ?? '').isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text('Rejected: ${b.rejectionReason}', style: const TextStyle(fontSize: 11.5, color: AppColors.danger)),
+                            ],
+                            if (b.uploadedBy != null) ...[
+                              const SizedBox(height: 4),
+                              Text('Filed by ${b.uploadedBy}', style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                            ],
                             const SizedBox(height: 8),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -866,16 +1004,37 @@ class _UtilityTabState extends ConsumerState<_UtilityTab> {
                                     style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
                               ],
                             ),
-                            if (canManage && b.paidAt == null) ...[
+                            if (isFullAccess && b.status == 'PENDING') ...[
+                              const SizedBox(height: 10),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  OutlinedButton(
+                                    onPressed: () => _reject(b),
+                                    child: const Text('Reject', style: TextStyle(fontSize: 11.5)),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  FilledButton(
+                                    onPressed: () => _approve(b),
+                                    child: const Text('Approve', style: TextStyle(fontSize: 11.5)),
+                                  ),
+                                ],
+                              ),
+                            ] else if (isFullAccess && b.status == 'APPROVED') ...[
                               const SizedBox(height: 10),
                               Align(
                                 alignment: Alignment.centerRight,
                                 child: SizedBox(
                                   height: 32,
-                                  child: FilledButton.tonal(
-                                    onPressed: () => _markPaid(b),
-                                    child: const Text('Mark paid', style: TextStyle(fontSize: 11.5)),
-                                  ),
+                                  child: b.paidAt == null
+                                      ? FilledButton.tonal(
+                                          onPressed: () => _markPaid(b),
+                                          child: const Text('Mark paid', style: TextStyle(fontSize: 11.5)),
+                                        )
+                                      : TextButton(
+                                          onPressed: () => _markUnpaid(b),
+                                          child: const Text('Mark unpaid', style: TextStyle(fontSize: 11.5)),
+                                        ),
                                 ),
                               ),
                             ],

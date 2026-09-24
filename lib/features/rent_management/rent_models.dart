@@ -49,6 +49,9 @@ class RentBranch {
   final DateTime? startDate;
   final bool? gstApplicable;
   final DateTime? gstLockedUntil;
+  final int? orgBranchId;
+  final double? gstRatePercent;
+  final double? tdsRatePercent;
   final bool active;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -64,6 +67,9 @@ class RentBranch {
     this.startDate,
     this.gstApplicable,
     this.gstLockedUntil,
+    this.orgBranchId,
+    this.gstRatePercent,
+    this.tdsRatePercent,
     this.active = true,
     this.createdAt,
     this.updatedAt,
@@ -80,6 +86,9 @@ class RentBranch {
         startDate: _date(j['startDate']),
         gstApplicable: j['gstApplicable'] as bool?,
         gstLockedUntil: _date(j['gstLockedUntil']),
+        orgBranchId: (j['orgBranchId'] as num?)?.toInt(),
+        gstRatePercent: _num(j['gstRatePercent']),
+        tdsRatePercent: _num(j['tdsRatePercent']),
         active: j['active'] as bool? ?? true,
         createdAt: _date(j['createdAt']),
         updatedAt: _date(j['updatedAt']),
@@ -94,6 +103,9 @@ class RentPayable {
   final String branchName;
   final String period;
   final double rentAmount;
+  final double? gstAmount;
+  final double? tdsAmount;
+  final double? netAmount;
   final String status;
   final String? holdReason;
   final int? holdNoticeId;
@@ -113,6 +125,9 @@ class RentPayable {
     required this.branchName,
     required this.period,
     required this.rentAmount,
+    this.gstAmount,
+    this.tdsAmount,
+    this.netAmount,
     required this.status,
     this.holdReason,
     this.holdNoticeId,
@@ -133,6 +148,9 @@ class RentPayable {
         branchName: j['branchName'] as String? ?? '',
         period: j['period'] as String? ?? '',
         rentAmount: _num0(j['rentAmount']),
+        gstAmount: _num(j['gstAmount']),
+        tdsAmount: _num(j['tdsAmount']),
+        netAmount: _num(j['netAmount']),
         status: j['status'] as String? ?? RentPayableStatus.pending,
         holdReason: j['holdReason'] as String?,
         holdNoticeId: (j['holdNoticeId'] as num?)?.toInt(),
@@ -193,11 +211,20 @@ class RentUtilityBill {
   final int branchId;
   final String branchName;
   final String period;
+  /// Last month the bill covers (internet bills can span 3 or 6 months; electricity = the period itself).
+  final DateTime? periodEnd;
   final String kind;
   final double? amount;
   final String? billNumber;
   final DateTime? billDate;
   final DateTime? dueDate;
+  /// PENDING → APPROVED / REJECTED (a full-access admin reviews).
+  final String status;
+  final String? rejectionReason;
+  final String? approvedBy;
+  final String? uploadedBy;
+  final int? documentAssetId;
+  final String? documentName;
   final DateTime? paidAt;
   final String? paidUtr;
   final String? notes;
@@ -210,6 +237,13 @@ class RentUtilityBill {
     required this.branchName,
     required this.period,
     required this.kind,
+    this.periodEnd,
+    this.status = 'PENDING',
+    this.rejectionReason,
+    this.approvedBy,
+    this.uploadedBy,
+    this.documentAssetId,
+    this.documentName,
     this.amount,
     this.billNumber,
     this.billDate,
@@ -227,6 +261,13 @@ class RentUtilityBill {
         branchName: j['branchName'] as String? ?? '',
         period: j['period'] as String? ?? '',
         kind: j['kind'] as String? ?? RentUtilityKind.electricity,
+        periodEnd: _date(j['periodEnd']),
+        status: j['status'] as String? ?? 'PENDING',
+        rejectionReason: j['rejectionReason'] as String?,
+        approvedBy: j['approvedBy'] as String?,
+        uploadedBy: j['uploadedBy'] as String?,
+        documentAssetId: (j['documentAssetId'] as num?)?.toInt(),
+        documentName: j['documentName'] as String?,
         amount: _num(j['amount']),
         billNumber: j['billNumber'] as String?,
         billDate: _date(j['billDate']),
@@ -279,5 +320,19 @@ class RentAuditLog {
         afterJson: j['afterJson'] as String?,
         metaJson: j['metaJson'] as String?,
         createdAt: _date(j['createdAt']),
+      );
+}
+
+/// GST / TDS rate dropdown options (`AdminRentRateOptions`).
+class RentRateOptions {
+  final List<double> gstRates;
+  final List<double> tdsRates;
+  const RentRateOptions({required this.gstRates, required this.tdsRates});
+
+  static const fallback = RentRateOptions(gstRates: [5, 12, 18, 28], tdsRates: [0, 2, 10]);
+
+  factory RentRateOptions.fromJson(Map<String, dynamic> j) => RentRateOptions(
+        gstRates: ((j['gstRates'] as List?) ?? const []).map((e) => (e as num).toDouble()).toList(),
+        tdsRates: ((j['tdsRates'] as List?) ?? const []).map((e) => (e as num).toDouble()).toList(),
       );
 }

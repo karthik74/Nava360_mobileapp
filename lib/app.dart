@@ -69,7 +69,9 @@ import 'features/mis/mis_locations_screen.dart';
 import 'features/mis/mis_branch_report_screen.dart';
 import 'features/mis/mis_api_client.dart';
 import 'features/mis/mis_auth.dart';
-import 'features/audit/my_audits_screen.dart';
+import 'features/audit/audit_detail_screen.dart';
+import 'features/audit/audit_home_screen.dart';
+import 'features/audit/audit_plan_form_screen.dart';
 import 'features/helpdesk/helpdesk_tickets_screen.dart';
 import 'features/helpdesk/helpdesk_raise_screen.dart';
 import 'features/helpdesk/helpdesk_ticket_detail_screen.dart';
@@ -90,6 +92,7 @@ import 'features/rent_management/rent_list_screen.dart';
 import 'features/rent_management/rent_branch_form_screen.dart';
 import 'features/rent_management/rent_payable_screen.dart';
 import 'features/rent_management/rent_notice_form_screen.dart';
+import 'features/rent_management/rent_models.dart' show RentUtilityBill;
 import 'features/rent_management/rent_utility_bill_form_screen.dart';
 import 'features/rent_management/rent_repository.dart' show isoPeriod;
 import 'features/mail_record/mail_list_screen.dart';
@@ -97,8 +100,10 @@ import 'features/mail_record/mail_record_form_screen.dart';
 import 'features/mail_record/mail_shipment_screen.dart';
 import 'features/mail_record/mail_complaint_form_screen.dart';
 import 'features/mail_record/mail_complaint_screen.dart';
-import 'features/mail_record/mail_complaint_department_form_screen.dart';
 import 'features/letterhead/letterhead_screen.dart';
+import 'features/it_assets/it_asset_models.dart';
+import 'features/it_assets/it_assets_screen.dart';
+import 'features/it_assets/it_asset_fill_screen.dart';
 import 'features/np/np_dashboard_screen.dart';
 import 'features/np/np_candidate_form_screen.dart';
 import 'features/np/np_candidate_detail_screen.dart';
@@ -344,7 +349,18 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/audit',
-        builder: (_, __) => const MyAuditsScreen(),
+        builder: (_, __) => const AuditHomeScreen(),
+      ),
+      // Static /audit/plans/new before the ':id' param route.
+      GoRoute(
+        path: '/audit/plans/new',
+        builder: (_, __) => const AuditPlanFormScreen(),
+      ),
+      GoRoute(
+        path: '/audit/plans/:id',
+        builder: (_, state) => AuditDetailScreen(
+          planId: int.parse(state.pathParameters['id']!),
+        ),
       ),
       // ── Helpdesk (Enterprise Service Desk) ──
       GoRoute(
@@ -464,7 +480,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/admin/rent/utility-bills/new',
-        builder: (_, __) => const RentUtilityBillFormScreen(),
+        builder: (_, state) => RentUtilityBillFormScreen(bill: state.extra is RentUtilityBill ? state.extra as RentUtilityBill : null),
       ),
       // ── Admin Tools · Mail Record ──
       GoRoute(
@@ -497,20 +513,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           complaintId: int.parse(state.pathParameters['id']!),
         ),
       ),
-      GoRoute(
-        path: '/admin/mail/complaint-departments/new',
-        builder: (_, __) => const MailComplaintDepartmentFormScreen(),
-      ),
-      GoRoute(
-        path: '/admin/mail/complaint-departments/:id',
-        builder: (_, state) => MailComplaintDepartmentFormScreen(
-          deptId: int.parse(state.pathParameters['id']!),
-        ),
-      ),
       // ── Admin Tools · Letter Head ──
       GoRoute(
         path: '/admin/letterhead',
         builder: (_, __) => const LetterheadScreen(),
+      ),
+      // ── Admin Tools · IT Assets (fill-only on mobile; authoring is web-only) ──
+      GoRoute(
+        path: '/admin/it-assets',
+        builder: (_, __) => const ItAssetsScreen(),
+      ),
+      GoRoute(
+        path: '/admin/it-assets/:id/fill',
+        builder: (_, state) => ItAssetFillScreen(entry: state.extra as ItAssetFormEntry),
       ),
       // ── NP (Navachetana Prathinidhi) Onboarding ──
       // 13-step BM→AM→DM→OPS workflow over /api/np. Static '/new' precedes

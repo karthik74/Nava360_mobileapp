@@ -7,6 +7,7 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import 'po_models.dart';
+import 'po_pdf.dart';
 import 'po_repository.dart';
 import 'po_status_ui.dart';
 
@@ -305,6 +306,15 @@ class _PoCard extends StatelessWidget {
                           style: const TextStyle(fontSize: 11, color: AppColors.muted),
                         ),
                     ],
+                  ),
+                ),
+                Consumer(
+                  builder: (ctx, ref, _) => IconButton(
+                    onPressed: () => downloadPoPdf(ctx, () => ref.read(poRepositoryProvider).get(po.id)),
+                    icon: Icon(Icons.picture_as_pdf_rounded, size: 19, color: AppColors.primary),
+                    tooltip: 'Download PDF',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                   ),
                 ),
                 if (canDelete)

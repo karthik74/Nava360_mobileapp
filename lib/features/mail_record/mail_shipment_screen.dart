@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
-import 'mail_list_screen.dart' show mailBranchesProvider;
+import 'mail_list_screen.dart' show mailBranchesProvider, mailMyBranchIdProvider, mailStockForBranchProvider;
 import 'mail_repository.dart';
 
 /// Dispatch a new inter-branch stationery shipment. Pops `true` on
@@ -21,7 +21,9 @@ class MailShipmentScreen extends ConsumerStatefulWidget {
 }
 
 class _MailShipmentScreenState extends ConsumerState<MailShipmentScreen> {
-  final _itemName = TextEditingController();
+  static const _othersValue = '__OTHERS__';
+  String? _item;
+  final _otherItem = TextEditingController();
   final _quantity = TextEditingController(text: '1');
   int? _fromBranchId;
   int? _toBranchId;
@@ -30,9 +32,18 @@ class _MailShipmentScreenState extends ConsumerState<MailShipmentScreen> {
   String? _error;
 
   @override
+  void initState() {
+    super.initState();
+    // The shipment leaves from the signed-in user's own branch by default (still changeable).
+    ref.read(mailMyBranchIdProvider.future).then((id) {
+      if (mounted && id != null) setState(() => _fromBranchId ??= id);
+    });
+  }
+
+  @override
   void dispose() {
-    _itemName.dispose();
     _quantity.dispose();
+    _otherItem.dispose();
     super.dispose();
   }
 
@@ -47,8 +58,9 @@ class _MailShipmentScreenState extends ConsumerState<MailShipmentScreen> {
       return;
     }
     final qty = num.tryParse(_quantity.text);
-    if (_itemName.text.trim().isEmpty || qty == null || qty <= 0) {
-      setState(() => _error = 'Enter an item name and a positive quantity.');
+    final itemName = _item == _othersValue ? _otherItem.text.trim() : _item;
+    if (itemName == null || itemName.isEmpty || qty == null || qty <= 0) {
+      setState(() => _error = 'Pick an item and enter a positive quantity.');
       return;
     }
     setState(() => _saving = true);
@@ -56,7 +68,7 @@ class _MailShipmentScreenState extends ConsumerState<MailShipmentScreen> {
       await ref.read(mailRepositoryProvider).dispatchShipment(
             fromBranchId: _fromBranchId!,
             toBranchId: _toBranchId!,
-            itemName: _itemName.text.trim(),
+            itemName: itemName,
             quantity: qty,
           );
       if (!mounted) return;
@@ -99,8 +111,38 @@ class _MailShipmentScreenState extends ConsumerState<MailShipmentScreen> {
                 onChanged: (v) => setState(() => _toBranchId = v),
               ),
               const SizedBox(height: 10),
-              _label('Item name *'),
-              TextField(controller: _itemName),
+              _label('Item *'),
+              if (_fromBranchId == null)
+                const Text('Pick the From branch first.',
+                    style: TextStyle(fontSize: 12, color: AppColors.inkSoft))
+              else
+                ref.watch(mailStockForBranchProvider(_fromBranchId!)).when(
+                      // The item list is shared by every branch — an admin maintains it.
+                      data: (items) => Column(
+                        children: [
+                          DropdownButtonFormField<String>(
+                            isExpanded: true,
+                            value: _item == _othersValue || items.any((i) => i.itemName == _item) ? _item : null,
+                            items: [
+                              for (final i in items)
+                                DropdownMenuItem(value: i.itemName, child: Text(i.itemName, overflow: TextOverflow.ellipsis)),
+                              const DropdownMenuItem(value: _othersValue, child: Text('Others')),
+                            ],
+                            onChanged: (v) => setState(() => _item = v),
+                          ),
+                          if (_item == _othersValue) ...[
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: _otherItem,
+                              maxLength: 120,
+                              decoration: const InputDecoration(hintText: 'Enter item name'),
+                            ),
+                          ],
+                        ],
+                      ),
+                      loading: () => const LinearProgressIndicator(),
+                      error: (e, _) => Text('$e', style: const TextStyle(color: AppColors.danger, fontSize: 12)),
+                    ),
               const SizedBox(height: 10),
               _label('Quantity *'),
               TextField(

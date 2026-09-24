@@ -85,11 +85,23 @@ class PoItem {
       );
 }
 
+/// Reads a company block (`address`, `gstin`, `cin`, `mobile`, `email`) from JSON.
+Map<String, String> companyFromJson(dynamic c) {
+  final m = (c is Map) ? c : const {};
+  return {
+    for (final k in const ['address', 'gstin', 'cin', 'mobile', 'email']) k: (m[k] as String?) ?? '',
+  };
+}
+
 /// Full purchase order (`AdminPurchaseOrder`).
 class PurchaseOrder {
   final int id;
   final String poNumber;
   final DateTime? poDate;
+  /** The date the products must be delivered by (null on POs made before this existed). */
+  final DateTime? deliveryByDate;
+  /// Company block printed on the PO: address, gstin, cin, mobile, email.
+  final Map<String, String> company;
   final String? supplierName;
   final String? supplierAddress;
   final String? supplierGstin;
@@ -110,6 +122,8 @@ class PurchaseOrder {
     required this.poNumber,
     required this.items,
     this.poDate,
+    this.deliveryByDate,
+    this.company = const {},
     this.supplierName,
     this.supplierAddress,
     this.supplierGstin,
@@ -129,6 +143,8 @@ class PurchaseOrder {
         id: (j['id'] as num).toInt(),
         poNumber: j['poNumber'] as String? ?? '',
         poDate: _date(j['poDate']),
+        deliveryByDate: _date(j['deliveryByDate']),
+        company: companyFromJson(j['company']),
         supplierName: j['supplierName'] as String?,
         supplierAddress: j['supplierAddress'] as String?,
         supplierGstin: j['supplierGstin'] as String?,

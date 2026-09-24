@@ -4,23 +4,15 @@ import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../auth/auth_controller.dart';
 import 'mail_models.dart';
 import 'mail_repository.dart';
 import 'mail_status_ui.dart';
 
-/// One complaint's detail + status workflow + history. There is no
-/// `GET /complaints/{id}` endpoint (the web lists complaints and works
-/// against the page), so this screen lists and finds [complaintId] within
-/// it, same source of truth as [MailListScreen]'s complaints tab.
-///
-/// Workflow: the web offers every other status as a manual transition from
-/// a "Change status…" dropdown rather than enforcing a strict linear state
-/// machine — PENDING/IN_PROGRESS/RESOLVED/ESCALATED/REJECTED are all
-/// reachable from any current status (gated by `ADMIN_MAIL_COMPLAINT_MANAGE`).
-/// Moving to RESOLVED or REJECTED prompts for an optional note, mirroring
-/// the web's `promptDialog` on those two transitions; the full status
-/// history (who changed what, when, with what note) is fetched on demand
-/// via `GET /complaints/{id}/history` and shown below the actions.
+/// One complaint's detail + history. Only a full-access admin sees the status actions — and only the moves the
+/// server allows from the current status ([MailComplaint.allowedNext]); resolving or rejecting needs a note, which
+/// the person who raised the complaint is notified with. Everyone else just follows their own complaint. There is
+/// no `GET /complaints/{id}`, so this lists and finds [complaintId], same source as the complaints tab.
 class MailComplaintScreen extends ConsumerStatefulWidget {
   const MailComplaintScreen({super.key, required this.complaintId});
   final int complaintId;
@@ -70,6 +62,10 @@ class _MailComplaintScreenState extends ConsumerState<MailComplaintScreen> {
         label: 'Note for marking "${_complaint!.subject}" as ${mailComplaintStatusLabel(status)}',
       );
       if (note == null) return; // cancelled
+      if (note.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Add a note — the person who raised it will see it.')));
+        return;
+      }
     }
     setState(() => _busy = true);
     try {
@@ -111,6 +107,12 @@ class _MailComplaintScreenState extends ConsumerState<MailComplaintScreen> {
         ],
       ),
     );
+  }
+
+  bool get _canResolve {
+    final user = ref.read(authUserProvider);
+    return (user?.hasPermission('ADMIN_MAIL_COMPLAINT_MANAGE') ?? false) &&
+        (user?.hasPermission('DATA_SCOPE_ALL') ?? false);
   }
 
   @override
@@ -163,30 +165,42 @@ class _MailComplaintScreenState extends ConsumerState<MailComplaintScreen> {
                                 ],
                               ),
                               const SizedBox(height: 6),
-                              Text('${c.branchLabel} · ${c.deptName ?? 'No department'}',
+                              Text('${c.branchLabel} · ${c.department ?? 'No department'}',
                                   style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
                               const Divider(height: 22),
                               _kv('Date', c.date == null ? '—' : df.format(c.date!)),
                               if (c.content != null && c.content!.isNotEmpty) _kv('Details', c.content!),
                               if (c.raisedByName != null) _kv('Raised by', c.raisedByName!),
+                              if (c.raisedByCode != null) _kv('Employee code', c.raisedByCode!),
+                              _kv('Branch', c.branchLabel),
+                              if (c.areaName != null) _kv('Area', c.areaName!),
+                              if (c.divisionName != null) _kv('Division', c.divisionName!),
+                              if (c.regionName != null) _kv('Region', c.regionName!),
+                              if (c.stateName != null) _kv('State', c.stateName!),
                               if (c.phone != null && c.phone!.isNotEmpty) _kv('Phone', c.phone!),
                               if (c.resolutionNote != null && c.resolutionNote!.isNotEmpty)
-                                _kv('Resolution note', c.resolutionNote!),
+                                _kv(c.status == MailComplaintStatus.rejected ? 'Rejected' : 'Resolution', '${c.resolutionNote!}${c.resolvedBy == null ? '' : ' — ${c.resolvedBy}'}'),
                             ],
                           ),
                         ),
                         const SizedBox(height: 20),
-                        const AppSectionHeader(title: 'Change status'),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            for (final s in MailComplaintStatus.values)
-                              if (s != c.status)
-                                _statusButton(s, () => _changeStatus(s)),
-                          ],
-                        ),
+                        if (_canResolve) ...[
+                          const AppSectionHeader(title: 'Update status'),
+                          const SizedBox(height: 10),
+                          if (c.allowedNext.isEmpty)
+                            const Text('This complaint is closed.',
+                                style: TextStyle(fontSize: 12.5, color: AppColors.muted))
+                          else
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: [
+                                for (final s in c.allowedNext) _statusButton(s, () => _changeStatus(s)),
+                              ],
+                            ),
+                        ] else
+                          const Text('Only an admin can update the status. You will be notified when it changes.',
+                              style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
                         const SizedBox(height: 24),
                         const AppSectionHeader(title: 'History'),
                         const SizedBox(height: 10),

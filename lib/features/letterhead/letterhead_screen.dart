@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/env.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import 'letterhead_align_screen.dart';
 import 'letterhead_models.dart';
 import 'letterhead_repository.dart';
 
@@ -152,6 +153,13 @@ class _LetterheadScreenState extends ConsumerState<LetterheadScreen> {
                 ),
               ),
               const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const LetterheadAlignScreen())),
+                icon: const Icon(Icons.picture_as_pdf_rounded),
+                label: const Text('Align & export PDF'),
+              ),
+              const SizedBox(height: 10),
               FilledButton.icon(
                 onPressed: _busy ? null : _upload,
                 icon: const Icon(Icons.upload_file_rounded),
