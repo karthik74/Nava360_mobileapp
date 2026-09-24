@@ -6,22 +6,31 @@
 //  post-dated cheques each with a 6-digit cheque number and a scan, account +
 //  IFSC required and identical on both cheques (PDC 2 mirrors PDC 1), cheque
 //  numbers distinct. Amount and cheque date are not captured (cheques are
-//  collected blank).
+//  collected blank). A customer verification video — the customer speaking on
+//  camera, recorded here — is required with every submission.
 // ─────────────────────────────────────────────────────────────────────────────
+
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:video_compress/video_compress.dart';
+import 'package:video_player/video_player.dart';
 
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'np_models.dart';
 import 'np_repository.dart';
+import 'np_verification_video_screen.dart';
 import 'np_widgets.dart';
 
 final _ifscRe = RegExp(r'^[A-Z]{4}0[A-Z0-9]{6}$');
+
+/// A ~480p take is already small; re-encode only what is actually big.
+const int _compressOverBytes = 8 * 1024 * 1024;
 
 class NpAgreementScreen extends ConsumerStatefulWidget {
   const NpAgreementScreen({super.key, required this.candidateId});
@@ -41,6 +50,9 @@ class _NpAgreementScreenState extends ConsumerState<NpAgreementScreen> {
   NpPickedFile? _agreementFile;
   NpPickedFile? _pdc1File;
   NpPickedFile? _pdc2File;
+  NpVideoTake? _video;
+  VideoPlayerController? _player;
+  String? _status;
   final _pdc1No = TextEditingController();
   final _pdc2No = TextEditingController();
   final _bankName = TextEditingController();
@@ -64,6 +76,8 @@ class _NpAgreementScreenState extends ConsumerState<NpAgreementScreen> {
     _ifsc.dispose();
     _account.dispose();
     _remarks.dispose();
+    _player?.dispose();
+    VideoCompress.cancelCompression();
     super.dispose();
   }
 
@@ -96,6 +110,7 @@ class _NpAgreementScreenState extends ConsumerState<NpAgreementScreen> {
     if (!_ifscRe.hasMatch(ifsc)) return 'Enter a valid IFSC, e.g. SBIN0001234.';
     if (_pdc1File == null) return 'PDC 1 needs a scan.';
     if (_pdc2File == null) return 'PDC 2 needs a scan.';
+    if (_video == null) return 'Record the customer verification video.';
     return null;
   }
 
@@ -118,12 +133,16 @@ class _NpAgreementScreenState extends ConsumerState<NpAgreementScreen> {
       ..bankName = bank
       ..ifsc = ifsc
       ..accountNumber = account;
+    _player?.pause();
     try {
+      final videoPath = await _uploadableVideo();
+      if (mounted) setState(() => _status = 'Uploading…');
       await ref.read(npRepositoryProvider).submitAgreement(
             _id,
             agreementPath: _agreementFile!.path,
             pdc1Path: _pdc1File!.path,
             pdc2Path: _pdc2File!.path,
+            videoPath: videoPath,
             agreementDate: npIsoDate(_agreementDate),
             pdc1: pdc(_pdc1No.text),
             pdc2: pdc(_pdc2No.text),
@@ -135,8 +154,64 @@ class _NpAgreementScreenState extends ConsumerState<NpAgreementScreen> {
     } catch (e) {
       if (mounted) npToast(context, 'Agreement submission failed: $e', error: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _status = null;
+        });
+      }
     }
+  }
+
+  /// The recorded file, shrunk first when it is big. Compression is an
+  /// optimisation: if the device cannot do it, the original is sent.
+  Future<String> _uploadableVideo() async {
+    final path = _video!.path;
+    try {
+      if (await File(path).length() <= _compressOverBytes) return path;
+      if (mounted) setState(() => _status = 'Shrinking the video…');
+      final info = await VideoCompress.compressVideo(
+        path,
+        quality: VideoQuality.Res640x480Quality,
+        deleteOrigin: false,
+        includeAudio: true,
+        frameRate: 24,
+      );
+      return info?.path ?? path;
+    } catch (_) {
+      return path;
+    }
+  }
+
+  Future<void> _record() async {
+    final d = _d;
+    if (d == null) return;
+    _player?.pause();
+    final take = await Navigator.of(context).push<NpVideoTake>(
+      MaterialPageRoute(fullscreenDialog: true, builder: (_) => NpVerificationVideoScreen(candidateName: d.fullName)),
+    );
+    if (take == null || !mounted) return;
+    final old = _player;
+    setState(() {
+      _video = take;
+      _player = null;
+    });
+    await old?.dispose();
+    final c = VideoPlayerController.file(File(take.path));
+    try {
+      await c.initialize();
+    } catch (_) {
+      await c.dispose();
+      return; // Preview is a courtesy; the take is still attached.
+    }
+    if (!mounted) {
+      await c.dispose();
+      return;
+    }
+    c.addListener(() {
+      if (mounted) setState(() {});
+    });
+    setState(() => _player = c);
   }
 
   Future<void> _pick(void Function(NpPickedFile f) set) async {
@@ -216,6 +291,7 @@ class _NpAgreementScreenState extends ConsumerState<NpAgreementScreen> {
                           ]),
                           _pdcCard(1, _pdc1No, _pdc1File, (f) => _pdc1File = f),
                           _pdcCard(2, _pdc2No, _pdc2File, (f) => _pdc2File = f),
+                          _videoCard(),
                           _card('Remarks', [
                             TextField(controller: _remarks, minLines: 2, maxLines: 4, textCapitalization: TextCapitalization.sentences),
                           ]),
@@ -226,7 +302,7 @@ class _NpAgreementScreenState extends ConsumerState<NpAgreementScreen> {
                               icon: _busy
                                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                   : const Icon(Icons.send_rounded, size: 18),
-                              label: Text(_busy ? 'Uploading…' : 'Submit agreement & PDCs'),
+                              label: Text(_busy ? (_status ?? 'Uploading…') : 'Submit agreement & PDCs'),
                             ),
                           ),
                         ],
@@ -245,6 +321,55 @@ class _NpAgreementScreenState extends ConsumerState<NpAgreementScreen> {
         ),
         NpFilePickField(label: 'Cheque scan', fileName: file?.name, onPick: () => _pick(setFile)),
       ]);
+
+  Widget _videoCard() {
+    final take = _video;
+    final player = _player;
+    String clock(int s) => '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
+    return _card('Customer verification video', [
+      const Text('Record the customer speaking on camera — their name, and that they have signed the agreement '
+          'and handed over the cheques.',
+          style: TextStyle(fontSize: 12, color: AppColors.muted)),
+      const SizedBox(height: 8),
+      if (take != null) ...[
+        ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          child: Container(
+            color: Colors.black,
+            height: 220,
+            alignment: Alignment.center,
+            child: player == null || !player.value.isInitialized
+                ? const Icon(Icons.videocam_rounded, color: Colors.white38, size: 40)
+                : Stack(alignment: Alignment.center, children: [
+                    AspectRatio(aspectRatio: player.value.aspectRatio, child: VideoPlayer(player)),
+                    IconButton(
+                      iconSize: 52,
+                      color: Colors.white,
+                      onPressed: () => player.value.isPlaying ? player.pause() : player.play(),
+                      icon: Icon(player.value.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded),
+                    ),
+                  ]),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(children: [
+          const Icon(Icons.check_circle_rounded, size: 16, color: AppColors.success),
+          const SizedBox(width: 6),
+          Expanded(child: Text('Recorded · ${clock(take.durationSec)}', style: const TextStyle(fontSize: 12.5, color: AppColors.ink))),
+          TextButton.icon(
+            onPressed: _busy ? null : _record,
+            icon: const Icon(Icons.replay_rounded, size: 16),
+            label: const Text('Re-record'),
+          ),
+        ]),
+      ] else
+        OutlinedButton.icon(
+          onPressed: _busy ? null : _record,
+          icon: const Icon(Icons.videocam_rounded, size: 18),
+          label: const Text('Record video'),
+        ),
+    ]);
+  }
 
   Widget _card(String title, List<Widget> children) => Padding(
         padding: const EdgeInsets.only(bottom: 10),

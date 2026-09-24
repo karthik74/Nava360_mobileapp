@@ -53,6 +53,8 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
   final _ivRemarks = TextEditingController();
 
   String _cbResult = 'APPROVED';
+  /// Whose pending CB attempt the recorded result is for (shown only with a spouse row).
+  String _cbSubject = 'CANDIDATE';
   final _cbRef = TextEditingController();
   final _cbScore = TextEditingController();
   final _cbRemarks = TextEditingController();
@@ -308,12 +310,26 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
       if (!mounted) return;
       _apply(next);
       final latest = next.cbChecks.isEmpty ? null : next.cbChecks.last;
+      // With a spouse on record there are two attempts: decide the message on the
+      // latest of each subject, the way the server does.
+      final bySubject = <String, NpCbCheck>{};
+      for (final cb in next.cbChecks) {
+        bySubject[cb.subject] = cb;
+      }
+      final several = bySubject.length > 1;
+      String label(NpCbCheck cb) => cb.subject == 'SPOUSE' ? 'spouse' : 'candidate';
+      final rejected = bySubject.values.where((cb) => cb.status == 'REJECTED').toList();
       if (latest?.status == 'ERROR') {
         npToast(context, latest?.remarks ?? 'The credit bureau check could not be raised. Try again.', error: true);
-      } else if (latest?.status == 'REJECTED') {
-        npToast(context, 'Credit bureau rejected${latest?.score != null ? ' (score ${latest!.score})' : ''}: ${latest?.remarks ?? ''}', error: true);
-      } else if (latest?.status == 'APPROVED') {
-        npToast(context, 'Credit bureau approved${latest?.score != null ? ' (score ${latest!.score})' : ''}');
+      } else if (rejected.isNotEmpty) {
+        final why = rejected.map((cb) => '${several ? '${label(cb)}: ' : ''}${cb.remarks ?? ''}').join('; ');
+        npToast(context, 'Credit bureau rejected: $why', error: true);
+      } else if (bySubject.isNotEmpty && bySubject.values.every((cb) => cb.status == 'APPROVED')) {
+        final scores = bySubject.values
+            .where((cb) => cb.score != null)
+            .map((cb) => '${several ? '${label(cb)} score ' : 'score '}${cb.score}')
+            .join(', ');
+        npToast(context, 'Credit bureau approved${scores.isEmpty ? '' : ' ($scores)'}');
       } else {
         npToast(context, 'CB submission done');
       }
@@ -332,7 +348,9 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
     final approved = _cbResult == 'APPROVED';
     if (!await npConfirm(context,
         title: approved ? 'Record CB approval?' : 'Record CB rejection?',
-        message: approved ? 'The file moves straight to background verification.' : 'This ends the onboarding for this candidate.',
+        message: approved
+            ? 'Once every subject is approved the file moves to background verification.'
+            : 'This ends the onboarding for this candidate.',
         confirmLabel: 'Record',
         danger: !approved)) {
       return;
@@ -342,6 +360,7 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
       () => ref.read(npRepositoryProvider).recordCbResult(
             _id,
             status: _cbResult,
+            subject: _cbSubject,
             referenceNo: _cbRef.text.trim().isEmpty ? null : _cbRef.text.trim(),
             score: _cbScore.text.trim().isEmpty ? null : _cbScore.text.trim(),
             remarks: _cbRemarks.text.trim().isEmpty ? null : _cbRemarks.text.trim(),
@@ -709,6 +728,10 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
         if (d.spouseDateOfBirth != null) NpInfoRow('Spouse DOB', npFmtDate(d.spouseDateOfBirth)),
         if (d.spouseMobile != null) NpInfoRow('Spouse mobile', d.spouseMobile),
         if (d.spouseOccupation != null) NpInfoRow('Spouse occupation', d.spouseOccupation),
+        if (d.spouseFatherName != null) NpInfoRow("Spouse's father", d.spouseFatherName),
+        if (d.spouseAadhaarLast4 != null) NpInfoRow('Spouse Aadhaar', '•••• ${d.spouseAadhaarLast4}'),
+        if (d.spousePanNumber != null) NpInfoRow('Spouse PAN', d.spousePanNumber),
+        if (d.spouseDrivingLicenceNumber != null) NpInfoRow('Spouse driving licence', d.spouseDrivingLicenceNumber),
         NpInfoRow('Alternate mobile', d.alternateMobile),
         NpInfoRow('Email', d.email),
         NpInfoRow('Education', d.education),
@@ -896,7 +919,7 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
                       ? AppColors.danger
                       : AppColors.warning,
             ),
-            title: 'Attempt ${cb.attemptNo}${cb.referenceNo != null ? ' · Ref ${cb.referenceNo}' : ''}',
+            title: '${cb.subject == 'SPOUSE' ? 'Spouse' : 'Candidate'} · Attempt ${cb.attemptNo}${cb.referenceNo != null ? ' · Ref ${cb.referenceNo}' : ''}',
             lines: [
               if (cb.provider.isNotEmpty) 'Provider: ${cb.provider}',
               if (cb.score != null) 'Score: ${cb.score}',
@@ -931,6 +954,22 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
           NpActionBox(
             title: 'Record the bureau result',
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              if (d.cbChecks.any((cb) => cb.subject == 'SPOUSE')) ...[
+                const NpFieldLabel('Whose result'),
+                DropdownButtonFormField<String>(
+                  value: _cbSubject,
+                  items: const [
+                    DropdownMenuItem(value: 'CANDIDATE', child: Text('Candidate')),
+                    DropdownMenuItem(value: 'SPOUSE', child: Text('Spouse')),
+                  ],
+                  onChanged: (v) => setState(() => _cbSubject = v ?? 'CANDIDATE'),
+                ),
+                const Padding(
+                  padding: EdgeInsets.only(top: 4, bottom: 4),
+                  child: Text('The file moves on only once both the candidate and the spouse are approved.',
+                      style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
+                ),
+              ],
               const NpFieldLabel('Result'),
               DropdownButtonFormField<String>(
                 value: _cbResult,
@@ -1117,6 +1156,21 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
                         onPressed: () => npOpenFile(context, p.file),
                         icon: Icon(Icons.image_rounded, size: 18, color: AppColors.primary),
                       ),
+                  ]),
+                ),
+              if (ag.verificationVideo != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(children: [
+                    const Expanded(
+                      child: Text('Customer verification video',
+                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.ink)),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => npOpenFile(context, ag.verificationVideo),
+                      icon: Icon(Icons.play_circle_rounded, size: 20, color: AppColors.primary),
+                    ),
                   ]),
                 ),
               if (ag.remarks != null && ag.remarks!.isNotEmpty) ...[

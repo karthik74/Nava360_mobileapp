@@ -171,6 +171,8 @@ class NpInterview {
 class NpCbCheck {
   final int id;
   final int attemptNo;
+  /// CANDIDATE | SPOUSE — the spouse is checked whenever one is on record.
+  final String subject;
   final String provider;
   final String? referenceNo;
   final String status; // PENDING | APPROVED | REJECTED | ERROR
@@ -184,6 +186,7 @@ class NpCbCheck {
   const NpCbCheck({
     required this.id,
     required this.attemptNo,
+    this.subject = 'CANDIDATE',
     required this.provider,
     this.referenceNo,
     required this.status,
@@ -199,6 +202,7 @@ class NpCbCheck {
   factory NpCbCheck.fromJson(Map<String, dynamic> j) => NpCbCheck(
         id: _int(j['id']),
         attemptNo: _int(j['attemptNo']),
+        subject: _str(j['subject']) ?? 'CANDIDATE',
         provider: _str(j['provider']) ?? '',
         referenceNo: _str(j['referenceNo']),
         status: _str(j['status']) ?? 'PENDING',
@@ -374,6 +378,9 @@ class NpAgreement {
   final int attemptNo;
   final DateTime? agreementDate;
   final NpFileRef? file;
+
+  /// The customer speaking on camera, recorded at signing.
+  final NpFileRef? verificationVideo;
   final List<NpPdc> pdcs;
   final String? remarks;
   final NpPerson? submittedBy;
@@ -383,6 +390,7 @@ class NpAgreement {
     required this.attemptNo,
     this.agreementDate,
     this.file,
+    this.verificationVideo,
     this.pdcs = const [],
     this.remarks,
     this.submittedBy,
@@ -394,6 +402,7 @@ class NpAgreement {
         attemptNo: _int(j['attemptNo']),
         agreementDate: _dt(j['agreementDate']),
         file: NpFileRef.fromJsonN(j['file']),
+        verificationVideo: NpFileRef.fromJsonN(j['verificationVideo']),
         pdcs: _list(j['pdcs']).map(NpPdc.fromJson).toList(),
         remarks: _str(j['remarks']),
         submittedBy: NpPerson.fromJsonN(j['submittedBy']),
@@ -600,6 +609,13 @@ class NpCandidateDetail extends NpCandidateSummary {
   final DateTime? spouseDateOfBirth;
   final String? spouseMobile;
   final String? spouseOccupation;
+  final String? spouseFatherName;
+  final String? spouseAadhaarLast4;
+
+  /// "XXXX XXXX 1234" when the full number is on file.
+  final String? spouseAadhaarMasked;
+  final String? spousePanNumber;
+  final String? spouseDrivingLicenceNumber;
   final String? addressLine;
   final String? villageOrTown;
   final String? district;
@@ -616,6 +632,9 @@ class NpCandidateDetail extends NpCandidateSummary {
   final bool? hasTwoWheeler;
   final bool? hasSmartphone;
   final String? aadhaarLast4;
+
+  /// "XXXX XXXX 1234" when the full number is on file.
+  final String? aadhaarMasked;
   final String? panNumber;
   final String? drivingLicenceNumber;
   final String? bankAccountNumber;
@@ -704,6 +723,11 @@ class NpCandidateDetail extends NpCandidateSummary {
     this.spouseDateOfBirth,
     this.spouseMobile,
     this.spouseOccupation,
+    this.spouseFatherName,
+    this.spouseAadhaarLast4,
+    this.spouseAadhaarMasked,
+    this.spousePanNumber,
+    this.spouseDrivingLicenceNumber,
     this.addressLine,
     this.villageOrTown,
     this.district,
@@ -720,6 +744,7 @@ class NpCandidateDetail extends NpCandidateSummary {
     this.hasTwoWheeler,
     this.hasSmartphone,
     this.aadhaarLast4,
+    this.aadhaarMasked,
     this.panNumber,
     this.drivingLicenceNumber,
     this.bankAccountNumber,
@@ -800,6 +825,11 @@ class NpCandidateDetail extends NpCandidateSummary {
       spouseDateOfBirth: _dt(j['spouseDateOfBirth']),
       spouseMobile: _str(j['spouseMobile']),
       spouseOccupation: _str(j['spouseOccupation']),
+      spouseFatherName: _str(j['spouseFatherName']),
+      spouseAadhaarLast4: _str(j['spouseAadhaarLast4']),
+      spouseAadhaarMasked: _str(j['spouseAadhaarMasked']),
+      spousePanNumber: _str(j['spousePanNumber']),
+      spouseDrivingLicenceNumber: _str(j['spouseDrivingLicenceNumber']),
       addressLine: _str(j['addressLine']),
       villageOrTown: _str(j['villageOrTown']),
       district: _str(j['district']),
@@ -816,6 +846,7 @@ class NpCandidateDetail extends NpCandidateSummary {
       hasTwoWheeler: _boolN(j['hasTwoWheeler']),
       hasSmartphone: _boolN(j['hasSmartphone']),
       aadhaarLast4: _str(j['aadhaarLast4']),
+      aadhaarMasked: _str(j['aadhaarMasked']),
       panNumber: _str(j['panNumber']),
       drivingLicenceNumber: _str(j['drivingLicenceNumber']),
       bankAccountNumber: _str(j['bankAccountNumber']),
@@ -906,6 +937,13 @@ class NpCandidateInput {
   String? spouseDateOfBirth;
   String? spouseMobile;
   String? spouseOccupation;
+  String? spouseFatherName;
+  String? spouseAadhaarLast4;
+
+  /// Full 12-digit number; null on an edit keeps the one on file.
+  String? spouseAadhaarNumber;
+  String? spousePanNumber;
+  String? spouseDrivingLicenceNumber;
   String? addressLine;
   String? villageOrTown;
   String? district;
@@ -922,6 +960,9 @@ class NpCandidateInput {
   bool hasTwoWheeler = false;
   bool hasSmartphone = false;
   String? aadhaarLast4;
+
+  /// Full 12-digit number; null on an edit keeps the one on file.
+  String? aadhaarNumber;
   String? panNumber;
   String? drivingLicenceNumber;
   String? bankAccountNumber;
@@ -947,6 +988,11 @@ class NpCandidateInput {
         'spouseDateOfBirth': spouseDateOfBirth,
         'spouseMobile': spouseMobile,
         'spouseOccupation': spouseOccupation,
+        'spouseFatherName': spouseFatherName,
+        'spouseAadhaarLast4': spouseAadhaarLast4,
+        'spouseAadhaarNumber': spouseAadhaarNumber,
+        'spousePanNumber': spousePanNumber,
+        'spouseDrivingLicenceNumber': spouseDrivingLicenceNumber,
         'addressLine': addressLine,
         'villageOrTown': villageOrTown,
         'district': district,
@@ -963,6 +1009,7 @@ class NpCandidateInput {
         'hasTwoWheeler': hasTwoWheeler,
         'hasSmartphone': hasSmartphone,
         'aadhaarLast4': aadhaarLast4,
+        'aadhaarNumber': aadhaarNumber,
         'panNumber': panNumber,
         'drivingLicenceNumber': drivingLicenceNumber,
         'bankAccountNumber': bankAccountNumber,
@@ -1221,6 +1268,7 @@ class NpConfig {
   final List<NpDocumentTypeConfig> documentTypes;
   final List<String> bgvChecklist;
   final String npIdFormat;
+  final String candidateCodeFormat;
   final int otpTtlSeconds;
   final int otpMaxAttempts;
   final bool aadhaarKycEnabled;
@@ -1231,6 +1279,7 @@ class NpConfig {
     this.documentTypes = const [],
     this.bgvChecklist = const [],
     this.npIdFormat = '',
+    this.candidateCodeFormat = '',
     this.otpTtlSeconds = 300,
     this.otpMaxAttempts = 3,
     this.aadhaarKycEnabled = false,
@@ -1245,6 +1294,7 @@ class NpConfig {
         documentTypes: _list(j['documentTypes']).map(NpDocumentTypeConfig.fromJson).toList(),
         bgvChecklist: _strList(j['bgvChecklist']),
         npIdFormat: _str(j['npIdFormat']) ?? '',
+        candidateCodeFormat: _str(j['candidateCodeFormat']) ?? '',
         otpTtlSeconds: _int(j['otpTtlSeconds']),
         otpMaxAttempts: _int(j['otpMaxAttempts']),
         aadhaarKycEnabled: _bool(j['aadhaarKycEnabled']),

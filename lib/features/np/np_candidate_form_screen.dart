@@ -25,6 +25,7 @@ import '../auth/auth_controller.dart';
 import '../files/file_repository.dart';
 import '../requisitions/requisition_models.dart';
 import '../requisitions/requisition_repository.dart';
+import 'np_aadhaar.dart';
 import 'np_models.dart';
 import 'np_repository.dart';
 import 'np_widgets.dart';
@@ -82,6 +83,10 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
   String? _aadhaarStatus;
   bool _aadhaarVerified = false;
 
+  // Masked numbers already on file (edit) — the full numbers never come back to the app.
+  String? _aadhaarOnFile;
+  String? _spouseAadhaarOnFile;
+
   // Bank verify
   bool _bankBusy = false;
   bool? _bankOk;
@@ -120,6 +125,9 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
       _f('spouseName').text = c.spouseName ?? '';
       _f('spouseMobile').text = c.spouseMobile ?? '';
       _f('spouseOcc').text = c.spouseOccupation ?? '';
+      _f('spouseFather').text = c.spouseFatherName ?? '';
+      _f('spousePan').text = c.spousePanNumber ?? '';
+      _f('spouseDl').text = c.spouseDrivingLicenceNumber ?? '';
       _f('addr').text = c.addressLine ?? '';
       _f('village').text = c.villageOrTown ?? '';
       _f('district').text = c.district ?? '';
@@ -133,7 +141,6 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
       _f('education').text = c.education ?? '';
       _f('occupation').text = c.occupation ?? '';
       _f('exp').text = c.experienceYears?.toString() ?? '';
-      _f('aadhaar4').text = c.aadhaarLast4 ?? '';
       _f('pan').text = c.panNumber ?? '';
       _f('dl').text = c.drivingLicenceNumber ?? '';
       _f('bankName').text = c.bankName ?? '';
@@ -147,6 +154,8 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
         _maritalStatus = c.maritalStatus;
         _dob = c.dateOfBirth;
         _spouseDob = c.spouseDateOfBirth;
+        _aadhaarOnFile = c.aadhaarMasked;
+        _spouseAadhaarOnFile = c.spouseAadhaarMasked;
         _twoWheeler = c.hasTwoWheeler ?? false;
         _smartphone = c.hasSmartphone ?? false;
         _branchId = c.branchId;
@@ -255,7 +264,7 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
       keep('district', d.district);
       keep('state', d.state);
       keep('pin', d.pincode);
-      _f('aadhaar4').text = d.aadhaarLast4 ?? _aadhaar.text.substring(8);
+      _f('aadhaarFull').text = _aadhaar.text.trim();
       setState(() {
         if (d.gender != null && kNpGenders.contains(d.gender!.toUpperCase())) _gender = d.gender!.toUpperCase();
         if (d.dateOfBirth != null) _dob = DateTime.tryParse(d.dateOfBirth!) ?? _dob;
@@ -342,6 +351,34 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
     final terms = Branding.current;
     if (_f('fullName').text.trim().isEmpty) return 'Full name is required.';
     if (!RegExp(r'^\d{10}$').hasMatch(_f('mobile').text.trim())) return 'Enter a valid 10-digit mobile number.';
+    // Everything the credit bureau needs is mandatory.
+    bool empty(String key) => _f(key).text.trim().isEmpty;
+    final missing = <String>[
+      if (_gender == null) 'gender',
+      if (_dob == null) 'date of birth',
+      if (empty('father')) "father's name",
+      if (_maritalStatus == null) 'marital status',
+      if (empty('aadhaarFull') && _aadhaarOnFile == null) 'Aadhaar number',
+      if (empty('addr')) 'address',
+      if (empty('village')) 'village / town',
+      if (empty('district')) 'district',
+      if (empty('state')) 'state',
+      if (empty('pin')) 'pincode',
+      if (_spouseRequired) ...[
+        if (empty('spouseName')) 'spouse name',
+        if (_spouseDob == null) 'spouse date of birth',
+        if (empty('spouseFather')) "spouse's father's name",
+        if (empty('spouseAadhaarFull') && _spouseAadhaarOnFile == null) 'spouse Aadhaar number',
+      ],
+    ];
+    if (missing.isNotEmpty) return 'Required for the credit bureau check: ${missing.join(', ')}.';
+    final aadhaar = _f('aadhaarFull').text.trim();
+    if (aadhaar.isNotEmpty && !isValidAadhaar(aadhaar)) return 'The Aadhaar number is not valid — check all 12 digits.';
+    final spouseAadhaar = _f('spouseAadhaarFull').text.trim();
+    if (_spouseRequired && spouseAadhaar.isNotEmpty) {
+      if (!isValidAadhaar(spouseAadhaar)) return "The spouse's Aadhaar number is not valid — check all 12 digits.";
+      if (spouseAadhaar == aadhaar) return "The spouse's Aadhaar number cannot be the candidate's own.";
+    }
     final alt = _f('altMobile').text.trim();
     if (alt.isNotEmpty && !RegExp(r'^\d{10}$').hasMatch(alt)) return 'The alternate mobile must be 10 digits.';
     final sm = _f('spouseMobile').text.trim();
@@ -350,13 +387,16 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
     if (pin.isNotEmpty && !RegExp(r'^\d{6}$').hasMatch(pin)) return 'The pincode must be 6 digits.';
     final cpin = _f('cPin').text.trim();
     if (cpin.isNotEmpty && !RegExp(r'^\d{6}$').hasMatch(cpin)) return 'The communication address pincode must be 6 digits.';
-    final a4 = _f('aadhaar4').text.trim();
-    if (a4.isNotEmpty && !RegExp(r'^\d{4}$').hasMatch(a4)) return 'Enter only the last 4 digits of the Aadhaar.';
     final pan = _f('pan').text.trim().toUpperCase();
     if (pan.isNotEmpty && !_panRe.hasMatch(pan)) return 'The PAN must look like ABCDE1234F.';
+    final spousePan = _f('spousePan').text.trim().toUpperCase();
+    if (spousePan.isNotEmpty && !_panRe.hasMatch(spousePan)) return 'The spouse PAN must look like ABCDE1234F.';
     if (_branchId == null || _branchId == 0) return 'Select a ${terms.term('branch').toLowerCase()}.';
     return null;
   }
+
+  /// A married candidate's spouse is credit-checked too, so their identity is mandatory.
+  bool get _spouseRequired => _maritalStatus == 'MARRIED';
 
   String? _blank(String key) {
     final v = _f(key).text.trim();
@@ -388,6 +428,10 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
       ..spouseDateOfBirth = _spouseDob == null ? null : npIsoDate(_spouseDob!)
       ..spouseMobile = _blank('spouseMobile')
       ..spouseOccupation = _blank('spouseOcc')
+      ..spouseFatherName = _blank('spouseFather')
+      ..spouseAadhaarNumber = _spouseRequired ? _blank('spouseAadhaarFull') : null
+      ..spousePanNumber = _blank('spousePan')?.toUpperCase()
+      ..spouseDrivingLicenceNumber = _blank('spouseDl')
       ..addressLine = _blank('addr')
       ..villageOrTown = _blank('village')
       ..district = _blank('district')
@@ -403,7 +447,7 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
       ..experienceYears = int.tryParse(_f('exp').text.trim())
       ..hasTwoWheeler = _twoWheeler
       ..hasSmartphone = _smartphone
-      ..aadhaarLast4 = _blank('aadhaar4')
+      ..aadhaarNumber = _blank('aadhaarFull')
       ..panNumber = _blank('pan')?.toUpperCase()
       ..drivingLicenceNumber = _blank('dl')
       ..bankAccountNumber = _blank('account')
@@ -469,24 +513,41 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
                   _section('Step 1', 'Identity', 'Who the candidate is.', [
                     const NpFieldLabel('Full name', required: true),
                     TextField(controller: _f('fullName'), textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()]),
-                    const NpFieldLabel('Gender'),
+                    const NpFieldLabel('Gender', required: true),
                     _dropdown(_gender, kNpGenders, (v) => setState(() => _gender = v)),
-                    const NpFieldLabel('Date of birth'),
+                    const NpFieldLabel('Date of birth', required: true),
                     _dateField(_dob, () => _pickDate(spouse: false)),
-                    const NpFieldLabel("Father's name"),
+                    const NpFieldLabel("Father's name", required: true),
                     TextField(controller: _f('father'), textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()]),
                     const _Hint('Sent to the credit bureau as a relation.'),
-                    const NpFieldLabel('Marital status'),
+                    const NpFieldLabel('Marital status', required: true),
                     _dropdown(_maritalStatus, kNpMaritalStatuses, (v) => setState(() => _maritalStatus = v)),
                     if (showSpouse) ...[
-                      const NpFieldLabel('Spouse name'),
+                      NpFieldLabel('Spouse name', required: _spouseRequired),
                       TextField(controller: _f('spouseName'), textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()]),
-                      const NpFieldLabel('Spouse date of birth'),
+                      NpFieldLabel('Spouse date of birth', required: _spouseRequired),
                       _dateField(_spouseDob, () => _pickDate(spouse: true)),
                       const NpFieldLabel('Spouse mobile'),
                       _digits('spouseMobile', 10),
                       const NpFieldLabel('Spouse occupation'),
                       TextField(controller: _f('spouseOcc'), textCapitalization: TextCapitalization.words),
+                      NpFieldLabel("Spouse's father's name", required: _spouseRequired),
+                      TextField(controller: _f('spouseFather'), textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()]),
+                      const _Hint("Sent to the credit bureau as the spouse's relation."),
+                      NpFieldLabel('Spouse Aadhaar number', required: _spouseRequired && _spouseAadhaarOnFile == null),
+                      _aadhaarField('spouseAadhaarFull', _spouseAadhaarOnFile),
+                      _Hint(_spouseAadhaarOnFile != null
+                          ? 'On file: $_spouseAadhaarOnFile — leave blank to keep it.'
+                          : 'All 12 digits — sent to the credit bureau.'),
+                      const NpFieldLabel('Spouse PAN'),
+                      TextField(
+                        controller: _f('spousePan'),
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: [const UpperCaseTextFormatter(), LengthLimitingTextInputFormatter(10)],
+                      ),
+                      const _Hint('Optional — sent to the credit bureau with the Aadhaar.'),
+                      const NpFieldLabel('Spouse driving licence'),
+                      TextField(controller: _f('spouseDl'), textCapitalization: TextCapitalization.characters, inputFormatters: const [UpperCaseTextFormatter()]),
                     ],
                     const NpFieldLabel('Photo'),
                     Row(children: [
@@ -525,15 +586,15 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
                   _section('Step 3', 'Address',
                       'Permanent address as per Aadhaar (used for the CB check and the BGV visit), and where the candidate can be reached.', [
                     const Text('Permanent address', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink)),
-                    const NpFieldLabel('Address line'),
+                    const NpFieldLabel('Address line', required: true),
                     TextField(controller: _f('addr'), textCapitalization: TextCapitalization.words, onChanged: (_) => _commSame ? _copyPermanentToComm() : null),
-                    const NpFieldLabel('Village / town'),
+                    const NpFieldLabel('Village / town', required: true),
                     TextField(controller: _f('village'), textCapitalization: TextCapitalization.words, onChanged: (_) => _commSame ? _copyPermanentToComm() : null),
-                    const NpFieldLabel('District'),
+                    const NpFieldLabel('District', required: true),
                     TextField(controller: _f('district'), textCapitalization: TextCapitalization.words, onChanged: (_) => _commSame ? _copyPermanentToComm() : null),
-                    const NpFieldLabel('State'),
+                    const NpFieldLabel('State', required: true),
                     TextField(controller: _f('state'), textCapitalization: TextCapitalization.words, onChanged: (_) => _commSame ? _copyPermanentToComm() : null),
-                    const NpFieldLabel('Pincode'),
+                    const NpFieldLabel('Pincode', required: true),
                     _digits('pin', 6, onChanged: (_) => _commSame ? _copyPermanentToComm() : null),
                     const SizedBox(height: 14),
                     Row(children: [
@@ -584,8 +645,11 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
                   ]),
 
                   _section('Step 5', 'Identity documents', 'Reference numbers only — the scans are uploaded at the KYC step.', [
-                    const NpFieldLabel('Aadhaar (last 4 digits)'),
-                    _digits('aadhaar4', 4),
+                    NpFieldLabel('Aadhaar number', required: _aadhaarOnFile == null),
+                    _aadhaarField('aadhaarFull', _aadhaarOnFile),
+                    _Hint(_aadhaarOnFile != null
+                        ? 'On file: $_aadhaarOnFile — leave blank to keep it.'
+                        : 'All 12 digits — stored encrypted and sent to the credit bureau.'),
                     const NpFieldLabel('PAN number'),
                     TextField(
                       controller: _f('pan'),
@@ -777,6 +841,15 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
           child: Text(value == null ? 'Not set' : npFmtDate(value),
               style: TextStyle(fontSize: 14, color: value == null ? AppColors.muted : AppColors.ink)),
         ),
+      );
+
+  Widget _aadhaarField(String key, String? onFile) => TextField(
+        controller: _f(key),
+        keyboardType: TextInputType.number,
+        autocorrect: false,
+        enableSuggestions: false,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(12)],
+        decoration: InputDecoration(hintText: onFile ?? '12 digits'),
       );
 
   Widget _digits(String key, int max, {bool enabled = true, ValueChanged<String>? onChanged}) => TextField(

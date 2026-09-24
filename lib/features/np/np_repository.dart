@@ -224,11 +224,18 @@ class NpRepository {
   Future<NpCandidateDetail> submitCbCheck(int id) =>
       _api.post('$_base/candidates/$id/cb-check', body: const {}, parse: _detail);
 
+  /// [subject] is CANDIDATE (default) or SPOUSE — whose pending attempt is being decided.
   Future<NpCandidateDetail> recordCbResult(int id,
-          {required String status, String? referenceNo, String? score, String? remarks}) =>
+          {required String status, String? subject, String? referenceNo, String? score, String? remarks}) =>
       _api.post(
         '$_base/candidates/$id/cb-check/result',
-        body: {'status': status, 'referenceNo': referenceNo, 'score': score, 'remarks': remarks},
+        body: {
+          'status': status,
+          'subject': subject ?? 'CANDIDATE',
+          'referenceNo': referenceNo,
+          'score': score,
+          'remarks': remarks,
+        },
         parse: _detail,
       );
 
@@ -277,6 +284,7 @@ class NpRepository {
     required String agreementPath,
     required String pdc1Path,
     required String pdc2Path,
+    required String videoPath,
     required String agreementDate,
     required NpPdcInput pdc1,
     required NpPdcInput pdc2,
@@ -286,6 +294,12 @@ class NpRepository {
       'agreementFile': await MultipartFile.fromFile(agreementPath),
       'pdc1File': await MultipartFile.fromFile(pdc1Path),
       'pdc2File': await MultipartFile.fromFile(pdc2Path),
+      // The server accepts the video by its .mp4/.mov extension, so keep one on the name.
+      'verificationVideo': await MultipartFile.fromFile(
+        videoPath,
+        filename: 'verification-video-${DateTime.now().millisecondsSinceEpoch}'
+            '${videoPath.toLowerCase().endsWith('.mov') ? '.mov' : '.mp4'}',
+      ),
       'agreementDate': agreementDate,
       'details': jsonEncode({'pdc1': pdc1.toJson(), 'pdc2': pdc2.toJson()}),
       if (remarks != null && remarks.trim().isNotEmpty) 'remarks': remarks.trim(),
@@ -294,7 +308,7 @@ class NpRepository {
       final res = await _api.raw.post<Map<String, dynamic>>(
         '$_base/candidates/$id/agreement',
         data: form,
-        options: Options(sendTimeout: const Duration(minutes: 3), receiveTimeout: const Duration(minutes: 3)),
+        options: Options(sendTimeout: const Duration(minutes: 6), receiveTimeout: const Duration(minutes: 3)),
       );
       return _detail(res.data!['data']);
     } on DioException catch (e) {
