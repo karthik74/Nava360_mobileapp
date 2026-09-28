@@ -195,6 +195,70 @@ class TaskRepository {
     );
   }
 
+  List<TeamTaskAssignment> _assignments(dynamic d) {
+    final content = d is List
+        ? d
+        : ((d as Map<String, dynamic>)['content'] as List<dynamic>? ?? const []);
+    return content
+        .map((e) => TeamTaskAssignment.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Submissions waiting for the caller's review: tasks naming them as reviewer, plus
+  /// — on templates with "show review to hierarchy" — their reportees' tasks (TASK_REVIEW).
+  Future<List<TeamTaskAssignment>> pendingReview({int size = 100}) {
+    return _api.get<List<TeamTaskAssignment>>(
+      '/api/tasks/pending-review',
+      query: {'page': 0, 'size': size},
+      parse: _assignments,
+    );
+  }
+
+  /// Review-required submissions of employees in the caller's branches (TASK_REVIEW_BRANCH).
+  /// [view] is PENDING | APPROVED | REJECTED | ALL.
+  Future<List<TeamTaskAssignment>> branchReview({String view = 'PENDING', String? q, int size = 100}) {
+    return _api.get<List<TeamTaskAssignment>>(
+      '/api/tasks/branch-review',
+      query: {
+        'view': view,
+        if (q != null && q.trim().isNotEmpty) 'q': q.trim(),
+        'page': 0,
+        'size': size,
+      },
+      parse: _assignments,
+    );
+  }
+
+  /// Approve / reject as the named reviewer or a manager above the assignee.
+  Future<void> approveAssignment(int assignmentId) =>
+      _api.put<void>('/api/task-assignments/$assignmentId/approve', parse: (_) {});
+
+  Future<void> rejectAssignment(int assignmentId, String reason) => _api.put<void>(
+        '/api/task-assignments/$assignmentId/reject',
+        body: {'reason': reason},
+        parse: (_) {},
+      );
+
+  /// Branch review desk actions (TASK_REVIEW_BRANCH).
+  Future<void> branchApprove(int assignmentId, {String? remarks}) => _api.post<void>(
+        '/api/tasks/branch-review/$assignmentId/approve',
+        body: {'remarks': (remarks == null || remarks.trim().isEmpty) ? null : remarks.trim()},
+        parse: (_) {},
+      );
+
+  Future<void> branchReject(int assignmentId, String reason) => _api.post<void>(
+        '/api/tasks/branch-review/$assignmentId/reject',
+        body: {'reason': reason},
+        parse: (_) {},
+      );
+
+  /// Correct the submitted form details; the task stays in review.
+  Future<void> branchUpdateForm(int assignmentId, String formResponseJson) => _api.put<void>(
+        '/api/tasks/branch-review/$assignmentId/form-response',
+        body: {'formResponse': formResponseJson},
+        parse: (_) {},
+      );
+
   Future<Task> get(int id) {
     return _api.get<Task>(
       '/api/tasks/$id',

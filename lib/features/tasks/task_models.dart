@@ -796,6 +796,9 @@ class TeamTaskAssignment {
     this.createdAt,
     this.updatedAt,
     this.completedAt,
+    this.submittedAt,
+    this.assigneeCode,
+    this.assigneeBranchName,
   });
 
   final int id;
@@ -820,6 +823,11 @@ class TeamTaskAssignment {
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final DateTime? completedAt;
+  final DateTime? submittedAt;
+  final String? assigneeCode;
+
+  /// The assignee's branch — filled on the branch review list.
+  final String? assigneeBranchName;
 
   bool get isOpen =>
       status != TaskStatuses.done &&
@@ -858,5 +866,8 @@ class TeamTaskAssignment {
         createdAt: DateTime.tryParse(j['createdAt'] as String? ?? ''),
         updatedAt: DateTime.tryParse(j['updatedAt'] as String? ?? ''),
         completedAt: DateTime.tryParse(j['completedAt'] as String? ?? ''),
+        submittedAt: DateTime.tryParse(j['submittedAt'] as String? ?? ''),
+        assigneeCode: j['assigneeCode'] as String?,
+        assigneeBranchName: j['assigneeBranchName'] as String?,
       );
 }

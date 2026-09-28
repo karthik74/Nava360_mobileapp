@@ -169,6 +169,9 @@ const List<MobileMenuItem> kMobileMenu = [
   // server further narrows the list to the caller's NP scope. moduleCode
   // matches the web top-level "np" menuConfig key; the per-company on/off
   // switch is App Settings → Features → NP Onboarding.
+  // Task review desk: branch-scoped submissions (TASK_REVIEW_BRANCH) and the caller's own
+  // review queue incl. reportees on "show review to hierarchy" templates (TASK_REVIEW).
+  MobileMenuItem(key: 'hrms.taskReviews', label: 'Task Reviews', route: '/tasks/reviews', icon: Icons.rate_review_rounded, module: MobileModule.hrms, order: 18, requiredPermissions: ['TASK_REVIEW_BRANCH', 'TASK_REVIEW']),
   MobileMenuItem(key: 'hrms.npOnboarding', label: 'NP Onboarding', route: '/np', icon: Icons.person_add_alt_1_rounded, module: MobileModule.hrms, order: 19, requiredPermissions: ['NP_CANDIDATE_VIEW'], moduleCode: 'np', featureFlag: 'FEATURE_NP_ONBOARDING'),
   // Whistleblower is intentionally NOT in the menu — reached via the dashboard's
   // "Report a concern" button (keeps the reporting entry low-profile).

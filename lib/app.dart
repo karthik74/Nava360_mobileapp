@@ -6,6 +6,7 @@ import 'core/api_client.dart';
 import 'core/branding.dart';
 import 'core/nava360_splash_screen.dart';
 import 'core/theme.dart';
+import 'features/tasks/task_reviews_screen.dart';
 import 'features/app_update/in_app_update_gate.dart';
 import 'features/attendance/attendance_screen.dart';
 import 'features/attendance/location_lifecycle.dart';
@@ -530,6 +531,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       // ── NP (Navachetana Prathinidhi) Onboarding ──
       // 13-step BM→AM→DM→OPS workflow over /api/np. Static '/new' precedes
       // the ':id' routes so it isn't captured as an id.
+      GoRoute(
+        path: '/tasks/reviews',
+        builder: (_, __) => const TaskReviewsScreen(),
+      ),
       GoRoute(
         path: '/np',
         builder: (_, __) => const NpDashboardScreen(),
