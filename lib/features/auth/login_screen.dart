@@ -18,6 +18,13 @@ import 'biometric/biometric_controller.dart';
 import 'biometric/biometric_enroll_gate.dart';
 import 'biometric/biometric_service.dart';
 
+/// Demo-only quick logins ("Test FO" / "Test BM"). Compiled in only when a build
+/// passes `--dart-define=DEMO_LOGIN_PASSWORD=...`; a normal build has an empty
+/// password and never shows the buttons, and no password lives in source.
+const _kDemoPassword = String.fromEnvironment('DEMO_LOGIN_PASSWORD');
+const _kDemoFoUser = String.fromEnvironment('DEMO_FO_USER', defaultValue: 'karthik.fo');
+const _kDemoBmUser = String.fromEnvironment('DEMO_BM_USER', defaultValue: 'rajesh.bm');
+
 /// Login screen — port of the design canvas's `LoginScreen`.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key, this.flash});
@@ -48,6 +55,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    await _signIn();
+  }
+
+  /// Fills the form with a demo account and signs in (demo builds only).
+  Future<void> _demoLogin(String username) async {
+    _username.text = username;
+    _password.text = _kDemoPassword;
+    await _signIn();
+  }
+
+  Future<void> _signIn() async {
     FocusScope.of(context).unfocus();
     await ref
         .read(authControllerProvider.notifier)
@@ -324,6 +342,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 busy: _bioBusy,
                                 onTap: () => _biometricLogin(auto: false),
                               ),
+                            if (_kDemoPassword.isNotEmpty) ...[
+                              const SizedBox(height: 14),
+                              _DemoLoginRow(
+                                enabled: !(loading || _justSignedIn),
+                                onFieldOfficer: () => _demoLogin(_kDemoFoUser),
+                                onBranchManager: () => _demoLogin(_kDemoBmUser),
+                              ),
+                            ],
                             const SizedBox(height: 16),
                             Center(
                               child: InkWell(
@@ -964,6 +990,59 @@ class _GradientAuthButton extends StatelessWidget {
 /// - Case A (enrolled + usable): an "or" divider + "Login with Fingerprint/Face ID".
 /// - Case C (enrolled but nothing enrolled on device): a hint to add one.
 /// - Case B (no hardware) / not enrolled here: nothing.
+/// The two demo quick-login buttons, under a small "Demo" caption so nobody
+/// mistakes them for a real sign-in option.
+class _DemoLoginRow extends StatelessWidget {
+  const _DemoLoginRow({
+    required this.enabled,
+    required this.onFieldOfficer,
+    required this.onBranchManager,
+  });
+
+  final bool enabled;
+  final VoidCallback onFieldOfficer;
+  final VoidCallback onBranchManager;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget button(String label, IconData icon, VoidCallback onTap) => Expanded(
+          child: OutlinedButton.icon(
+            onPressed: enabled ? onTap : null,
+            icon: Icon(icon, size: 18),
+            label: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              side: BorderSide(color: AppColors.primary.withValues(alpha: 0.5)),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        );
+
+    return Column(
+      children: [
+        const Text(
+          'DEMO LOGIN',
+          style: TextStyle(
+            fontSize: 11,
+            letterSpacing: 1.2,
+            fontWeight: FontWeight.w700,
+            color: AppColors.muted,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            button('Test FO', Icons.directions_walk_rounded, onFieldOfficer),
+            const SizedBox(width: 10),
+            button('Test BM', Icons.storefront_rounded, onBranchManager),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class _BiometricLoginSection extends StatelessWidget {
   const _BiometricLoginSection({
     required this.state,

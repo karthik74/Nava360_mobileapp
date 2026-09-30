@@ -44,6 +44,12 @@ class MobileMenuItem {
   /// the deployment turns it off via /api/public/branding.
   final String? featureFlag;
 
+  /// Opt-in flag: show only when the backend explicitly publishes
+  /// [featureFlag] as `true`. For features whose endpoints older backends do
+  /// not have — a missing key there must hide the entry, not show a screen
+  /// that can only fail. Other flags keep "on unless explicitly false".
+  final bool featureFlagDefaultOff;
+
   /// Backend module code (web menuConfig top-level key, e.g. `helpdesk`)
   /// gating this item through ENABLED_MODULES. Defaults to the code of the
   /// item's own [module]; set explicitly for items that belong to a different
@@ -64,6 +70,7 @@ class MobileMenuItem {
     this.mobileAllowed = true,
     this.showInBottomNav = false,
     this.featureFlag,
+    this.featureFlagDefaultOff = false,
     this.moduleCode,
   });
 }
@@ -110,6 +117,14 @@ const List<MobileMenuItem> kMobileMenu = [
   // the company turns the feature off, and further narrowed server-side to the
   // employee's own branches and book.
   MobileMenuItem(key: 'hrms.nearbyCustomers', label: 'Nearby Customers', route: '/nearby-customers', icon: Icons.person_pin_circle_rounded, module: MobileModule.hrms, order: 6, requiredPermissions: ['CUSTOMER_NEARBY_VIEW'], featureFlag: 'FEATURE_NEARBY_CUSTOMERS'),
+  // Collections field work, next to Nearby Customers. No permission gate on
+  // purpose: field officers hold no CRM_* permission, and /api/crm-ptp/mine
+  // and /api/ftod/mine scope every caller server-side (own customers → branch
+  // → all). Each deployment switches them on via its feature flag — opt-in,
+  // since that flag is the only gate and a backend not yet upgraded publishes
+  // no key at all (and has no /api/crm-ptp or /api/ftod to call).
+  MobileMenuItem(key: 'hrms.ptpFollowups', label: 'PTP Follow-ups', route: '/ptp', icon: Icons.handshake_rounded, module: MobileModule.hrms, order: 6, featureFlag: 'FEATURE_CRM_PTP', featureFlagDefaultOff: true),
+  MobileMenuItem(key: 'hrms.ftodCollections', label: 'FTOD Collections', route: '/ftod', icon: Icons.calendar_month_rounded, module: MobileModule.hrms, order: 6, featureFlag: 'FEATURE_FTOD', featureFlagDefaultOff: true),
   // Chats is a bottom-nav root (order 2) — NOT a drawer/HRMS-grid item.
   // showInBottomNav also excludes it from menuFor()/allMenuItems(), so it no
   // longer appears in the left navigation menu.
@@ -238,8 +253,11 @@ bool _visible(MobileMenuItem m, AuthUser? user, bool isManager) {
   final branding = Branding.current;
   final code = m.moduleCode ?? _moduleCodeOf(m.module);
   if (code != null && !branding.moduleEnabled(code)) return false;
-  if (m.featureFlag != null && !branding.featureEnabled(m.featureFlag!)) {
-    return false;
+  if (m.featureFlag != null) {
+    final on = m.featureFlagDefaultOff
+        ? branding.features[m.featureFlag!] == true
+        : branding.featureEnabled(m.featureFlag!);
+    if (!on) return false;
   }
   if (!m.employeeAllowed && !isManager) return false; // manager-only gate
   if (!m.managerAllowed && isManager) return false;

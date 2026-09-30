@@ -163,6 +163,14 @@ class PushService {
   /// (e.g. running on a dev device without `google-services.json`).
   bool get isAvailable => _firebaseReady && _localReady;
 
+  /// True once this device's FCM token reached the backend, i.e. the server
+  /// can really push here. [isAvailable] alone is not proof: on an iOS
+  /// simulator Firebase initialises but no APNs token ever arrives, so no push
+  /// is delivered. The demo alert poller stands down while this is true, so
+  /// one alert never shows as two banners.
+  bool get isPushRegistered => _tokenRegistered;
+  bool _tokenRegistered = false;
+
   /// One-shot initialisation. Brings up Firebase, local notifications and
   /// the Android notification channel. Catches and logs everything so a
   /// misconfigured device cannot prevent the app from booting.
@@ -186,6 +194,17 @@ class PushService {
               AndroidFlutterLocalNotificationsPlugin>()
           ?.createNotificationChannel(_androidChannel);
       _localReady = true;
+
+      // A banner this app raised itself (e.g. an FTOD/PTP alert) that is tapped
+      // after iOS has closed the app relaunches it WITHOUT calling
+      // onDidReceiveNotificationResponse — the tap only survives in the launch
+      // details. Replay it so the tap still lands on its screen; the route waits
+      // in _pendingRoute until the router registers onOpenRoute.
+      final launch = await _local.getNotificationAppLaunchDetails();
+      final launchResponse = launch?.notificationResponse;
+      if ((launch?.didNotificationLaunchApp ?? false) && launchResponse != null) {
+        _onLocalTap(launchResponse);
+      }
     } catch (e) {
       debugPrint('Local notifications init failed: $e');
     }
@@ -297,6 +316,7 @@ class PushService {
     _openedSub = null;
     _tokenRefreshSub = null;
     _started = false;
+    _tokenRegistered = false;
   }
 
   // ── Notification tap → open chat ──────────────────────────────────────────
@@ -443,12 +463,13 @@ class PushService {
       // Non-fatal — registration proceeds without version info.
     }
 
-    await _repo.registerDeviceToken(
+    final ok = await _repo.registerDeviceToken(
       token: token,
       platform: platform,
       appVersionName: versionName,
       appVersionCode: versionCode,
     );
+    if (ok) _tokenRegistered = true;
   }
 
   /// Routes a foreground message: silent control messages (e.g. a live-location
@@ -518,6 +539,42 @@ class PushService {
           ),
         ),
         payload: message.data.isEmpty ? null : jsonEncode(message.data),
+      );
+    } catch (e) {
+      debugPrint('Local notification show failed: $e');
+    }
+  }
+
+  /// Shows a banner raised by the app itself rather than by Firebase — used by
+  /// the demo alert poller ([demoAlertPollerProvider]). Tapping it opens [route].
+  Future<void> showLocal({
+    required int id,
+    required String title,
+    required String body,
+    String? route,
+  }) async {
+    if (!_localReady) return;
+    try {
+      await _local.show(
+        id,
+        title,
+        body,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _androidChannel.id,
+            _androidChannel.name,
+            channelDescription: _androidChannel.description,
+            importance: Importance.high,
+            priority: Priority.high,
+            icon: '@mipmap/ic_launcher',
+          ),
+          iOS: const DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+          ),
+        ),
+        payload: route == null ? null : jsonEncode({'route': route}),
       );
     } catch (e) {
       debugPrint('Local notification show failed: $e');

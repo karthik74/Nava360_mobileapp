@@ -176,13 +176,20 @@ class BrandingNotifier extends Notifier<Branding> {
 
   /// Cache-first load, then background refresh — mirrors the web app.
   Future<void> bootstrap() async {
-    final cached = await SecureStorage.readBrandingJson();
-    if (cached != null && cached.isNotEmpty) {
-      try {
-        _apply(Branding.fromJson(jsonDecode(cached) as Map<String, dynamic>));
-      } catch (_) {
-        // Corrupt cache — ignore; the network refresh below replaces it.
+    try {
+      final cached = await SecureStorage.readBrandingJson();
+      if (cached != null && cached.isNotEmpty) {
+        try {
+          _apply(Branding.fromJson(jsonDecode(cached) as Map<String, dynamic>));
+        } catch (_) {
+          // Corrupt cache — ignore; the network refresh below replaces it.
+        }
       }
+    } finally {
+      // The router holds the splash until this flips: a restored session must
+      // not be routed on Branding.defaults (no feature flags) just because the
+      // secure-storage read lost the race with the auth restore.
+      ref.read(brandingCacheReadProvider.notifier).state = true;
     }
     await refresh();
   }
@@ -210,3 +217,7 @@ class BrandingNotifier extends Notifier<Branding> {
 
 final brandingProvider =
     NotifierProvider<BrandingNotifier, Branding>(BrandingNotifier.new);
+
+/// True once the cached branding (and its feature flags) has been read at
+/// startup — whether or not a cache existed. The router waits on it at /splash.
+final brandingCacheReadProvider = StateProvider<bool>((_) => false);

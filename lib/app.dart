@@ -26,12 +26,18 @@ import 'features/requisitions/requisitions_screen.dart';
 import 'features/support/help_support_screen.dart';
 import 'features/customers/customers_screen.dart';
 import 'features/customers/nearby_customers_screen.dart';
+import 'features/ftod/ftod_screen.dart';
+import 'features/ptp/ptp_models.dart' show PtpFilter;
+import 'features/ptp/ptp_screen.dart';
 import 'features/home/dashboard_screen.dart';
 import 'features/home/home_shell.dart';
 import 'features/home/module_screens.dart';
+import 'features/insights/opening_insights_screen.dart';
+import 'features/insights/opening_insights_trigger.dart';
 import 'features/leaves/leaves_screen.dart';
 import 'features/notifications/notifications_screen.dart';
 import 'features/notifications/push_lifecycle.dart';
+import 'features/notifications/demo_alert_poller.dart';
 import 'features/notifications/push_service.dart';
 import 'features/permissions/permission_gate.dart';
 import 'features/profile/business_card_screen.dart';
@@ -118,17 +124,23 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       final auth = ref.read(authControllerProvider);
       final welcome = ref.read(welcomeSeenProvider);
 
-      // Still bootstrapping either flag — sit on the splash.
-      if (auth.isLoading || welcome.isLoading) return '/splash';
+      // Still bootstrapping either flag — or the cached branding whose feature
+      // flags decide where a restored session lands — sit on the splash.
+      if (auth.isLoading || welcome.isLoading || !ref.read(brandingCacheReadProvider)) {
+        return '/splash';
+      }
 
       final loggedIn = auth.asData?.value != null;
       final welcomeSeen = welcome.asData?.value ?? false;
       final loc = state.matchedLocation;
 
-      // Signed-in users never see welcome/login/splash.
+      // Signed-in users never see welcome/login/splash. Leaving them means a
+      // fresh login or a restored session: land on /home, or on the opening
+      // insights intro when FEATURE_OPENING_INSIGHTS is on (it goes to /home
+      // itself when done). See opening_insights_trigger.dart.
       if (loggedIn) {
         if (loc == '/welcome' || loc == '/login' || loc == '/splash') {
-          return '/home';
+          return ref.read(openingInsightsTriggerProvider).entryLocation();
         }
         return null;
       }
@@ -172,6 +184,20 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/first-login',
         builder: (_, __) => const FirstLoginScreen(),
+      ),
+      // Opening-insights intro (MTD disbursement · FTOD · PTP + yesterday's
+      // FTD dues) shown after login / on resume; stays until the user taps its
+      // button. Fades in and out; never shown on top of itself.
+      GoRoute(
+        path: kOpeningInsightsRoute,
+        pageBuilder: (_, state) => CustomTransitionPage<void>(
+          key: state.pageKey,
+          transitionDuration: const Duration(milliseconds: 350),
+          reverseTransitionDuration: const Duration(milliseconds: 350),
+          transitionsBuilder: (_, animation, __, child) =>
+              FadeTransition(opacity: animation, child: child),
+          child: const OpeningInsightsScreen(),
+        ),
       ),
       GoRoute(
         path: '/profile',
@@ -222,6 +248,24 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/nearby-customers',
         builder: (_, __) => const NearbyCustomersScreen(),
+      ),
+      // Collections follow-ups, full-screen like the map so a push/in-app
+      // notification tap lands straight on the customer list. '/ptp' takes an
+      // optional ?filter=DUE_TODAY|DUE_TOMORROW|BROKEN|UPCOMING|KEPT so a
+      // digest can open on the matching chip.
+      GoRoute(
+        path: '/ptp',
+        builder: (_, state) => PtpScreen(
+          initialFilter: PtpFilter.fromApi(state.uri.queryParameters['filter']),
+        ),
+      ),
+      // '/ftod' takes an optional ?month=YYYY-MM: an evening digest about late
+      // money against last month's dues opens on that month, not this one.
+      GoRoute(
+        path: '/ftod',
+        builder: (_, state) => FtodScreen(
+          initialMonth: state.uri.queryParameters['month'],
+        ),
       ),
       // NOTE: /chats (the list) lives INSIDE the ShellRoute below so it renders
       // as a bottom-nav tab with the persistent nav bar. Only the thread
@@ -593,6 +637,7 @@ class _GoRouterRefresh extends ChangeNotifier {
   _GoRouterRefresh(Ref ref) {
     ref.listen(authControllerProvider, (_, __) => notifyListeners());
     ref.listen(welcomeSeenProvider, (_, __) => notifyListeners());
+    ref.listen(brandingCacheReadProvider, (_, __) => notifyListeners());
   }
 }
 
@@ -618,9 +663,23 @@ class HrmsApp extends ConsumerWidget {
     // Rebuild the whole tree (incl. ThemeData built from the runtime-mutable
     // AppColors tokens) whenever fresh company branding arrives.
     final branding = ref.watch(brandingProvider);
+    // Warm the opening-insights character's first frame so the intro's
+    // animation starts on its first frame (no-op once cached).
+    if (openingInsightsEnabled(branding)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) precacheOpeningInsightsCharacter(context);
+      });
+    }
     // Activate the auth → side-effect bindings once at the app root.
     ref.watch(locationLifecycleProvider);
     ref.watch(pushLifecycleProvider);
+    ref.watch(demoAlertPollerProvider);
+    // Opening-insights intro: resume-after-5-min trigger + notification-tap
+    // precedence. Every push tap below goes through it so a tap skips/ends the
+    // intro and still lands on its screen.
+    final insights = ref.watch(openingInsightsTriggerProvider)
+      ..attachRouter(router);
+    void openFromPush(String route) => insights.openFromNotification(route);
     // On any 401, clear credentials and bounce to /login. Set once (??=) so
     // rebuilds don't re-wire it. Read the notifier lazily inside the callback so
     // we always hit the live controller.
@@ -661,10 +720,10 @@ class HrmsApp extends ConsumerWidget {
       });
     }
     // Let push-notification taps deep-link into a chat thread.
-    ref.read(pushServiceProvider).onOpenChat = (id) => router.push('/chats/$id');
+    ref.read(pushServiceProvider).onOpenChat = (id) => openFromPush('/chats/$id');
     // …and into an announcement.
     ref.read(pushServiceProvider).onOpenAnnouncement =
-        (id) => router.push('/announcements/$id');
+        (id) => openFromPush('/announcements/$id');
     // Every announcement-push tap is reported (fire-and-forget) so admins can
     // see who clicked — including notification-only nudges that never appear
     // in the announcements list.
@@ -676,11 +735,11 @@ class HrmsApp extends ConsumerWidget {
     };
     // …and into a company policy.
     ref.read(pushServiceProvider).onOpenPolicy =
-        (id) => router.push('/policies/$id');
+        (id) => openFromPush('/policies/$id');
     // …and into the employee's assets (asset assignment / warranty pushes).
-    ref.read(pushServiceProvider).onOpenAssets = () => router.push('/assets');
+    ref.read(pushServiceProvider).onOpenAssets = () => openFromPush('/assets');
     // …and to any explicit in-app route a push carries (announcement actions).
-    ref.read(pushServiceProvider).onOpenRoute = (route) => router.push(route);
+    ref.read(pushServiceProvider).onOpenRoute = openFromPush;
     return MaterialApp.router(
       title: branding.productName,
       debugShowCheckedModeBanner: false,

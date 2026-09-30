@@ -128,6 +128,10 @@ flutter:
     # transparent ring-only and centre-only PNGs for the ring-spin effect.
     - assets/nava360_ring.png
     - assets/nava360_center.png
+    # Opening-insights intro character: animated WebP with transparency (both
+    # platforms decode it natively; the WebM/VP9-alpha cut-out plays on neither
+    # iOS nor Android's video player with its transparency intact).
+    - assets/insights/nava360_character.webp
 
   fonts:
     # Business-card name typeface (reference design uses Playfair Display 700).
