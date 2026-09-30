@@ -438,6 +438,9 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
   @override
   Widget build(BuildContext context) {
     final user = ref.watch(authUserProvider);
+    // Menu visibility reads the server feature flags; rebuild when the background
+    // branding refresh lands so a flag switched on shows without an app restart.
+    ref.watch(brandingProvider);
     final mq = MediaQuery.of(context);
 
     final pendingLeaves =

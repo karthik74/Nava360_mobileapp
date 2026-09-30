@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/branding.dart';
 import '../../core/navigation/mobile_menu_config.dart';
 import '../attendance/sign_out_guard.dart';
 import '../auth/auth_controller.dart';
@@ -25,6 +26,8 @@ class ModuleGridScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(authUserProvider);
+    // Rebuild when the branding refresh lands — menu entries follow its feature flags.
+    ref.watch(brandingProvider);
     final items = menuFor(module, user);
     final theme = Theme.of(context);
 
@@ -165,6 +168,7 @@ class MoreScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(authUserProvider);
+    ref.watch(brandingProvider);
     final items = menuFor(MobileModule.more, user);
     final theme = Theme.of(context);
     return SafeArea(
