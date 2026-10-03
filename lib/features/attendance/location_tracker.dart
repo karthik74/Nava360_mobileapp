@@ -1,17 +1,24 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/api_client.dart';
 import '../../core/branding.dart';
 import '../auth/biometric/device_info_service.dart';
+import '../customers/nearby_customer_models.dart';
 import 'location_ping_models.dart';
 import 'location_ping_store.dart';
 import 'location_repository.dart';
+import 'tracking/tracking_engine.dart';
+import 'tracking/tracking_task.dart';
 
 /// Public state of the tracker, exposed via Riverpod.
 class LocationTrackerState {
@@ -22,6 +29,10 @@ class LocationTrackerState {
   final int bufferedCount;
   final int sentCount;
   final String? lastError;
+  /// Device location services are currently on (as last reported).
+  final bool locationEnabled;
+  /// The background service holds the session (Android) rather than this process.
+  final bool backgroundService;
 
   const LocationTrackerState({
     required this.active,
@@ -31,6 +42,8 @@ class LocationTrackerState {
     required this.bufferedCount,
     required this.sentCount,
     required this.lastError,
+    this.locationEnabled = true,
+    this.backgroundService = false,
   });
 
   static const idle = LocationTrackerState(
@@ -52,6 +65,8 @@ class LocationTrackerState {
     int? sentCount,
     String? lastError,
     bool clearError = false,
+    bool? locationEnabled,
+    bool? backgroundService,
   }) {
     return LocationTrackerState(
       active: active ?? this.active,
@@ -61,95 +76,64 @@ class LocationTrackerState {
       bufferedCount: bufferedCount ?? this.bufferedCount,
       sentCount: sentCount ?? this.sentCount,
       lastError: clearError ? null : (lastError ?? this.lastError),
+      locationEnabled: locationEnabled ?? this.locationEnabled,
+      backgroundService: backgroundService ?? this.backgroundService,
     );
   }
+
+  LocationTrackerState fromSnapshot(TrackingSnapshot s) => copyWith(
+        active: s.active,
+        employeeId: s.employeeId,
+        lastCapturedAt: s.lastCapturedAt,
+        lastFlushedAt: s.lastFlushedAt,
+        bufferedCount: s.bufferedCount,
+        sentCount: s.sentCount,
+        lastError: s.lastError,
+        clearError: s.lastError == null,
+        locationEnabled: s.locationEnabled,
+      );
 }
 
-/// Captures GPS samples on an adaptive schedule while the employee is "punched in"
-/// and posts them to the server in batches.
+/// Controls GPS tracking for the "punched in" employee.
 ///
-/// Cadence (tuned for an accurate travel path while limiting battery use):
-///   - Default                  → 5 minutes
-///   - Moving fast (>3 m/s)     → 1 minute
-///   - Stopped (<0.5 m/s)       → 30 minutes
-///   - Distance-triggered       → 75 m moved
-///   - Hard cap                 → at most one ping per 15 s
+/// On Android the capture loop runs in a native foreground service with its
+/// own Dart isolate (`tracking/tracking_task.dart`), so it keeps recording when
+/// the app is swiped away or killed by the launcher and comes back by itself
+/// after a reboot. This class only starts/stops that service, relays commands
+/// to it and mirrors its snapshots into Riverpod state.
 ///
-/// The tracker self-flushes when its buffer reaches [_flushAtCount] or
-/// [_flushIntervalSeconds] have passed since the last successful upload.
+/// On iOS (and if the service ever fails to start on Android) the same
+/// [TrackingEngine] runs in-process as a fallback.
 class LocationTracker extends StateNotifier<LocationTrackerState>
     with WidgetsBindingObserver {
   LocationTracker(this._repo) : super(LocationTrackerState.idle) {
-    // Observe app lifecycle so we can self-heal (resume a killed session) and
-    // drain the offline queue the moment the app returns to the foreground.
     WidgetsBinding.instance.addObserver(this);
+    if (_useService) {
+      FlutterForegroundTask.addTaskDataCallback(_onServiceData);
+    }
   }
 
   final LocationRepository _repo;
-
-  /// Durable offline queue — every captured ping is persisted here and removed
-  /// only once the server confirms it, so the trail survives app restarts / no
-  /// internet and syncs when connectivity returns.
   final LocationPingStore _store = LocationPingStore.instance;
 
-  // ---- Tunables ----
-  // Compiled-in fallbacks. The live values come from the server
-  // (/api/customers/nearby/config) via [applyConfig], so cadence can be retuned
-  // for a company without an app release.
-  static const Duration _intervalDefault = Duration(minutes: 5);
-  static const Duration _intervalMoving = Duration(minutes: 1);
-  static const Duration _intervalStopped = Duration(minutes: 30);
-  static const double _movingThresholdMps = 3.0;
-  static const double _stoppedThresholdMps = 0.5;
-  static const int _distanceFilterMeters = 75;
-  static const int _flushAtCount = 5;
-  static const int _flushIntervalSeconds = 120;
-  static const Duration _tick = Duration(seconds: 15);
-  /// Minimum gap between two captured route pings (burst guard).
-  static const Duration _minCaptureGap = Duration(seconds: 15);
-  // How often the foreground timer fires a location-on/off heartbeat.
-  static const Duration _statusInterval = Duration(minutes: 3);
-  // Minimum gap between heartbeats (the location stream also triggers them, so they
-  // keep flowing in the background where Dart timers are paused).
-  static const Duration _statusMinGap = Duration(seconds: 90);
-  // OS location-update interval. Drives the stream on a timer (not just on movement)
-  // so heartbeats keep flowing in the background even when the device is stationary.
-  static const Duration _streamInterval = Duration(minutes: 1);
+  static bool get _useService =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
-  // ---- Persistent key (so we can resume after a process restart) ----
+  // Persistent key: which employee's session is open (also read by the
+  // sign-out guard path and kept for compatibility with older builds).
   static const _kActiveEmployee = 'tracker.activeEmployeeId';
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
 
-  // ---- Runtime ----
-  StreamSubscription<Position>? _streamSub;
-  Timer? _ticker;
-  Timer? _statusTicker;
-  Position? _lastPosition;
-  Position? _lastCapturedPosition;
-  DateTime? _lastCaptureAt;
-  DateTime? _lastStatusSentAt;
-  final List<LocationPing> _buffer = [];
-  Future<void>? _flushInFlight;
+  /// In-process engine (iOS, or Android fallback).
+  TrackingEngine? _localEngine;
+  Timer? _localTicker;
+  Completer<void>? _stopAck;
+  bool _serviceInitialised = false;
+  TrackingConfig _cfg = TrackingConfig.fallback;
 
-  /// Server-tuned cadence; falls back to the constants above until it arrives.
-  Duration _cfgMoving = _intervalMoving;
-  Duration _cfgStopped = _intervalStopped;
-  Duration _cfgNearCustomer = const Duration(seconds: 30);
-  int _cfgDistanceFilterMeters = _distanceFilterMeters;
-  double _cfgNearCustomerRadiusMeters = 200;
-
-  /// Coordinates of nearby customers, refreshed by the Nearby Customers screen.
-  /// Used only to decide when to sample faster — never uploaded anywhere.
-  List<({double lat, double lng})> _nearbyCustomerPoints = const [];
-
-  /// Stable id for this device, attached to every fix so the backend can tell
-  /// two phones sharing one login apart.
-  String? _deviceId;
-
-  /// Monotonic counter behind the per-sample idempotency key.
-  int _pingSeq = 0;
+  // ── Public API ───────────────────────────────────────────────────────────
 
   /// Start (or noop if already running for the same employee).
   Future<void> start(int employeeId) async {
@@ -160,27 +144,15 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
 
     await _storage.write(key: _kActiveEmployee, value: '$employeeId');
 
-    // Stamp every fix with this install's device id. Reuses the same persisted
-    // UUID as biometric login — no hardware identifier, no PII — so the backend
-    // can tell two phones on one login apart without learning anything new.
+    String? deviceId;
     try {
-      _deviceId = (await DeviceInfoService().resolve()).deviceId;
+      deviceId = (await DeviceInfoService().resolve()).deviceId;
     } catch (_) {
       // Optional context; tracking proceeds without it.
     }
 
-    final settings = _platformSettings();
-    _streamSub = Geolocator.getPositionStream(locationSettings: settings)
-        .listen(_onPosition, onError: _onStreamError);
-    _ticker = Timer.periodic(_tick, (_) => _maybeCapture());
-    // Foreground heartbeat. The location stream also fires heartbeats (see
-    // _onPosition) so they keep flowing while the app is backgrounded. Also
-    // attempt a flush here so queued pings sync even when the device is
-    // stationary (no new captures) after connectivity is restored.
-    _statusTicker = Timer.periodic(_statusInterval, (_) {
-      _maybeSendStatus(tracking: true);
-      _maybeAutoFlush();
-    });
+    // Best-effort server cadence, bounded so a slow network can't delay check-in.
+    await _loadConfig().timeout(const Duration(seconds: 4), onTimeout: () {});
 
     state = state.copyWith(
       active: true,
@@ -188,111 +160,98 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
       bufferedCount: 0,
       sentCount: 0,
       clearError: true,
+      backgroundService: false,
     );
-    _lastStatusSentAt = DateTime.now();
-    unawaited(_sendStatus(tracking: true)); // report ON immediately
 
-    // Re-load any pings persisted but not yet uploaded (a previous session that
-    // ended offline, or an app kill) so they sync as soon as we're online again.
-    try {
-      final persisted = await _store.load(employeeId);
-      if (persisted.isNotEmpty) {
-        _buffer.insertAll(0, persisted); // oldest first
-        state = state.copyWith(bufferedCount: _buffer.length);
-        _maybeAutoFlush();
+    if (_useService) {
+      final ok = await _startService(employeeId, deviceId);
+      if (ok) {
+        state = state.copyWith(backgroundService: true);
+        return;
       }
-    } catch (_) {
-      // A read failure must not block tracking.
+      // Fall back to in-process tracking so the check-in still goes ahead.
     }
-
-    // Try to capture an immediate baseline sample so the user sees activity right away.
-    try {
-      final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 10),
-      );
-      _onPosition(pos);
-    } catch (_) {
-      // Initial fix can fail (cold start, indoors); the stream will catch up.
-    }
+    await _startLocal(employeeId, deviceId);
   }
 
   /// Stop tracking. Flushes any buffered pings unless [flushBuffer] is false.
   Future<void> stop({bool flushBuffer = true}) async {
-    await _streamSub?.cancel();
-    _ticker?.cancel();
-    _statusTicker?.cancel();
-    _streamSub = null;
-    _ticker = null;
-    _statusTicker = null;
-
-    // Report that tracking has stopped (so HR sees "checked out", not a stale state).
-    await _sendStatus(tracking: false);
-
-    _lastPosition = null;
-    _lastCapturedPosition = null;
-    _lastCaptureAt = null;
-    _lastStatusSentAt = null;
-
-    if (flushBuffer && _buffer.isNotEmpty && state.employeeId != null) {
-      await _flush();
-    } else {
-      _buffer.clear();
+    final wasActive = state.active;
+    if (_useService && (wasActive || await FlutterForegroundTask.isRunningService)) {
+      await _stopService(flush: flushBuffer);
     }
-
+    if (_localEngine != null) {
+      _localTicker?.cancel();
+      _localTicker = null;
+      final e = _localEngine!;
+      _localEngine = null;
+      try {
+        await e.stop(flush: flushBuffer);
+      } catch (_) {}
+    }
     await _storage.delete(key: _kActiveEmployee);
-
     state = LocationTrackerState.idle;
   }
 
-  /// Best-effort heartbeat reporting whether device location/GPS is on right now.
-  Future<void> _sendStatus({required bool tracking}) async {
-    if (state.employeeId == null) return;
-    try {
-      final enabled = await Geolocator.isLocationServiceEnabled();
-      final perm = await Geolocator.checkPermission();
-      final granted = perm == LocationPermission.always ||
-          perm == LocationPermission.whileInUse;
-      await _repo.sendStatus(
-        locationEnabled: enabled,
-        permissionGranted: granted,
-        tracking: tracking,
-        latitude: _lastPosition?.latitude,
-        longitude: _lastPosition?.longitude,
-      );
-    } catch (_) {
-      // Best-effort — ignore network / permission errors.
-    }
-  }
-
-  /// On app start: if a tracking session was persisted, reattach to it.
+  /// On app start: if a tracking session was persisted, reattach to it (the
+  /// service may well still be running) or restart it.
   Future<void> restoreIfActive() async {
     final raw = await _storage.read(key: _kActiveEmployee);
-    if (raw == null) return;
-    final empId = int.tryParse(raw);
+    final empId = raw == null ? null : int.tryParse(raw);
+
+    if (_useService) {
+      final running = await FlutterForegroundTask.isRunningService;
+      if (running) {
+        final serviceEmp =
+            await FlutterForegroundTask.getData<int>(key: TrackingKeys.employeeId);
+        if (serviceEmp == null) {
+          // Orphaned service (checked out, but the stop never completed).
+          await FlutterForegroundTask.stopService();
+        } else {
+          _initService();
+          state = state.copyWith(
+            active: true,
+            employeeId: serviceEmp,
+            backgroundService: true,
+            clearError: true,
+          );
+          FlutterForegroundTask.sendDataToTask(TrackingMsg.encode(TrackingMsg.cmdSnapshot));
+          FlutterForegroundTask.sendDataToTask(TrackingMsg.encode(TrackingMsg.cmdFlush));
+          if (empId == null) {
+            await _storage.write(key: _kActiveEmployee, value: '$serviceEmp');
+          }
+          return;
+        }
+      }
+    }
     if (empId == null) return;
     await start(empId);
   }
 
-  /// Uploads any pings left in the durable offline queue — e.g. captured while
-  /// the employee had no internet and then checked out, so no tracking session
-  /// is active to drain them. Call once on app start / when back online. The
-  /// currently-tracked employee (if any) is skipped, since [start]/[_flush]
-  /// already own that queue and draining it here would race.
+  /// Uploads any pings left in the durable offline queue by an earlier session
+  /// (checked out offline, app killed before the final upload). The employee
+  /// whose session is running is skipped — the engine owns that queue.
   Future<void> syncPendingPings() async {
     try {
+      await _store.purgeStale();
       final grouped = await _store.loadGrouped();
       for (final entry in grouped.entries) {
         final empId = entry.key;
         final pings = entry.value;
-        if (pings.isEmpty || empId == state.employeeId) continue;
-        try {
-          await _repo.uploadBatch(
-            LocationPingBatch(employeeId: empId, pings: pings),
-          );
-          await _store.removeOldest(empId, pings.length);
-        } catch (_) {
-          // Still offline — leave them queued for the next attempt.
+        if (pings.isEmpty || (state.active && empId == state.employeeId)) continue;
+        for (var i = 0; i < pings.length; i += 200) {
+          final slice = pings.sublist(i, (i + 200).clamp(0, pings.length));
+          try {
+            await _repo.uploadBatch(LocationPingBatch(employeeId: empId, pings: slice));
+            await _store.removeConfirmed(empId, slice);
+          } on ApiException catch (e) {
+            // Not ours to upload with this login (400/403) or offline: leave
+            // them for the owner's next login; stale ones age out above.
+            if (e.statusCode == 401) return;
+            break;
+          } catch (_) {
+            break; // offline — next time
+          }
         }
       }
     } catch (_) {
@@ -300,24 +259,26 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
     }
   }
 
-  /// When the app returns to the foreground: drain the offline queue promptly
-  /// and, if a session should be running but was killed by the OS, resume it —
-  /// so no ping sits unsynced and tracking self-heals without a manual re-start.
+  /// When the app returns to the foreground: nudge an upload and, if a session
+  /// should be running but isn't, bring it back.
   @override
   void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
     if (lifecycle != AppLifecycleState.resumed) return;
     if (state.active) {
-      _maybeAutoFlush(); // push the active employee's buffered/queued pings
+      if (state.backgroundService) {
+        FlutterForegroundTask.sendDataToTask(TrackingMsg.encode(TrackingMsg.cmdFlush));
+        FlutterForegroundTask.sendDataToTask(TrackingMsg.encode(TrackingMsg.cmdSnapshot));
+        unawaited(_verifyServiceAlive());
+      } else {
+        unawaited(_localEngine?.flushNow());
+      }
     } else {
-      unawaited(restoreIfActive()); // a killed session? bring it back
+      unawaited(restoreIfActive());
     }
-    unawaited(syncPendingPings()); // leftover queues from prior sessions
+    unawaited(syncPendingPings());
   }
 
-  // -------------------- internals --------------------
-
-  /// Applies server-side tuning. Safe to call repeatedly; takes effect on the
-  /// next capture decision.
+  /// Applies server-side tuning. Safe to call repeatedly.
   void applyConfig({
     int? movingSeconds,
     int? stationarySeconds,
@@ -325,185 +286,236 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
     int? nearCustomerRadiusMeters,
     int? minDisplacementMeters,
   }) {
-    if (movingSeconds != null && movingSeconds > 0) {
-      _cfgMoving = Duration(seconds: movingSeconds);
-    }
-    if (stationarySeconds != null && stationarySeconds > 0) {
-      _cfgStopped = Duration(seconds: stationarySeconds);
-    }
-    if (nearCustomerSeconds != null && nearCustomerSeconds > 0) {
-      _cfgNearCustomer = Duration(seconds: nearCustomerSeconds);
-    }
-    if (nearCustomerRadiusMeters != null && nearCustomerRadiusMeters > 0) {
-      _cfgNearCustomerRadiusMeters = nearCustomerRadiusMeters.toDouble();
-    }
-    if (minDisplacementMeters != null && minDisplacementMeters > 0) {
-      _cfgDistanceFilterMeters = minDisplacementMeters;
+    _cfg = _cfg.merge(
+      movingSeconds: movingSeconds,
+      stationarySeconds: stationarySeconds,
+      nearCustomerSeconds: nearCustomerSeconds,
+      nearCustomerRadiusMeters: nearCustomerRadiusMeters,
+      minDisplacementMeters: minDisplacementMeters,
+    );
+    _localEngine?.applyConfig(_cfg);
+    if (state.backgroundService) {
+      FlutterForegroundTask.sendDataToTask(
+          TrackingMsg.encode(TrackingMsg.cmdConfig, {'config': _cfg.toJson()}));
     }
   }
 
   /// Tells the tracker where the employee's nearby customers are, so it can
   /// sample faster when close to one. Coordinates stay on the device.
   void setNearbyCustomerPoints(List<({double lat, double lng})> points) {
-    _nearbyCustomerPoints = points;
-  }
-
-  /// True when the last fix is within the "near a customer" radius.
-  ///
-  /// This is what makes short visits detectable at all: at the everyday
-  /// stationary cadence a two-minute stop produces at most one fix, and one fix
-  /// is not evidence of a visit. Near a customer we sample often enough for the
-  /// backend to see an arrival, a stay and a departure.
-  bool _nearCustomer() {
-    final p = _lastPosition;
-    if (p == null || _nearbyCustomerPoints.isEmpty) return false;
-    for (final c in _nearbyCustomerPoints) {
-      final d = Geolocator.distanceBetween(p.latitude, p.longitude, c.lat, c.lng);
-      if (d <= _cfgNearCustomerRadiusMeters) return true;
+    _localEngine?.setNearbyCustomerPoints(points);
+    if (state.backgroundService) {
+      FlutterForegroundTask.sendDataToTask(TrackingMsg.encode(TrackingMsg.cmdNearby, {
+        'points': [
+          for (final p in points) {'lat': p.lat, 'lng': p.lng},
+        ],
+      }));
     }
-    return false;
   }
 
-  Duration _currentInterval() {
-    if (_nearCustomer()) return _cfgNearCustomer;
-    final speed = _lastPosition?.speed ?? 0;
-    if (speed > _movingThresholdMps) return _cfgMoving;
-    if (speed < _stoppedThresholdMps) return _cfgStopped;
-    return _intervalDefault;
-  }
+  // ── Android foreground service ───────────────────────────────────────────
 
-  void _onPosition(Position p) {
-    _lastPosition = p;
-    // Stream now fires on a time interval (so it keeps flowing in the background
-    // even when stationary). Capture a route ping only when enough distance/time
-    // has elapsed; always send a location-ON heartbeat (throttled).
-    _maybeCapture();
-    _maybeSendStatus(tracking: true);
-  }
-
-  /// Sends a heartbeat at most once per [_statusMinGap].
-  void _maybeSendStatus({required bool tracking}) {
-    final now = DateTime.now();
-    if (_lastStatusSentAt != null &&
-        now.difference(_lastStatusSentAt!) < _statusMinGap) {
-      return;
-    }
-    _lastStatusSentAt = now;
-    unawaited(_sendStatus(tracking: tracking));
-  }
-
-  void _onStreamError(Object e) {
-    state = state.copyWith(lastError: e.toString());
-  }
-
-  void _maybeCapture() {
-    if (!state.active || _lastPosition == null) return;
-    final p = _lastPosition!;
-    final now = DateTime.now();
-
-    final interval = _currentInterval();
-    final dueByTime =
-        _lastCaptureAt == null || now.difference(_lastCaptureAt!) >= interval;
-    final movedFar = _lastCapturedPosition == null ||
-        Geolocator.distanceBetween(
-              _lastCapturedPosition!.latitude,
-              _lastCapturedPosition!.longitude,
-              p.latitude,
-              p.longitude,
-            ) >=
-            _cfgDistanceFilterMeters;
-
-    if (!dueByTime && !movedFar) return;
-    // Avoid bursts — at most one ping per _minCaptureGap.
-    if (_lastCaptureAt != null &&
-        now.difference(_lastCaptureAt!) < _minCaptureGap) {
-      return;
-    }
-
-    _capture(p);
-    _maybeAutoFlush();
-  }
-
-  void _capture(Position p) {
-    final empId = state.employeeId;
-    final ping = LocationPing(
-      // Idempotency key: employee + capture time + a counter. Survives in the
-      // durable queue, so a batch retried after a timeout is stored once and
-      // cannot be counted twice inside a visit.
-      clientPingId: '$empId-${p.timestamp.toUtc().millisecondsSinceEpoch}-${_pingSeq++}',
-      recordedAt: p.timestamp.toUtc(),
-      latitude: p.latitude,
-      longitude: p.longitude,
-      accuracyMeters: p.accuracy,
-      speedMps: p.speed,
-      headingDegrees: p.heading,
-      deviceId: _deviceId,
-      // Android reports spoofed positions; iOS has no equivalent signal, so
-      // null there means "unknown", not "genuine".
-      mockLocation: p.isMocked,
-    );
-    _buffer.add(ping);
-    // Persist immediately so an offline ping is never lost if the OS kills the
-    // app before it can be uploaded (this is what fills the gaps in the trail).
-    if (empId != null) {
-      unawaited(_store.append(empId, [ping]));
-    }
-    _lastCaptureAt = DateTime.now();
-    _lastCapturedPosition = p;
-    state = state.copyWith(
-      lastCapturedAt: _lastCaptureAt,
-      bufferedCount: _buffer.length,
+  void _initService() {
+    if (_serviceInitialised) return;
+    _serviceInitialised = true;
+    FlutterForegroundTask.init(
+      androidNotificationOptions: AndroidNotificationOptions(
+        channelId: TrackingKeys.channelId,
+        channelName: TrackingKeys.channelName,
+        channelDescription:
+            'Shown while your route is being recorded between check-in and check-out.',
+        channelImportance: NotificationChannelImportance.LOW,
+        priority: NotificationPriority.LOW,
+        onlyAlertOnce: true,
+        showWhen: false,
+      ),
+      iosNotificationOptions: const IOSNotificationOptions(showNotification: false),
+      foregroundTaskOptions: ForegroundTaskOptions(
+        eventAction: ForegroundTaskEventAction.repeat(TrackingKeys.tickMillis),
+        // Bring the session back after a reboot / app update / OS kill.
+        autoRunOnBoot: true,
+        autoRunOnMyPackageReplaced: true,
+        allowAutoRestart: true,
+        allowWakeLock: true,
+        allowWifiLock: true,
+        // Swiping the app away must not end the session.
+        stopWithTask: false,
+      ),
     );
   }
 
-  void _maybeAutoFlush() {
-    final byCount = _buffer.length >= _flushAtCount;
-    final byAge = state.lastFlushedAt == null ||
-        DateTime.now().difference(state.lastFlushedAt!) >=
-            const Duration(seconds: _flushIntervalSeconds);
-    if (byCount || (byAge && _buffer.isNotEmpty)) {
-      _flushInFlight ??=
-          _flush(heartbeat: true).whenComplete(() => _flushInFlight = null);
-    }
-  }
-
-  /// Uploads the buffered pings. When [heartbeat] is true, a location heartbeat
-  /// is piggybacked onto a successful upload (see below) — pass false for the
-  /// final checkout flush, which has already reported tracking:false.
-  Future<void> _flush({bool heartbeat = false}) async {
-    if (_buffer.isEmpty || state.employeeId == null) return;
-    final empId = state.employeeId!;
-    final pending = List<LocationPing>.from(_buffer);
+  Future<bool> _startService(int employeeId, String? deviceId) async {
     try {
-      final saved = await _repo.uploadBatch(
-        LocationPingBatch(employeeId: empId, pings: pending),
-      );
-      _buffer.removeRange(0, pending.length);
-      // Drop the confirmed pings from the durable queue (FIFO — pings captured
-      // during this in-flight upload stay queued for the next flush).
-      await _store.removeOldest(empId, pending.length);
-      state = state.copyWith(
-        lastFlushedAt: DateTime.now(),
-        bufferedCount: _buffer.length,
-        sentCount: state.sentCount + saved,
-        clearError: true,
-      );
-      // Piggyback a status heartbeat on the just-confirmed connection. Heartbeats
-      // are otherwise best-effort/fire-and-forget with no retry queue, so a run of
-      // failures (poor signal, or the OS deferring background requests) freezes the
-      // server's status at an old fix while the durable ping queue still carries the
-      // trail forward. Sending here — right after a successful upload, when the
-      // network is known-good — keeps the on/off status (and its position) advancing
-      // in step with the trail. Guarded to the active session so it never overrides
-      // the tracking:false we send at checkout.
-      if (heartbeat && state.active) {
-        _maybeSendStatus(tracking: true);
+      _initService();
+      await FlutterForegroundTask.saveData(key: TrackingKeys.employeeId, value: employeeId);
+      await FlutterForegroundTask.saveData(
+          key: TrackingKeys.startedAt, value: DateTime.now().toUtc().toIso8601String());
+      await FlutterForegroundTask.saveData(
+          key: TrackingKeys.productName, value: Branding.current.productName);
+      await FlutterForegroundTask.saveData(
+          key: TrackingKeys.config, value: jsonEncode(_cfg.toJson()));
+      if (deviceId != null) {
+        await FlutterForegroundTask.saveData(key: TrackingKeys.deviceId, value: deviceId);
+      } else {
+        await FlutterForegroundTask.removeData(key: TrackingKeys.deviceId);
       }
+
+      final ServiceRequestResult result;
+      if (await FlutterForegroundTask.isRunningService) {
+        result = await FlutterForegroundTask.restartService();
+      } else {
+        result = await FlutterForegroundTask.startService(
+          serviceId: TrackingKeys.serviceId,
+          serviceTypes: [ForegroundServiceTypes.location],
+          notificationTitle: '${Branding.current.productName} attendance',
+          notificationText: 'Recording your route while you are checked in',
+          callback: trackingServiceStart,
+        );
+      }
+      if (result is ServiceRequestFailure) {
+        state = state.copyWith(
+            lastError: 'Background tracking could not start: ${result.error}');
+        if (kDebugMode) debugPrint('Tracking service start failed: ${result.error}');
+        await FlutterForegroundTask.removeData(key: TrackingKeys.employeeId);
+        return false;
+      }
+      return true;
     } catch (e) {
-      // Keep buffer AND the durable queue so the next tick / next session retries.
-      state = state.copyWith(lastError: e.toString());
-      if (kDebugMode) debugPrint('Location flush failed: $e');
+      state = state.copyWith(lastError: 'Background tracking could not start: $e');
+      if (kDebugMode) debugPrint('Tracking service start threw: $e');
+      return false;
     }
+  }
+
+  Future<void> _stopService({required bool flush}) async {
+    try {
+      if (!await FlutterForegroundTask.isRunningService) {
+        await FlutterForegroundTask.removeData(key: TrackingKeys.employeeId);
+        return;
+      }
+      _stopAck = Completer<void>();
+      FlutterForegroundTask.sendDataToTask(
+          TrackingMsg.encode(TrackingMsg.cmdStop, {'flush': flush}));
+      try {
+        // The service flushes, reports tracking:false and stops itself.
+        await _stopAck!.future.timeout(const Duration(seconds: 20));
+      } catch (_) {
+        // Didn't answer — stop it from here. Pings are still on disk.
+        await FlutterForegroundTask.removeData(key: TrackingKeys.employeeId);
+        await FlutterForegroundTask.stopService();
+        if (flush && state.employeeId != null) {
+          unawaited(_drainQueueFor(state.employeeId!));
+        }
+        await _sendStatusOff();
+      }
+    } catch (_) {
+    } finally {
+      _stopAck = null;
+    }
+  }
+
+  /// The system can kill even a foreground service on some phones. If the
+  /// session should be running but the service is gone, start it again.
+  Future<void> _verifyServiceAlive() async {
+    try {
+      if (await FlutterForegroundTask.isRunningService) return;
+      final empId = state.employeeId;
+      if (empId == null) return;
+      state = state.copyWith(active: false, backgroundService: false);
+      await start(empId);
+    } catch (_) {}
+  }
+
+  void _onServiceData(Object data) {
+    final msg = TrackingMsg.decode(data);
+    if (msg == null) return;
+    switch (msg['type']) {
+      case TrackingMsg.evtSnapshot:
+        final body = msg['snapshot'];
+        if (body is Map<String, dynamic> && state.active && state.backgroundService) {
+          final snap = TrackingSnapshot.fromJson(body);
+          if (snap.employeeId == state.employeeId) {
+            state = state.fromSnapshot(snap).copyWith(active: true);
+          }
+        }
+      case TrackingMsg.evtStopped:
+        _stopAck?.complete();
+        _stopAck = null;
+      case TrackingMsg.evtExpired:
+        // Forgotten check-out: the service ended the session on its own.
+        unawaited(_storage.delete(key: _kActiveEmployee));
+        state = LocationTrackerState.idle.copyWith(
+            lastError:
+                'Tracking stopped automatically after 20 hours without a check-out.');
+    }
+  }
+
+  // ── In-process engine (iOS / fallback) ───────────────────────────────────
+
+  Future<void> _startLocal(int employeeId, String? deviceId) async {
+    final engine = TrackingEngine(
+      employeeId: employeeId,
+      repo: _repo,
+      store: _store,
+      deviceId: deviceId,
+      config: _cfg,
+      onSnapshot: (s) {
+        if (_localEngine != null && s.employeeId == state.employeeId) {
+          state = state.fromSnapshot(s).copyWith(active: true, backgroundService: false);
+        }
+      },
+      onSessionExpired: () => unawaited(stop()),
+    );
+    _localEngine = engine;
+    await engine.start(
+      androidForegroundNotification: _useService
+          ? ForegroundNotificationConfig(
+              notificationTitle: '${Branding.current.productName} attendance',
+              notificationText: 'Recording your location while you are checked in',
+              enableWakeLock: true,
+              notificationChannelName: TrackingKeys.channelName,
+            )
+          : null,
+    );
+    _localTicker = Timer.periodic(const Duration(seconds: 15), (_) => engine.tick());
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  Future<void> _loadConfig() async {
+    try {
+      final cfg = await ApiClient.instance.get<FieldVisitConfig>(
+        '/api/customers/nearby/config',
+        parse: (d) => FieldVisitConfig.fromJson(d as Map<String, dynamic>),
+      );
+      _cfg = TrackingConfig.fromFieldVisit(cfg);
+    } catch (_) {
+      // Compiled-in / previous values stay.
+    }
+  }
+
+  Future<void> _drainQueueFor(int employeeId) async {
+    try {
+      final pings = await _store.load(employeeId);
+      for (var i = 0; i < pings.length; i += 200) {
+        final slice = pings.sublist(i, (i + 200).clamp(0, pings.length));
+        await _repo.uploadBatch(LocationPingBatch(employeeId: employeeId, pings: slice));
+        await _store.removeConfirmed(employeeId, slice);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _sendStatusOff() async {
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      final perm = await Geolocator.checkPermission();
+      await _repo.sendStatus(
+        locationEnabled: enabled,
+        permissionGranted: perm == LocationPermission.always ||
+            perm == LocationPermission.whileInUse,
+        tracking: false,
+      );
+    } catch (_) {}
   }
 
   Future<bool> _ensurePermissionAndService() async {
@@ -544,20 +556,15 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
       return false;
     }
 
-    // Best-effort: ask the OS to exempt the app from battery optimisation so the
-    // foreground tracking service isn't killed/dozed — the single biggest lever
-    // for keeping GPS capture (and therefore pings) alive in the background.
     await _requestBatteryExemption();
-
     return true;
   }
 
-  /// Prompts (once) to disable battery optimisation for this app on Android.
-  /// Never blocks tracking — a denied/failed request just means the OS may kill
-  /// the service more aggressively; the durable offline queue still protects
-  /// already-captured pings.
+  /// Asks the OS to exempt the app from battery optimisation on Android. This
+  /// is also what lets the system restart the service from the background
+  /// (reboot, OS kill) on Android 12+. Never blocks tracking.
   Future<void> _requestBatteryExemption() async {
-    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (!Platform.isAndroid) return;
     try {
       final status = await Permission.ignoreBatteryOptimizations.status;
       if (!status.isGranted) {
@@ -568,48 +575,11 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
     }
   }
 
-  /// Platform-specific stream settings. We use a TIME interval (not a distance
-  /// filter) so the OS delivers updates on a schedule — keeping the foreground
-  /// service active and the on/off heartbeat flowing even when the device is
-  /// stationary in the background. Route pings are de-duplicated by distance in
-  /// [_maybeCapture], so a 0 distance filter doesn't flood the server.
-  LocationSettings _platformSettings() {
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      return AndroidSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 0,
-        intervalDuration: _streamInterval,
-        foregroundNotificationConfig: ForegroundNotificationConfig(
-          notificationTitle: '${Branding.current.productName} attendance',
-          notificationText: 'Recording your location while you are checked in',
-          enableWakeLock: true,
-          notificationChannelName: 'Attendance tracking',
-        ),
-      );
-    }
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      return AppleSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 0,
-        // Foreground-only on iOS: the App Store build has no location
-        // background mode (guideline 2.5.4), and enabling background updates
-        // without it crashes CoreLocation.
-        allowBackgroundLocationUpdates: false,
-        activityType: ActivityType.other,
-      );
-    }
-    return const LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 0,
-    );
-  }
-
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _streamSub?.cancel();
-    _ticker?.cancel();
-    _statusTicker?.cancel();
+    if (_useService) FlutterForegroundTask.removeTaskDataCallback(_onServiceData);
+    _localTicker?.cancel();
     super.dispose();
   }
 }

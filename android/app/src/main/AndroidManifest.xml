@@ -70,6 +70,15 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Attendance route tracking runs in this foreground service (flutter_foreground_task)
+             so it survives the app being swiped away or killed, and the plugin's boot
+             receiver restarts it after a reboot. stopWithTask=false is what keeps it
+             alive when the UI task is removed. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="location"
+            android:exported="false"
+            android:stopWithTask="false" />
         <!-- Default FCM notification channel + icon used when the app is in the
              background or terminated and the payload includes a notification. -->
         <meta-data

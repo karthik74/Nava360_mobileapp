@@ -1,6 +1,7 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
@@ -9,6 +10,10 @@ import 'features/notifications/push_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Receive snapshots from the background tracking service isolate (Android).
+  // Must be registered before anything can start or attach to the service.
+  FlutterForegroundTask.initCommunicationPort();
 
   // Portrait everywhere by default — the one screen that needs landscape
   // (the Branch Report card, so its table fits without scrolling) switches
