@@ -145,6 +145,58 @@ void main() {
     });
   });
 
+  group('MTD / FTD columns', () {
+    test('reads mtd and ftd; a null figure stays null (shown as "—")', () {
+      final i = OpeningInsights.fromJson({
+        'mtd': {
+          'date': '2026-10-05',
+          'disbursement': 29,
+          'ftod': '1',
+          'ftodDue': 392.0,
+          'ftodCollected': 391,
+          'ptp': 7,
+        },
+        'ftd': {
+          'date': '2026-10-03',
+          'disbursement': null,
+          'ftod': 2,
+          'ptp': 0
+        },
+      });
+      expect(i.mtdColumn.disbursement, 29);
+      expect(i.mtdColumn.ftod, 1);
+      expect(i.mtdColumn.ftodDue, 392);
+      expect(i.mtdColumn.ptp, 7);
+      expect(i.ftdColumn.date, DateTime(2026, 10, 3));
+      expect(i.ftdColumn.disbursement, isNull);
+      expect(i.ftdColumn.ftodDue, isNull);
+      expect(i.ftdColumn.ptp, 0); // a real zero stays zero
+    });
+
+    test('an older backend: columns built from the month and yesterday objects',
+        () {
+      final i = OpeningInsights.fromJson({
+        'disbursement': {'accounts': 0, 'connected': false},
+        'ftod': {'accounts': 40, 'collected': 27, 'pending': 10, 'partial': 3},
+        'ptp': {'total': 20},
+        'yesterday': {
+          'date': '2026-09-29',
+          'due': 12,
+          'collected': 9,
+          'pending': 3
+        },
+      });
+      expect(i.mtdColumn.disbursement, isNull); // not connected → "—"
+      expect(i.mtdColumn.ftod, 13);
+      expect(i.mtdColumn.ftodDue, 40);
+      expect(i.mtdColumn.ptp, 20);
+      expect(i.ftdColumn.date, DateTime(2026, 9, 29));
+      expect(i.ftdColumn.ftod, 3);
+      expect(i.ftdColumn.disbursement, isNull);
+      expect(i.ftdColumn.ptp, isNull);
+    });
+  });
+
   group('formatting', () {
     test('counts use Indian digit grouping, no decimals', () {
       expect(insightsCount(0), '0');

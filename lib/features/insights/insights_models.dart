@@ -1,8 +1,8 @@
 import 'package:intl/intl.dart';
 
 /// Opening-insights payload — `GET /api/insights/opening` (optional
-/// `?month=YYYY-MM`): month-to-date disbursement / FTOD / PTP plus yesterday's
-/// FTOD dues. Counts only, never rupee amounts; the scope (own
+/// `?month=YYYY-MM`): Disbursement / FTOD / PTP for this month (`mtd`) and for
+/// yesterday (`ftd`), plus the older month-to-date and yesterday objects. Counts only, never rupee amounts; the scope (own
 /// customers / branch / area / division / region / all) is decided by the
 /// server from the caller's designation, so the app never sends one.
 ///
@@ -184,6 +184,49 @@ class YesterdayInsight {
       );
 }
 
+int? _intOrNull(dynamic v) {
+  if (v == null) return null;
+  if (v is int) return v;
+  if (v is num) return v.round();
+  if (v is String) return num.tryParse(v.trim())?.round();
+  return null;
+}
+
+/// One column of the intro — MTD (this month so far) or FTD (yesterday) —
+/// with the same three cards: Disbursement · FTOD · PTP. A null figure means
+/// "not available" (feed not connected, nothing synced yet, or the caller not
+/// in it) and shows "—", never a misleading 0.
+class InsightsColumn {
+  /// MTD: the day the month is as of. FTD: the day reported (a holiday
+  /// reports the working day before). Null when absent.
+  final DateTime? date;
+  final int? disbursement;
+
+  /// Accounts due and not yet collected.
+  final int? ftod;
+  final int? ftodDue;
+  final int? ftodCollected;
+  final int? ptp;
+
+  const InsightsColumn({
+    this.date,
+    this.disbursement,
+    this.ftod,
+    this.ftodDue,
+    this.ftodCollected,
+    this.ptp,
+  });
+
+  factory InsightsColumn.fromJson(Map<String, dynamic> j) => InsightsColumn(
+        date: _date(j['date']),
+        disbursement: _intOrNull(j['disbursement']),
+        ftod: _intOrNull(j['ftod']),
+        ftodDue: _intOrNull(j['ftodDue']),
+        ftodCollected: _intOrNull(j['ftodCollected']),
+        ptp: _intOrNull(j['ptp']),
+      );
+}
+
 /// "2026-09-29" (optionally followed by a time) → local DateTime(2026, 9, 29).
 /// Only the calendar date is read, so a UTC suffix can't shift the day.
 DateTime? _date(dynamic v) {
@@ -211,6 +254,11 @@ class OpeningInsights {
   /// Null when the backend predates the `yesterday` object.
   final YesterdayInsight? yesterday;
 
+  /// The intro's two columns. Null when the backend predates them — the
+  /// intro then builds them from the older fields ([mtdColumn] / [ftdColumn]).
+  final InsightsColumn? mtd;
+  final InsightsColumn? ftd;
+
   const OpeningInsights({
     this.month = '',
     this.asOf = '',
@@ -220,7 +268,35 @@ class OpeningInsights {
     this.ftod = const FtodInsight(),
     this.ptp = const PtpInsight(),
     this.yesterday,
+    this.mtd,
+    this.ftd,
   });
+
+  /// This month's column, from `mtd` or — on an older backend — the
+  /// month-to-date objects (disbursement only when its feed is connected).
+  InsightsColumn get mtdColumn =>
+      mtd ??
+      InsightsColumn(
+        disbursement: disbursement.connected ? disbursement.accounts : null,
+        ftod: ftod.pending + ftod.partial,
+        ftodDue: ftod.accounts,
+        ftodCollected: ftod.collected,
+        ptp: ptp.total,
+      );
+
+  /// Yesterday's column, from `ftd` or — on an older backend — yesterday's
+  /// FTOD dues (no disbursement or PTP there).
+  InsightsColumn get ftdColumn {
+    final f = ftd;
+    if (f != null) return f;
+    final y = yesterday;
+    return InsightsColumn(
+      date: y?.date,
+      ftod: y?.pending,
+      ftodDue: y?.due,
+      ftodCollected: y?.collected,
+    );
+  }
 
   factory OpeningInsights.fromJson(dynamic raw) {
     final j = _map(raw);
@@ -235,6 +311,8 @@ class OpeningInsights {
       yesterday: j['yesterday'] is Map
           ? YesterdayInsight.fromJson(_map(j['yesterday']))
           : null,
+      mtd: j['mtd'] is Map ? InsightsColumn.fromJson(_map(j['mtd'])) : null,
+      ftd: j['ftd'] is Map ? InsightsColumn.fromJson(_map(j['ftd'])) : null,
     );
   }
 }

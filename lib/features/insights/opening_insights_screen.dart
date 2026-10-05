@@ -62,8 +62,8 @@ double _ease(double x) => 1 - math.pow(1 - x, 3).toDouble(); // easeOutCubic
 
 /// Full-screen "opening insights" intro. The guide arrives, the MTD and FTD
 /// headings appear beside her, the "i'll improve and work hard today" button
-/// rises, then she pulls back and six cards (MTD disbursement / FTOD / PTP and
-/// yesterday's due / collected / pending) rise and count up around her.
+/// rises, then she pulls back and six cards rise and count up around her:
+/// Disbursement / FTOD / PTP for this month (MTD) and for yesterday (FTD).
 ///
 /// It never leaves on its own: the user taps the button (or Back), sees a
 /// short encouragement, and goes on — popping back to the screen underneath
@@ -356,7 +356,7 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
     final data = _data;
     final now = (widget.now ?? DateTime.now)();
     final ftdDate =
-        data?.yesterday?.date ?? DateTime(now.year, now.month, now.day - 1);
+        data?.ftdColumn.date ?? DateTime(now.year, now.month, now.day - 1);
 
     return Stack(
       clipBehavior: Clip.none,
@@ -480,25 +480,14 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
   }
 
   Widget _cards(double u, OpeningInsights? d) {
-    String? n(int? v) => v == null ? null : '$v';
-    final disb = d?.disbursement;
-    final disbOn = disb != null && disb.connected;
-    final y = d?.yesterday;
-    // Rows of (left: MTD, right: yesterday), exactly like the prototype grid.
+    final mtd = d?.mtdColumn, ftd = d?.ftdColumn;
+    // Rows of (left: MTD, right: FTD) — the same three cards in each column.
     final rows = <(_CardSpec, _CardSpec)>[
+      (_disbursement(d, mtd), _disbursement(d, ftd)),
+      (_ftod(mtd), _ftod(ftd)),
       (
-        _CardSpec('Disbursement', disbOn ? disb.accounts : null,
-            d != null && !disbOn ? 'not connected' : 'accounts'),
-        _CardSpec('Due', y?.due, 'accounts'),
-      ),
-      (
-        _CardSpec('FTOD', d?.ftod.collected,
-            'collected / ${n(d?.ftod.accounts) ?? '—'} due'),
-        _CardSpec('Collected', y?.collected, 'accounts'),
-      ),
-      (
-        _CardSpec('PTP', d?.ptp.total, 'promises'),
-        _CardSpec('Pending', y?.pending, 'accounts'),
+        _CardSpec('PTP', mtd?.ptp, 'promises due'),
+        _CardSpec('PTP', ftd?.ptp, 'promises due'),
       ),
     ];
     return Column(
@@ -515,6 +504,21 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
         ],
       ],
     );
+  }
+
+  /// "—" with "not available" once data is in and the feed has no figure
+  /// (e.g. yesterday's disbursement); plain "accounts" otherwise.
+  static _CardSpec _disbursement(OpeningInsights? d, InsightsColumn? c) {
+    final v = c?.disbursement;
+    return _CardSpec('Disbursement', v,
+        d != null && v == null ? 'not available' : 'accounts');
+  }
+
+  /// Accounts still unpaid, with how many fell due behind them.
+  static _CardSpec _ftod(InsightsColumn? c) {
+    final due = c?.ftodDue;
+    return _CardSpec('FTOD', c?.ftod,
+        due == null ? 'accounts' : 'of ${insightsCount(due)} due');
   }
 
   /// Count-up progress (0–1) for a card entering at [at].
