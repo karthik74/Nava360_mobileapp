@@ -141,14 +141,17 @@ void main() {
     await tester.pump(); // repository future resolves
     expect(repo.calls, 1);
 
+    // FTD (left) comes in first, then MTD (right). FTD uses the API's `ftd.date`.
     var t = await pumpTo(tester, 0, .9);
-    expect(opacityOf(tester, find.text('MTD')), 0);
-    t = await pumpTo(tester, t, 1.8); // MTD in at 1.05 + .6
-    expect(opacityOf(tester, find.text('MTD')), 1);
-    // The FTD heading uses the API's `ftd.date`.
     expect(opacityOf(tester, find.text('FTD · 28 SEP')), 0);
-    t = await pumpTo(tester, t, 3.4); // FTD in at 2.65 + .6
+    t = await pumpTo(tester, t, 1.8); // FTD in at 1.05 + .6
     expect(opacityOf(tester, find.text('FTD · 28 SEP')), 1);
+    expect(opacityOf(tester, find.text('MTD')), 0);
+    t = await pumpTo(tester, t, 3.4); // MTD in at 2.65 + .6
+    expect(opacityOf(tester, find.text('MTD')), 1);
+    // FTD heading sits left of MTD.
+    expect(tester.getCenter(find.text('FTD · 28 SEP')).dx,
+        lessThan(tester.getCenter(find.text('MTD')).dx));
 
     // Cards are still hidden before 7.35 s.
     t = await pumpTo(tester, t, 7.2);
@@ -173,6 +176,9 @@ void main() {
     expect(find.text('promises due'), findsNWidgets(2));
     // No daily disbursement: "—", said plainly — not 0.
     expect(find.text('—'), findsOneWidget);
+    // Cards follow the headings: FTD (yesterday's "—") left, MTD (1,23,456) right.
+    expect(tester.getCenter(find.text('—')).dx,
+        lessThan(tester.getCenter(find.text('1,23,456')).dx));
     expect(find.text('not available'), findsOneWidget);
     expect(opacityOf(tester, find.text('PTP')), 1);
 

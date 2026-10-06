@@ -25,7 +25,9 @@ void precacheOpeningInsightsCharacter(BuildContext context) {
 const double _kDuration = 10; // reveal ends; only the character keeps looping
 const double _kArrivalAt = .05, _kArrivalLen = .75; // character + orbit in
 const double _kZoomAt = 6.9, _kZoomLen = .7; // 1.22× close-up pulls back
-const double _kMtdAt = 1.05, _kFtdAt = 2.65, _kTeaserLen = .6; // headings
+const double _kLeftHeadAt = 1.05,
+    _kRightHeadAt = 2.65,
+    _kTeaserLen = .6; // headings, left first
 const double _kCtaAt = 5.55, _kCtaLen = .75; // button (enabled once fully in)
 const List<double> _kRowAt = [7.35, 7.55, 7.75]; // card pairs
 const double _kCardLen = .6; // card rise
@@ -60,10 +62,10 @@ double _phase(double t, double start, double length) =>
     _clamp01((t - start) / length);
 double _ease(double x) => 1 - math.pow(1 - x, 3).toDouble(); // easeOutCubic
 
-/// Full-screen "opening insights" intro. The guide arrives, the MTD and FTD
+/// Full-screen "opening insights" intro. The guide arrives, the FTD and MTD
 /// headings appear beside her, the "i'll improve and work hard today" button
 /// rises, then she pulls back and six cards rise and count up around her:
-/// Disbursement / FTOD / PTP for this month (MTD) and for yesterday (FTD).
+/// Disbursement / FTOD / PTP for yesterday (FTD, left) and this month (MTD, right).
 ///
 /// It never leaves on its own: the user taps the button (or Back), sees a
 /// short encouragement, and goes on — popping back to the screen underneath
@@ -407,15 +409,16 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
           child: _cards(u, data),
         ),
         // Headings (z 7).
-        _teaser(u, zoom, at: _kMtdAt, big: 5.7, left: true, text: 'MTD'),
+        // FTD (yesterday) on the left, MTD (this month) on the right.
         _teaser(
           u,
           zoom,
-          at: _kFtdAt,
+          at: _kLeftHeadAt,
           big: 4.0,
-          left: false,
+          left: true,
           text: 'FTD · ${insightsShortDate(ftdDate)}',
         ),
+        _teaser(u, zoom, at: _kRightHeadAt, big: 5.7, left: false, text: 'MTD'),
         // Button + feedback (z 7).
         Positioned(
           left: 5 * u,
@@ -481,13 +484,13 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
 
   Widget _cards(double u, OpeningInsights? d) {
     final mtd = d?.mtdColumn, ftd = d?.ftdColumn;
-    // Rows of (left: MTD, right: FTD) — the same three cards in each column.
+    // Rows of (left: FTD, right: MTD) — the same three cards in each column.
     final rows = <(_CardSpec, _CardSpec)>[
-      (_disbursement(d, mtd), _disbursement(d, ftd)),
-      (_ftod(mtd), _ftod(ftd)),
+      (_disbursement(d, ftd), _disbursement(d, mtd)),
+      (_ftod(ftd), _ftod(mtd)),
       (
-        _CardSpec('PTP', mtd?.ptp, 'promises due'),
         _CardSpec('PTP', ftd?.ptp, 'promises due'),
+        _CardSpec('PTP', mtd?.ptp, 'promises due'),
       ),
     ];
     return Column(
