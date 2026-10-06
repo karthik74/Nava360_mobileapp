@@ -497,12 +497,21 @@ class _AttendanceTab extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
               // Manager / HR: set one day's status by hand (e.g. mark Absent).
-              if (ref.watch(authUserProvider)?.hasPermission('ATTENDANCE_OVERRIDE') ?? false)
+              if (ref.watch(authUserProvider)?.hasPermission('ATTENDANCE_OVERRIDE') ?? false) ...[
                 _MarkAttendanceCard(
                   employeeId: employeeId,
                   records: records,
                   onChanged: () => ref.invalidate(_attendanceProvider(employeeId)),
                 ),
+                const SizedBox(height: 12),
+                // Manager / HR: the employee checked out by mistake — put them
+                // back on the clock so they can check out again later.
+                _UndoCheckOutCard(
+                  employeeId: employeeId,
+                  records: records,
+                  onChanged: () => ref.invalidate(_attendanceProvider(employeeId)),
+                ),
+              ],
               const SizedBox(height: 4),
               // The attendance API does not expose a per-day "late mark" flag,
               // so late marks can't be derived reliably here.
@@ -730,6 +739,136 @@ class _MarkAttendanceCardState extends ConsumerState<_MarkAttendanceCard> {
             label: Text(_busy
                 ? 'Saving…'
                 : 'Mark ${_options.firstWhere((o) => o.$1 == _status).$2}'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// "Undo check-out": the employee checked out by mistake. Clears today's
+/// check-out (the check-in is kept) so they are checked in again and can check
+/// out properly later. Enabled only while today's record is actually checked
+/// out; the server applies the same scope rule as Mark attendance.
+class _UndoCheckOutCard extends ConsumerStatefulWidget {
+  const _UndoCheckOutCard({
+    required this.employeeId,
+    required this.records,
+    required this.onChanged,
+  });
+  final int employeeId;
+  final List<AttendanceRecord> records;
+  final VoidCallback onChanged;
+
+  @override
+  ConsumerState<_UndoCheckOutCard> createState() => _UndoCheckOutCardState();
+}
+
+class _UndoCheckOutCardState extends ConsumerState<_UndoCheckOutCard> {
+  bool _busy = false;
+
+  AttendanceRecord? get _today {
+    final ymd = _ymd(DateTime.now());
+    for (final r in widget.records) {
+      if (r.date == ymd) return r;
+    }
+    return null;
+  }
+
+  String _hhmm(String? iso) {
+    if (iso == null) return '—';
+    final dt = DateTime.tryParse(iso);
+    return dt == null ? iso : DateFormat('h:mm a').format(dt);
+  }
+
+  Future<void> _undo() async {
+    final today = _today;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Undo today's check-out?"),
+        content: Text(
+          'The check-out at ${_hhmm(today?.checkOut)} will be cleared and the '
+          'employee will be checked in again (check-in ${_hhmm(today?.checkIn)} '
+          'is kept), so they can check out properly later.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Undo check-out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      final message = await ref
+          .read(attendanceRepositoryProvider)
+          .reopenCheckOut(employeeId: widget.employeeId);
+      if (!mounted) return;
+      widget.onChanged();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not undo the check-out: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final today = _today;
+    final checkedOut = today != null && today.checkIn != null && today.checkOut != null;
+    final String state;
+    if (today == null || today.checkIn == null) {
+      state = 'No check-in today';
+    } else if (today.checkOut == null) {
+      state = 'Checked in at ${_hhmm(today.checkIn)} — still on the clock';
+    } else {
+      state = 'Checked in ${_hhmm(today.checkIn)} · checked out ${_hhmm(today.checkOut)}';
+    }
+    return _SectionCard(
+      title: 'Undo check-out',
+      icon: Icons.history_toggle_off_rounded,
+      children: [
+        Text(
+          state,
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            color: AppColors.ink,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'For an employee who checked out by mistake: clears today\'s '
+          'check-out so they can check out again later.',
+          style: TextStyle(fontSize: 12, color: AppColors.inkSoft),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: _busy || !checkedOut ? null : _undo,
+            icon: _busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.undo_rounded, size: 18),
+            label: Text(_busy ? 'Undoing…' : 'Undo check-out'),
           ),
         ),
       ],
@@ -2583,20 +2722,42 @@ bool _isOverdue(Task t) {
       .isBefore(DateTime(today.year, today.month, today.day));
 }
 
+/// Distance travelled along [pings], matching the backend travel-distance
+/// report (`EmployeeDayStatsService.summariseTrail`) so the "Distance today"
+/// chip and the web report agree:
+///  * hops under 15 m are stationary GPS drift, not travel;
+///  * fixes that fail the route map's quality gate are skipped — (0,0) or
+///    out-of-range coordinates, an error radius over 250 m, or an implied
+///    speed over 150 km/h against the last good fix (measured on the distance
+///    the two error radii cannot explain). One stray fix hundreds of km away
+///    used to count as travel there and back.
+/// The thresholds mirror the backend defaults (Settings → Field Visits).
 double? _routeDistanceKm(List<TrackPing> pings) {
   if (pings.length < 2) return null;
-  // Ignore sub-15m hops so stationary GPS drift doesn't inflate the total —
-  // matches the backend travel-distance report (MIN_SEGMENT_METERS).
   const minSegmentMeters = 15.0;
+  const maxAccuracyMeters = 250.0;
+  const maxKmph = 150.0;
   var meters = 0.0;
-  for (var i = 1; i < pings.length; i++) {
-    final m = _haversineMeters(
-      pings[i - 1].latitude,
-      pings[i - 1].longitude,
-      pings[i].latitude,
-      pings[i].longitude,
-    );
-    if (m >= minSegmentMeters) meters += m;
+  TrackPing? prev;
+  for (final p in pings) {
+    if (p.latitude == 0.0 && p.longitude == 0.0) continue;
+    if (p.latitude.abs() > 90 || p.longitude.abs() > 180) continue;
+    final acc = p.accuracyMeters ?? 0.0;
+    if (acc > maxAccuracyMeters) continue;
+    if (prev != null) {
+      final m = _haversineMeters(
+        prev.latitude,
+        prev.longitude,
+        p.latitude,
+        p.longitude,
+      );
+      final dt = p.recordedAt.difference(prev.recordedAt).inSeconds;
+      final unexplained = m - (prev.accuracyMeters ?? 0.0) - acc;
+      final kmph = dt > 0 && unexplained > 0 ? (unexplained / dt) * 3.6 : 0.0;
+      if (kmph > maxKmph || (dt <= 0 && unexplained > 0)) continue;
+      if (m >= minSegmentMeters) meters += m;
+    }
+    prev = p;
   }
   return meters / 1000.0;
 }

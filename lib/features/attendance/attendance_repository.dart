@@ -78,6 +78,24 @@ class AttendanceRepository {
     return (res.data?['message'] as String?) ?? 'Attendance updated';
   }
 
+  /// Manager/HR "undo check-out": clears a mistaken check-out for [date]
+  /// (yyyy-MM-dd; today by default, yesterday for overnight shifts) so the
+  /// employee is checked in again and can check out later. Returns the
+  /// server's message.
+  Future<String> reopenCheckOut({
+    required int employeeId,
+    String? date,
+  }) async {
+    final res = await _api.raw.post<Map<String, dynamic>>(
+      '/api/attendance/reopen-check-out',
+      data: {
+        'employeeId': employeeId,
+        if (date != null && date.isNotEmpty) 'date': date,
+      },
+    );
+    return (res.data?['message'] as String?) ?? 'Check-out undone';
+  }
+
   /// Submits an attendance regularization request for [date] (yyyy-MM-dd).
   /// [requestedStatus] is an AttendanceStatus name; times are "HH:mm" (optional).
   Future<void> createRegularization({

@@ -63,30 +63,66 @@ class TaskRepository {
     );
   }
 
+  /// Upper bound on pages walked by [_allPages]: 25 × 200 = 5,000 rows, far
+  /// above any real list, so a runaway server page count can't spin forever.
+  static const _maxPages = 25;
+
+  /// Walks a paged endpoint (`page`/`size` → `{content, last}`) and returns
+  /// every row. The task screens bucket, count and filter client-side, so they
+  /// need the WHOLE list — a single capped page silently hid everything older
+  /// than the cap (a manager with 600+ hierarchy tasks saw only the newest 200
+  /// and "couldn't find" a task that was really there). A bare list response
+  /// (older servers) is returned as-is.
+  Future<List<T>> _allPages<T>(
+    String path, {
+    required Map<String, dynamic> query,
+    required T Function(Map<String, dynamic>) fromJson,
+    int size = 200,
+  }) async {
+    final out = <T>[];
+    for (var page = 0; page < _maxPages; page++) {
+      final last = await _api.get<bool>(
+        path,
+        // A fixed, unique sort key keeps page boundaries stable: without it rows
+        // that tie on the server's default order can repeat or vanish between
+        // pages (hundreds of imported tasks share one created-at second).
+        query: {'sort': 'id,desc', ...query, 'page': page, 'size': size},
+        parse: (d) {
+          if (d is List) {
+            out.addAll(d.map((e) => fromJson(e as Map<String, dynamic>)));
+            return true;
+          }
+          final m = d as Map<String, dynamic>;
+          final content = m['content'] as List<dynamic>? ?? const [];
+          out.addAll(content.map((e) => fromJson(e as Map<String, dynamic>)));
+          final isLast = m['last'];
+          if (isLast is bool) return isLast || content.isEmpty;
+          final totalPages = m['totalPages'];
+          if (totalPages is num) return page + 1 >= totalPages;
+          return content.length < size;
+        },
+      );
+      if (last) break;
+    }
+    return out;
+  }
+
   /// Manager view: assignments of the caller's team (server scopes to the
-  /// reporting hierarchy / assigned branches). One page, newest-due first;
-  /// the screen buckets by status client-side so counts stay consistent.
+  /// reporting hierarchy / assigned branches). Every page is fetched; the
+  /// screen buckets by status client-side so counts stay consistent.
   Future<List<TeamTaskAssignment>> teamTasks({
     int? employeeId,
     String? status,
     int size = 300,
   }) {
-    return _api.get<List<TeamTaskAssignment>>(
+    return _allPages<TeamTaskAssignment>(
       '/api/tasks/team',
       query: {
         if (employeeId != null) 'employeeId': employeeId,
         if (status != null) 'status': status,
-        'page': 0,
-        'size': size,
       },
-      parse: (d) {
-        final content = d is List
-            ? d
-            : ((d as Map<String, dynamic>)['content'] as List<dynamic>? ?? const []);
-        return content
-            .map((e) => TeamTaskAssignment.fromJson(e as Map<String, dynamic>))
-            .toList();
-      },
+      fromJson: TeamTaskAssignment.fromJson,
+      size: size,
     );
   }
 
@@ -172,26 +208,20 @@ class TaskRepository {
     );
   }
 
+  /// The signed-in employee's tasks: their own plus hierarchy-performable
+  /// tasks of their reportees (server-side). The endpoint is paged, so every
+  /// page is walked — the screen's status/date/priority filters and counts
+  /// need the whole history, and a manager with many reportees easily has
+  /// more than one page. The title search goes to the SERVER so it matches
+  /// all tasks, not only the loaded ones.
   Future<List<Task>> listForEmployee(int employeeId, {String? status, String? q}) {
-    return _api.get<List<Task>>(
+    return _allPages<Task>(
       '/api/tasks/employee/$employeeId',
-      // The endpoint is paged (default 20) — request a large page so client-side
-      // date/priority filters see real history, and pass the title search to the
-      // SERVER so it matches ALL tasks, not just the loaded page.
       query: {
         if (status != null && status.isNotEmpty) 'status': status,
         if (q != null && q.trim().isNotEmpty) 'q': q.trim(),
-        'size': '200',
       },
-      parse: (d) {
-        if (d is List) {
-          return d.map((e) => Task.fromJson(e as Map<String, dynamic>)).toList();
-        }
-        final content = (d as Map<String, dynamic>)['content'] as List<dynamic>;
-        return content
-            .map((e) => Task.fromJson(e as Map<String, dynamic>))
-            .toList();
-      },
+      fromJson: Task.fromJson,
     );
   }
 
