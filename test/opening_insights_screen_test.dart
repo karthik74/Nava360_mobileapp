@@ -48,12 +48,28 @@ final _sample = OpeningInsights.fromJson({
   'ftod': {'accounts': 120, 'collected': 90, 'pending': 20, 'partial': 10},
   'ptp': {'total': 30, 'open': 12, 'kept': 10, 'broken': 5, 'cancelled': 3},
   'yesterday': {'date': '2026-09-28', 'due': 12, 'collected': 9, 'pending': 3},
+  'mtd': {
+    'date': '2026-09-30',
+    'disbursement': 123456,
+    'ftod': 30,
+    'ftodDue': 120,
+    'ftodCollected': 90,
+    'ptp': 25,
+  },
+  'ftd': {
+    'date': '2026-09-28',
+    'disbursement': null, // the feed has no daily disbursement
+    'ftod': 12,
+    'ftodDue': 130,
+    'ftodCollected': 118,
+    'ptp': 4,
+  },
 });
 
 const _ctaKey = ValueKey('opening-insights-cta');
 
-/// Every final value of [_sample], as the cards show them.
-const _finalValues = ['1,23,456', '90', '30', '12', '9', '3'];
+/// Every final value of [_sample], as the cards show them (FTD disbursement is "—").
+const _finalValues = ['1,23,456', '30', '25', '12', '4'];
 
 void main() {
   late List<String?> finished;
@@ -125,19 +141,22 @@ void main() {
     await tester.pump(); // repository future resolves
     expect(repo.calls, 1);
 
+    // FTD (left) comes in first, then MTD (right). FTD uses the API's `ftd.date`.
     var t = await pumpTo(tester, 0, .9);
-    expect(opacityOf(tester, find.text('MTD')), 0);
-    t = await pumpTo(tester, t, 1.8); // MTD in at 1.05 + .6
-    expect(opacityOf(tester, find.text('MTD')), 1);
-    // The FTD heading uses the API's `yesterday.date`.
     expect(opacityOf(tester, find.text('FTD · 28 SEP')), 0);
-    t = await pumpTo(tester, t, 3.4); // FTD in at 2.65 + .6
+    t = await pumpTo(tester, t, 1.8); // FTD in at 1.05 + .6
     expect(opacityOf(tester, find.text('FTD · 28 SEP')), 1);
+    expect(opacityOf(tester, find.text('MTD')), 0);
+    t = await pumpTo(tester, t, 3.4); // MTD in at 2.65 + .6
+    expect(opacityOf(tester, find.text('MTD')), 1);
+    // FTD heading sits left of MTD.
+    expect(tester.getCenter(find.text('FTD · 28 SEP')).dx,
+        lessThan(tester.getCenter(find.text('MTD')).dx));
 
     // Cards are still hidden before 7.35 s.
     t = await pumpTo(tester, t, 7.2);
     expect(opacityOf(tester, find.text('DISBURSEMENT')), 0);
-    expect(opacityOf(tester, find.text('PENDING')), 0);
+    expect(opacityOf(tester, find.text('PTP')), 0);
 
     // Mid rise/count-up of the first pair.
     t = await pumpTo(tester, t, 7.6);
@@ -148,9 +167,20 @@ void main() {
     for (final v in _finalValues) {
       expect(find.text(v), findsOneWidget, reason: v);
     }
-    expect(find.text('collected / 120 due'), findsOneWidget);
-    expect(find.text('promises'), findsOneWidget);
-    expect(opacityOf(tester, find.text('PENDING')), 1);
+    // Both columns carry the same three cards.
+    expect(find.text('DISBURSEMENT'), findsNWidgets(2));
+    expect(find.text('FTOD'), findsNWidgets(2));
+    expect(find.text('PTP'), findsNWidgets(2));
+    expect(find.text('of 120 due'), findsOneWidget);
+    expect(find.text('of 130 due'), findsOneWidget);
+    expect(find.text('promises due'), findsNWidgets(2));
+    // No daily disbursement: "—", said plainly — not 0.
+    expect(find.text('—'), findsOneWidget);
+    // Cards follow the headings: FTD (yesterday's "—") left, MTD (1,23,456) right.
+    expect(tester.getCenter(find.text('—')).dx,
+        lessThan(tester.getCenter(find.text('1,23,456')).dx));
+    expect(find.text('not available'), findsOneWidget);
+    expect(opacityOf(tester, find.text('PTP')), 1);
 
     // Well past the 10 s reveal: still here, waiting for the button.
     await pumpTo(tester, t, 20);
@@ -211,13 +241,14 @@ void main() {
 
     t = await pumpTo(tester, t, 8.6);
     expect(find.text('—'), findsNWidgets(6));
-    expect(find.text('collected / — due'), findsOneWidget);
+    expect(find.text('not available'),
+        findsNothing); // unknown yet, not "unavailable"
 
     slow.complete(_sample);
     await tester.pump(); // data arrives
     await tester.pump(const Duration(milliseconds: 200));
     expect(find.text('1,23,456'), findsNothing); // counting up
-    expect(find.text('—'), findsNothing);
+    expect(find.text('—'), findsOneWidget); // only FTD disbursement
     await tester.pump(const Duration(milliseconds: 500));
     for (final v in _finalValues) {
       expect(find.text(v), findsOneWidget, reason: v);
@@ -242,7 +273,9 @@ void main() {
     expect(finished, [null]);
   });
 
-  testWidgets('reduced motion shows the final state at once', (tester) async {
+  testWidgets(
+      'reduced motion shows the final state at once (older backend: no mtd/ftd)',
+      (tester) async {
     final data = OpeningInsights.fromJson({
       'disbursement': {'accounts': 0, 'connected': false},
       'ftod': {'accounts': 4, 'collected': 1, 'pending': 3},
@@ -255,13 +288,16 @@ void main() {
       disableAnimations: true,
     );
     await tester.pump();
-    expect(find.text('not connected'), findsOneWidget);
-    expect(find.text('—'), findsOneWidget); // disbursement only
-    expect(find.text('collected / 4 due'), findsOneWidget);
-    expect(find.text('6'), findsOneWidget);
-    expect(find.text('5'), findsOneWidget);
-    expect(find.text('0'), findsOneWidget); // pending
-    expect(opacityOf(tester, find.text('PENDING')), 1);
+    // MTD from the month objects: disbursement not connected, FTOD 3 of 4 due, PTP 2.
+    // FTD from `yesterday`: FTOD 0 of 6 due; no disbursement or PTP there.
+    expect(find.text('not available'), findsNWidgets(2));
+    expect(find.text('—'), findsNWidgets(3)); // both disbursements + FTD PTP
+    expect(find.text('of 4 due'), findsOneWidget);
+    expect(find.text('3'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+    expect(find.text('of 6 due'), findsOneWidget);
+    expect(find.text('0'), findsOneWidget); // yesterday's still-unpaid
+    expect(opacityOf(tester, find.text('PTP')), 1);
     expect(opacityOf(tester, find.text('FTD · 29 SEP')), 1);
     expect(ctaEnabled(tester), isTrue);
 
