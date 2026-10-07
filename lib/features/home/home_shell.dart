@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,31 +9,18 @@ import 'package:go_router/go_router.dart';
 import '../../core/api_client.dart';
 import '../../core/branding.dart';
 import '../../core/navigation/mobile_menu_config.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../announcements/announcements_repository.dart';
 import '../policies/policies_repository.dart';
 import '../attendance/sign_out_guard.dart';
 import '../auth/auth_controller.dart';
+import '../auth/auth_models.dart';
 import '../chat/chat_controller.dart';
 import '../leaves/leave_repository.dart';
+import '../tasks/assign_task_screen.dart';
 import '../tasks/task_repository.dart';
-
-// ─────────────────────────────────────────────────────────────────────
-// Drawer presentation styles (all driven by the same mobile_menu_config):
-//   collapsible — #1: expandable module sections, menus inline.
-//   moduleList  — #2: module cards → each opens a dedicated module screen.
-// (chips — #3 — will be added when implemented.) Flip this one variable to
-// switch the drawer between implementations.
-// ─────────────────────────────────────────────────────────────────────
-enum _DrawerStyle { collapsible, moduleList }
-
-// `final` (not `const`) on purpose: it keeps BOTH branches live for the
-// analyzer, so the inactive style's code is never flagged as dead.
-// collapsible = everything stays IN the drawer (tap a module → its menus
-// expand inline, no new screen). moduleList = module cards → dedicated screens.
-// ignore: prefer_const_declarations
-final _DrawerStyle _kDrawerStyle = _DrawerStyle.collapsible;
 
 // ─────────────────────────────────────────────────────────────────────
 // Drawer badge counters — populated when the drawer is on screen.
@@ -123,6 +111,42 @@ class HomeShell extends ConsumerWidget {
     return -1;
   }
 
+  /// The centre orb's actions — each only when the user can open that menu.
+  List<_QuickAction> _quickActionsFor(BuildContext context, AuthUser? user) {
+    final routes = <String>{
+      for (final m in allMenuItems(user)) m.route,
+      for (final m in bottomNavTabs(user)) m.route,
+    };
+    final canAssign =
+        isManagerUser(user) && (user?.hasPermission('TASK_ASSIGN') ?? false);
+    return [
+      if (routes.contains('/leaves'))
+        _QuickAction('Apply leave', Icons.edit_calendar_rounded,
+            AppColors.primary, () => context.go('/leaves')),
+      if (routes.contains('/attendance'))
+        _QuickAction('Regularise', Icons.history_rounded, AppColors.success,
+            () => context.go('/attendance')),
+      if (routes.contains('/tasks'))
+        canAssign
+            ? _QuickAction(
+                'Assign task',
+                Icons.add_task_rounded,
+                const Color(0xFF1D7A4A),
+                () => Navigator.of(context, rootNavigator: true).push(
+                  MaterialPageRoute(builder: (_) => const AssignTaskScreen()),
+                ),
+              )
+            : _QuickAction('New task', Icons.add_task_rounded,
+                const Color(0xFF1D7A4A), () => context.go('/tasks')),
+      if (routes.contains('/travel/claims'))
+        _QuickAction('Travel claim', Icons.receipt_long_rounded,
+            const Color(0xFFC2571A), () => context.push('/travel/claims/new')),
+      if (routes.contains('/helpdesk'))
+        _QuickAction('Raise ticket', Icons.support_agent_rounded,
+            const Color(0xFF2F18C0), () => context.push('/helpdesk/raise')),
+    ];
+  }
+
   String _titleFor(String loc) {
     if (loc.startsWith('/home')) return 'Dashboard';
     if (loc.startsWith('/attendance')) return 'Attendance';
@@ -141,9 +165,25 @@ class HomeShell extends ConsumerWidget {
     final isManager = isManagerUser(user);
     // Bottom-nav tabs come from the centralized mobile_menu_config (Home, HRMS,
     // Payroll, My Team*, More — My Team only for managers). No hardcoded tabs.
+    // Live counts on the tab bar (unread chats, open tasks).
+    final tabBadges = <String, int>{
+      '/chats': ref.watch(totalUnreadProvider),
+      '/tasks': ref.watch(_drawerActiveTasksProvider).asData?.value ?? 0,
+    };
     final visibleTabs = bottomNavTabs(user)
-        .map((m) => _Tab(label: m.label, icon: m.icon, selectedIcon: m.icon, path: m.route))
+        .map((m) => _Tab(
+              label: m.label,
+              icon: m.icon,
+              selectedIcon: m.icon,
+              path: m.route,
+              badge: tabBadges[m.route] ?? 0,
+            ))
         .toList();
+    final quickActions = _quickActionsFor(context, user);
+    // The design's bar holds two tabs each side of the orb; any further tab
+    // moves to the top of the side menu so it stays one tap away.
+    final barTabs = visibleTabs.take(4).toList();
+    final extraTabs = visibleTabs.skip(4).toList();
     final index = _indexFromLocation(loc, visibleTabs);
 
     return PopScope(
@@ -158,49 +198,38 @@ class HomeShell extends ConsumerWidget {
       backgroundColor: Colors.transparent,
       extendBody: true,
       extendBodyBehindAppBar: true,
-      drawer: _AppDrawer(currentPath: loc, isManager: isManager),
+      drawer: _AppDrawer(
+        currentPath: loc,
+        isManager: isManager,
+        extraTabs: [
+          for (final t in extraTabs)
+            _NavItemData(
+              label: t.label,
+              icon: t.icon,
+              path: t.path,
+              badge: t.badge > 0 ? t.badge : null,
+            ),
+        ],
+      ),
       appBar: PreferredSize(
         preferredSize: Size.fromHeight(
-          MediaQuery.of(context).padding.top + AppChrome.appBarHeight,
+          MediaQuery.of(context).padding.top + AppChrome.appBarHeight + 8,
         ),
         child: AnnotatedRegion<SystemUiOverlayStyle>(
-          value: SystemUiOverlayStyle.light,
+          value: SystemUiOverlayStyle.dark,
           child: Container(
-            color: AppColors.deep,
+            color: AppColors.bg,
             child: SafeArea(
               bottom: false,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-                child: Row(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+                child: Stack(
+                  alignment: Alignment.center,
                   children: [
-                    Builder(
-                      builder: (ctx) => _HamburgerButton(
-                        onTap: () => Scaffold.of(ctx).openDrawer(),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    GestureDetector(
-                      onTap: () => context.push('/profile'),
-                      child: Container(
-                        padding: const EdgeInsets.all(2),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(13),
-                          border: Border.all(
-                            color: AppColors.live.withOpacity(0.9),
-                            width: 1.5,
-                          ),
-                        ),
-                        child: UserAvatar(
-                          name: user?.username ?? '',
-                          size: 34,
-                          radius: 10,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
+                    // Centred title (soft theme), clear of the side buttons.
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 96),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
@@ -210,7 +239,7 @@ class HomeShell extends ConsumerWidget {
                             style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
-                              color: Colors.white,
+                              color: AppColors.ink,
                               letterSpacing: -0.3,
                             ),
                           ),
@@ -219,21 +248,53 @@ class HomeShell extends ConsumerWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.white70,
+                              fontSize: 11.5,
+                              color: AppColors.muted,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    // AI Assistant lives here (top-right of the shell
-                    // header, every tab), not in the menu list.
-                    if (ref
-                        .watch(brandingProvider)
-                        .featureEnabled('FEATURE_AI_ASSISTANT'))
-                      _AssistantButton(
-                          onTap: () => context.push('/assistant')),
+                    Row(
+                      children: [
+                        Builder(
+                          builder: (ctx) => _HamburgerButton(
+                            onTap: () => Scaffold.of(ctx).openDrawer(),
+                          ),
+                        ),
+                        const Spacer(),
+                        // AI Assistant lives here (top-right of the shell
+                        // header, every tab), not in the menu list.
+                        if (ref
+                            .watch(brandingProvider)
+                            .featureEnabled('FEATURE_AI_ASSISTANT')) ...[
+                          _AssistantButton(
+                              onTap: () => context.push('/assistant')),
+                          const SizedBox(width: 8),
+                        ],
+                        Semantics(
+                          button: true,
+                          label: 'My profile',
+                          child: GestureDetector(
+                            onTap: () => context.push('/profile'),
+                            child: Container(
+                              padding: const EdgeInsets.all(2.5),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(14),
+                                boxShadow: AppShadows.soft,
+                              ),
+                              child: UserAvatar(
+                                name: user?.username ?? '',
+                                size: 35,
+                                radius: 11.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -267,9 +328,12 @@ class HomeShell extends ConsumerWidget {
       bottomNavigationBar: loc.startsWith('/attendance')
           ? null
           : _FloatingTabBar(
-              tabs: visibleTabs,
-              index: index,
-              onTap: (i) => context.go(visibleTabs[i].path),
+              tabs: barTabs,
+              index: index < barTabs.length ? index : -1,
+              onTap: (i) => context.go(barTabs[i].path),
+              onQuickActions: quickActions.isEmpty
+                  ? null
+                  : () => _showQuickActions(context, quickActions),
             ),
       ),
     );
@@ -288,9 +352,14 @@ class _AssistantButton extends StatelessWidget {
       button: true,
       label: 'AI Assistant',
       child: _ShellIconButton(
-        icon: Icons.auto_awesome_rounded,
         onTap: onTap,
-        iconColor: AppColors.live,
+        child: ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (r) => LinearGradient(
+            colors: [AppColors.primary, AppColors.glow],
+          ).createShader(r),
+          child: const Icon(Icons.auto_awesome_rounded, size: 19),
+        ),
       ),
     );
   }
@@ -305,37 +374,55 @@ class _HamburgerButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: 'Open menu',
-      child: _ShellIconButton(icon: Icons.menu_rounded, onTap: onTap),
+      child: _ShellIconButton(
+        onTap: onTap,
+        child: const CustomPaint(
+          size: Size(18, 12),
+          painter: _MenuLinesPainter(),
+        ),
+      ),
     );
   }
 }
 
-/// 40×40 translucent square for the deep shell header.
+/// Two short rounded lines (long over short) — the soft theme's menu glyph.
+class _MenuLinesPainter extends CustomPainter {
+  const _MenuLinesPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()
+      ..color = AppColors.ink
+      ..strokeWidth = 2.2
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(1, 2), Offset(size.width - 1, 2), p);
+    canvas.drawLine(Offset(1, size.height - 2), Offset(size.width * 0.6, size.height - 2), p);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// 40×40 white rounded square floating on a soft shadow.
 class _ShellIconButton extends StatelessWidget {
-  const _ShellIconButton({
-    required this.icon,
-    required this.onTap,
-    this.iconColor = Colors.white,
-  });
-  final IconData icon;
+  const _ShellIconButton({required this.child, required this.onTap});
+  final Widget child;
   final VoidCallback onTap;
-  final Color iconColor;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white.withOpacity(0.1),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.white.withOpacity(0.14)),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: AppShadows.soft,
       ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: SizedBox(
-          width: 40,
-          height: 40,
-          child: Icon(icon, size: 19, color: iconColor),
+      child: Material(
+        color: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(width: 40, height: 40, child: Center(child: child)),
         ),
       ),
     );
@@ -378,9 +465,16 @@ class _NavItemData {
 }
 
 class _AppDrawer extends ConsumerStatefulWidget {
-  const _AppDrawer({required this.currentPath, required this.isManager});
+  const _AppDrawer({
+    required this.currentPath,
+    required this.isManager,
+    this.extraTabs = const [],
+  });
   final String currentPath;
   final bool isManager;
+
+  /// Bottom-nav tabs that don't fit on the bar (shown under Dashboard).
+  final List<_NavItemData> extraTabs;
 
   @override
   ConsumerState<_AppDrawer> createState() => _AppDrawerState();
@@ -389,6 +483,12 @@ class _AppDrawer extends ConsumerStatefulWidget {
 class _AppDrawerState extends ConsumerState<_AppDrawer> {
   final _searchCtrl = TextEditingController();
   String _query = '';
+
+  /// Module tiles (grid) vs collapsible sections (list).
+  bool _grid = true;
+
+  /// Module opened from the grid — its menus replace the grid in place.
+  MobileModule? _open;
 
   @override
   void dispose() {
@@ -498,155 +598,224 @@ class _AppDrawerState extends ConsumerState<_AppDrawer> {
             })
             .toList();
 
+    // Drill-down: a module opened from the grid shows its menus in place.
+    final openSection = _open == null
+        ? null
+        : moduleSections.where((s) => s.info.module == _open).firstOrNull;
+
     return Drawer(
       backgroundColor: AppColors.bg,
       surfaceTintColor: Colors.transparent,
-      width: math.min(mq.size.width * 0.86, 340),
+      width: math.min(mq.size.width * 0.88, 360),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.horizontal(right: Radius.circular(24)),
+        borderRadius: BorderRadius.horizontal(right: Radius.circular(28)),
       ),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          // Deep header continues the shell app bar: who you are + search.
-          AnnotatedRegion<SystemUiOverlayStyle>(
-            value: SystemUiOverlayStyle.light,
-            child: Container(
-              color: AppColors.deep,
-              padding: EdgeInsets.fromLTRB(0, mq.padding.top + 10, 0, 14),
-              child: Column(
-                children: [
-                  _DrawerBrandRow(
-                    onClose: () => Navigator.pop(context),
-                    onOpenProfile: () {
-                      Navigator.pop(context);
-                      context.push('/profile');
-                    },
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle.dark,
+        child: Column(
+          children: [
+            SizedBox(height: mq.padding.top + 12),
+            _DrawerBrandRow(
+              onClose: () => Navigator.pop(context),
+              onOpenProfile: () {
+                Navigator.pop(context);
+                context.push('/profile');
+              },
+            ),
+            const SizedBox(height: 14),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _DrawerSearchField(
+                controller: _searchCtrl,
+                onChanged: (v) => setState(() => _query = v),
+              ),
+            ),
+            Expanded(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                switchInCurve: Curves.easeOutCubic,
+                transitionBuilder: (c, a) => FadeTransition(
+                  opacity: a,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0.04, 0),
+                      end: Offset.zero,
+                    ).animate(a),
+                    child: c,
                   ),
-                  const SizedBox(height: 12),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    child: _DrawerSearchField(
-                      controller: _searchCtrl,
-                      onChanged: (v) => setState(() => _query = v),
-                    ),
+                ),
+                child: ListView(
+                  key: ValueKey(query.isNotEmpty
+                      ? 'search'
+                      : openSection != null
+                          ? 'module-${openSection.info.module.name}'
+                          : 'home-$_grid'),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                  children: [
+                    if (query.isNotEmpty) ...[
+                      _DrawerSectionLabel(
+                          label: 'Results · ${searchItems.length}'),
+                      if (searchItems.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+                          child: Column(
+                            children: [
+                              const Icon(Icons.search_off_rounded,
+                                  size: 28, color: AppColors.faint),
+                              const SizedBox(height: 8),
+                              Text(
+                                'No menus match "${_query.trim()}"',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  color: AppColors.muted,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        _DrawerGroup(children: [
+                          for (final item in searchItems)
+                            _DrawerNavTile(
+                              item: item,
+                              currentPath: widget.currentPath,
+                            ),
+                        ]),
+                    ] else if (openSection != null) ...[
+                      _DrawerModuleHeader(
+                        label: openSection.info.label,
+                        icon: openSection.info.icon,
+                        accent: moduleAccent(openSection.info.module),
+                        count: openSection.items.length,
+                        onBack: () => setState(() => _open = null),
+                      ),
+                      const SizedBox(height: 14),
+                      _DrawerGroup(children: [
+                        for (final item in openSection.items)
+                          _DrawerNavTile(
+                            item: item,
+                            currentPath: widget.currentPath,
+                            accent: moduleAccent(openSection.info.module),
+                          ),
+                      ]),
+                    ] else ...[
+                      _DrawerDashboardTile(
+                        active: widget.currentPath.startsWith('/home'),
+                        onTap: () {
+                          Navigator.pop(context);
+                          context.go('/home');
+                        },
+                      ),
+                      if (widget.extraTabs.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        _DrawerGroup(children: [
+                          for (final t in widget.extraTabs)
+                            _DrawerNavTile(item: t, currentPath: widget.currentPath),
+                        ]),
+                      ],
+                      const SizedBox(height: 18),
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Your modules',
+                              style: TextStyle(
+                                fontSize: 15.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.ink,
+                                letterSpacing: -0.2,
+                              ),
+                            ),
+                          ),
+                          _ViewToggle(
+                            grid: _grid,
+                            onChanged: (g) => setState(() => _grid = g),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (_grid)
+                        GridView.count(
+                          padding: EdgeInsets.zero,
+                          crossAxisCount: 2,
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
+                          childAspectRatio: 1.06,
+                          children: [
+                            for (final sec in moduleSections)
+                              _ModuleTile(
+                                label: sec.info.label,
+                                icon: sec.info.icon,
+                                accent: moduleAccent(sec.info.module),
+                                badge: moduleBadge(sec.info.module),
+                                itemCount: sec.items.length,
+                                active: sec.items.any(
+                                    (i) => widget.currentPath.startsWith(i.path)),
+                                onTap: () =>
+                                    setState(() => _open = sec.info.module),
+                              ),
+                          ],
+                        )
+                      else
+                        for (var s = 0; s < moduleSections.length; s++)
+                          _ModuleSection(
+                            label: moduleSections[s].info.label,
+                            icon: moduleSections[s].info.icon,
+                            accent: moduleAccent(moduleSections[s].info.module),
+                            badge: moduleBadge(moduleSections[s].info.module),
+                            items: moduleSections[s].items,
+                            currentPath: widget.currentPath,
+                            initiallyExpanded: moduleSections[s].items.any(
+                                    (i) => widget.currentPath.startsWith(i.path)) ||
+                                (!anyActive && s == 0),
+                          ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Color(0x122A2470),
+                    blurRadius: 24,
+                    offset: Offset(0, -6),
                   ),
                 ],
               ),
+              padding: EdgeInsets.fromLTRB(16, 14, 12, mq.padding.bottom + 14),
+              child: _DrawerUserCard(
+                name: user?.username ?? 'User',
+                email: user?.email ?? '',
+                role: user?.role ?? 'EMPLOYEE',
+                onSignOut: () async {
+                  // The check-in guard reads providers, so it has to run
+                  // while the drawer — and this State's `ref` — is still
+                  // alive. Same reason the notifier is captured here.
+                  final checkedIn = await isCheckedInNow(ref);
+                  final auth = ref.read(authControllerProvider.notifier);
+                  if (!context.mounted) return;
+                  Navigator.pop(context);
+                  if (checkedIn) {
+                    await showCheckOutRequiredDialog(context);
+                    return;
+                  }
+                  if (context.mounted) {
+                    _showLogoutDialog(context, auth);
+                  }
+                },
+              ),
             ),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
-              children: [
-                // Implementation #1 — collapsible module sections.
-                if (query.isEmpty &&
-                    _kDrawerStyle == _DrawerStyle.collapsible) ...[
-                  _DrawerNavTile(
-                    item: const _NavItemData(
-                      label: 'Dashboard',
-                      icon: Icons.home_rounded,
-                      path: '/home',
-                    ),
-                    currentPath: widget.currentPath,
-                  ),
-                  const _DrawerSectionLabel(label: 'MODULES'),
-                  for (var s = 0; s < moduleSections.length; s++)
-                    _ModuleSection(
-                      label: moduleSections[s].info.label,
-                      icon: moduleSections[s].info.icon,
-                      accent: moduleAccent(moduleSections[s].info.module),
-                      badge: moduleBadge(moduleSections[s].info.module),
-                      items: moduleSections[s].items,
-                      currentPath: widget.currentPath,
-                      initiallyExpanded: moduleSections[s].items.any(
-                              (i) => widget.currentPath.startsWith(i.path)) ||
-                          (!anyActive && s == 0),
-                    ),
-                ]
-                // Implementation #2 — module list (cards) → module screen.
-                else if (query.isEmpty &&
-                    _kDrawerStyle == _DrawerStyle.moduleList) ...[
-                  const _DrawerSectionLabel(label: 'MODULES'),
-                  for (final mi in modulesFor(user)
-                      .where((m) => m.module != MobileModule.home))
-                    _ModuleCard(
-                      label: mi.label,
-                      icon: mi.icon,
-                      accent: moduleAccent(mi.module),
-                      badge: moduleBadge(mi.module),
-                      itemCount: itemsForModule(mi.module).length,
-                      active: widget.currentPath.startsWith(mi.route) ||
-                          itemsForModule(mi.module)
-                              .any((i) => widget.currentPath.startsWith(i.path)),
-                      // Push (not go) so the system Back returns to the
-                      // previous screen — predictable drawer navigation.
-                      onTap: () {
-                        Navigator.pop(context);
-                        context.push(mi.route);
-                      },
-                    ),
-                ] else if (searchItems.isEmpty) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
-                    child: Column(
-                      children: [
-                        const Icon(Icons.search_off_rounded,
-                            size: 28, color: AppColors.faint),
-                        const SizedBox(height: 8),
-                        Text(
-                          'No menus match "${_query.trim()}"',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 13.5,
-                            color: AppColors.muted,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ] else ...[
-                  _DrawerSectionLabel(label: 'RESULTS · ${searchItems.length}'),
-                  for (final item in searchItems)
-                    _DrawerNavTile(
-                      item: item,
-                      currentPath: widget.currentPath,
-                    ),
-                ],
-                const SizedBox(height: 12),
-              ],
-            ),
-          ),
-          Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: AppColors.hairline)),
-            ),
-            padding: EdgeInsets.fromLTRB(14, 12, 10, mq.padding.bottom + 12),
-            child: _DrawerUserCard(
-              name: user?.username ?? 'User',
-              email: user?.email ?? '',
-              role: user?.role ?? 'EMPLOYEE',
-              onSignOut: () async {
-                // The check-in guard reads providers, so it has to run
-                // while the drawer — and this State's `ref` — is still
-                // alive. Same reason the notifier is captured here.
-                final checkedIn = await isCheckedInNow(ref);
-                final auth = ref.read(authControllerProvider.notifier);
-                if (!context.mounted) return;
-                Navigator.pop(context);
-                if (checkedIn) {
-                  await showCheckOutRequiredDialog(context);
-                  return;
-                }
-                if (context.mounted) {
-                  _showLogoutDialog(context, auth);
-                }
-              },
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -712,109 +881,74 @@ class _DrawerBrandRow extends ConsumerWidget {
 
     // Name comes from the cached login user — shown instantly, no API wait.
     final name = user?.displayName ?? 'User';
+    final first = name.trim().split(RegExp(r'\s+')).first;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          // Tappable employee chip → profile.
           Expanded(
             child: Semantics(
               button: true,
               label: 'View profile for $name, employee code $code',
-              child: Material(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(14),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: onOpenProfile,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: AppColors.live.withOpacity(0.9),
-                              width: 1.5,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onOpenProfile,
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: AppShadows.soft,
+                      ),
+                      child: UserAvatar(name: name, size: 42, radius: 13),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Hello $first,',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.ink,
+                              letterSpacing: -0.4,
                             ),
                           ),
-                          child: UserAvatar(name: name, size: 40, radius: 11),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.white,
-                                  letterSpacing: -0.3,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      code,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                        color: Colors.white.withOpacity(0.62),
-                                        fontFeatures: const [
-                                          FontFeature.tabularFigures(),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  Icon(
-                                    Icons.chevron_right_rounded,
-                                    size: 16,
-                                    color: Colors.white.withOpacity(0.5),
-                                  ),
-                                ],
-                              ),
-                            ],
+                          const SizedBox(height: 1),
+                          Text(
+                            code,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.muted,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ),
           ),
           const SizedBox(width: 8),
-          // Close — icon-only, accessible label.
           Semantics(
             button: true,
             label: 'Close navigation drawer',
-            child: Material(
-              color: Colors.white.withOpacity(0.1),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: Colors.white.withOpacity(0.14)),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: onClose,
-                child: const SizedBox(
-                  width: 38,
-                  height: 38,
-                  child: Icon(Icons.close_rounded, size: 18, color: Colors.white),
-                ),
-              ),
+            child: _DrawerSquareButton(
+              icon: Icons.close_rounded,
+              onTap: onClose,
             ),
           ),
         ],
@@ -823,8 +957,38 @@ class _DrawerBrandRow extends ConsumerWidget {
   }
 }
 
+/// White rounded square icon button on a soft shadow.
+class _DrawerSquareButton extends StatelessWidget {
+  const _DrawerSquareButton({required this.icon, required this.onTap});
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(13),
+        boxShadow: AppShadows.soft,
+      ),
+      child: Material(
+        color: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: 38,
+            height: 38,
+            child: Icon(icon, size: 19, color: AppColors.ink),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
-// Search field (filters nav items locally) — translucent on the deep header
+// Search field (filters nav items locally)
 // ─────────────────────────────────────────────────────────────────────
 
 class _DrawerSearchField extends StatelessWidget {
@@ -839,42 +1003,38 @@ class _DrawerSearchField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 44, // touch target ≥44px
+      height: 46, // touch target ≥44px
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: Colors.white.withOpacity(0.14)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: AppShadows.soft,
       ),
       child: Row(
         children: [
-          const SizedBox(width: 12),
-          Icon(
-            Icons.search_rounded,
-            size: 18,
-            color: Colors.white.withOpacity(0.6),
-          ),
+          const SizedBox(width: 14),
+          const Icon(Icons.search_rounded, size: 19, color: AppColors.muted),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
               controller: controller,
               onChanged: onChanged,
-              cursorColor: AppColors.live,
+              cursorColor: AppColors.primary,
               cursorWidth: 1.5,
               style: const TextStyle(
                 fontSize: 14,
-                color: Colors.white,
+                color: AppColors.ink,
                 fontWeight: FontWeight.w500,
               ),
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 isCollapsed: true,
                 filled: false,
-                contentPadding: const EdgeInsets.symmetric(vertical: 13),
+                contentPadding: EdgeInsets.symmetric(vertical: 13),
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
                 focusedBorder: InputBorder.none,
                 hintText: 'Search menus…',
                 hintStyle: TextStyle(
-                  color: Colors.white.withOpacity(0.5),
+                  color: AppColors.faint,
                   fontSize: 14,
                   fontWeight: FontWeight.w400,
                 ),
@@ -882,25 +1042,18 @@ class _DrawerSearchField extends StatelessWidget {
             ),
           ),
           if (controller.text.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: IconButton(
-                splashRadius: 16,
-                visualDensity: VisualDensity.compact,
-                tooltip: 'Clear search',
-                icon: Icon(
-                  Icons.close_rounded,
-                  size: 16,
-                  color: Colors.white.withOpacity(0.7),
-                ),
-                onPressed: () {
-                  controller.clear();
-                  onChanged('');
-                },
-              ),
+            IconButton(
+              splashRadius: 16,
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Clear search',
+              icon: const Icon(Icons.close_rounded, size: 16, color: AppColors.muted),
+              onPressed: () {
+                controller.clear();
+                onChanged('');
+              },
             )
           else
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
         ],
       ),
     );
@@ -908,7 +1061,7 @@ class _DrawerSearchField extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Section header label (sentence case, muted)
+// Section label (sentence case)
 // ─────────────────────────────────────────────────────────────────────
 
 class _DrawerSectionLabel extends StatelessWidget {
@@ -917,15 +1070,12 @@ class _DrawerSectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final text = label.isEmpty
-        ? label
-        : label[0].toUpperCase() + label.substring(1).toLowerCase();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 14, 12, 6),
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
       child: Text(
-        text,
+        label,
         style: const TextStyle(
-          fontSize: 12,
+          fontSize: 13,
           fontWeight: FontWeight.w600,
           color: AppColors.muted,
         ),
@@ -935,10 +1085,320 @@ class _DrawerSectionLabel extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Collapsible module section (Implementation #1) — an expandable header
-// (module icon + label + aggregate badge + animated chevron) that reveals
-// the module's menu tiles inline on a white card. State is local so each
-// module expands independently.
+// Dashboard tile — a small gradient panel at the top of the menu
+// ─────────────────────────────────────────────────────────────────────
+
+class _DrawerDashboardTile extends StatelessWidget {
+  const _DrawerDashboardTile({required this.active, required this.onTap});
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: active,
+      label: 'Dashboard',
+      child: GestureDetector(
+        onTap: onTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.deep.withOpacity(0.3),
+                blurRadius: 24,
+                spreadRadius: -10,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: ProDeepSurface(
+            radius: 22,
+            padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.22),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(Icons.space_dashboard_rounded,
+                      size: 21, color: Colors.white),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Dashboard',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                      Text(
+                        'Your day at a glance',
+                        style: TextStyle(fontSize: 12, color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    active ? Icons.check_rounded : Icons.arrow_forward_rounded,
+                    size: 17,
+                    color: AppColors.deep,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Grid / list switch (two small squares, like the reference "Your lessons")
+// ─────────────────────────────────────────────────────────────────────
+
+class _ViewToggle extends StatelessWidget {
+  const _ViewToggle({required this.grid, required this.onChanged});
+  final bool grid;
+  final ValueChanged<bool> onChanged;
+
+  Widget _btn(IconData icon, bool on, VoidCallback tap, String label) {
+    return Semantics(
+      button: true,
+      selected: on,
+      label: label,
+      child: GestureDetector(
+        onTap: tap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: on ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(11),
+            boxShadow: on ? AppShadows.soft : null,
+          ),
+          child: Icon(icon, size: 18, color: on ? AppColors.primary : AppColors.faint),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _btn(Icons.grid_view_rounded, grid, () => onChanged(true), 'Grid view'),
+        const SizedBox(width: 6),
+        _btn(Icons.view_agenda_outlined, !grid, () => onChanged(false), 'List view'),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Module tile (grid) — gradient icon inside a progress-style ring
+// ─────────────────────────────────────────────────────────────────────
+
+class _ModuleTile extends StatelessWidget {
+  const _ModuleTile({
+    required this.label,
+    required this.icon,
+    required this.accent,
+    required this.badge,
+    required this.itemCount,
+    required this.active,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color accent;
+  final int badge;
+  final int itemCount;
+  final bool active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '$label, $itemCount menus${badge > 0 ? ', $badge pending' : ''}',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: AppShadows.card,
+        ),
+        child: Material(
+          color: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+            side: active
+                ? BorderSide(color: AppColors.primary.withOpacity(0.5), width: 1.4)
+                : BorderSide.none,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ProRingIcon(icon: icon, color: accent),
+                      const Spacer(),
+                      if (badge > 0)
+                        _DrawerBadge(value: badge, asString: false, tone: accent),
+                    ],
+                  ),
+                  const Spacer(),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    itemCount == 1 ? '1 menu' : '$itemCount menus',
+                    style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Opened module header (drill-down from the grid)
+// ─────────────────────────────────────────────────────────────────────
+
+class _DrawerModuleHeader extends StatelessWidget {
+  const _DrawerModuleHeader({
+    required this.label,
+    required this.icon,
+    required this.accent,
+    required this.count,
+    required this.onBack,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color accent;
+  final int count;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Semantics(
+          button: true,
+          label: 'All modules',
+          child: _DrawerSquareButton(
+            icon: Icons.chevron_left_rounded,
+            onTap: onBack,
+          ),
+        ),
+        const SizedBox(width: 12),
+        ProRingIcon(icon: icon, color: accent, size: 44),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.ink,
+                  letterSpacing: -0.4,
+                ),
+              ),
+              Text(
+                count == 1 ? '1 menu' : '$count menus',
+                style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// White rounded card holding nav rows separated by soft dividers.
+class _DrawerGroup extends StatelessWidget {
+  const _DrawerGroup({required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: AppShadows.card,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0)
+              const Divider(
+                height: 1,
+                thickness: 1,
+                indent: 60,
+                color: AppColors.hairlineSoft,
+              ),
+            children[i],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Collapsible module section (list view) — white card that expands to show
+// the module's menus inline. State is local so each module expands
+// independently.
 // ─────────────────────────────────────────────────────────────────────
 class _ModuleSection extends StatefulWidget {
   const _ModuleSection({
@@ -968,38 +1428,26 @@ class _ModuleSectionState extends State<_ModuleSection> {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-      margin: const EdgeInsets.only(bottom: 6),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: _expanded ? Colors.white : Colors.transparent,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        border: Border.all(
-          color: _expanded ? AppColors.hairline : Colors.transparent,
-        ),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: AppShadows.card,
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Material(
             color: Colors.transparent,
             child: InkWell(
-              borderRadius: BorderRadius.circular(AppRadii.lg),
               onTap: () => setState(() => _expanded = !_expanded),
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 child: Row(
                   children: [
-                    Container(
-                      width: 34,
-                      height: 34,
-                      decoration: BoxDecoration(
-                        color: widget.accent.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(widget.icon, size: 18, color: widget.accent),
-                    ),
+                    ProRingIcon(icon: widget.icon, color: widget.accent, size: 40),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -1018,7 +1466,7 @@ class _ModuleSectionState extends State<_ModuleSection> {
                         child: _DrawerBadge(
                           value: widget.badge,
                           asString: false,
-                          tone: AppColors.primary,
+                          tone: widget.accent,
                         ),
                       ),
                     AnimatedRotation(
@@ -1041,18 +1489,18 @@ class _ModuleSectionState extends State<_ModuleSection> {
             curve: Curves.easeOutCubic,
             alignment: Alignment.topCenter,
             child: _expanded
-                ? Padding(
-                    padding: const EdgeInsets.fromLTRB(6, 0, 6, 6),
-                    child: Column(
-                      children: [
-                        for (final item in widget.items)
-                          _DrawerNavTile(
-                            item: item,
-                            currentPath: widget.currentPath,
-                            nested: true,
-                          ),
-                      ],
-                    ),
+                ? Column(
+                    children: [
+                      const Divider(height: 1, thickness: 1, color: AppColors.hairlineSoft),
+                      for (final item in widget.items)
+                        _DrawerNavTile(
+                          item: item,
+                          currentPath: widget.currentPath,
+                          accent: widget.accent,
+                          nested: true,
+                        ),
+                      const SizedBox(height: 4),
+                    ],
                   )
                 : const SizedBox(width: double.infinity),
           ),
@@ -1063,93 +1511,92 @@ class _ModuleSectionState extends State<_ModuleSection> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Module card (Implementation #2) — a tappable card for a top-level module
-// (icon + label + menu count + aggregate badge + chevron). Highlights when
-// the current route belongs to the module; tapping opens its module screen.
+// Nav row — icon tile + label; active = brand tint + brand label
 // ─────────────────────────────────────────────────────────────────────
-class _ModuleCard extends StatelessWidget {
-  const _ModuleCard({
-    required this.label,
-    required this.icon,
-    required this.accent,
-    required this.badge,
-    required this.itemCount,
-    required this.active,
-    required this.onTap,
+
+class _DrawerNavTile extends StatelessWidget {
+  const _DrawerNavTile({
+    required this.item,
+    required this.currentPath,
+    this.accent,
+    this.nested = false,
   });
 
-  final String label;
-  final IconData icon;
-  final Color accent;
-  final int badge;
-  final int itemCount;
-  final bool active;
-  final VoidCallback onTap;
+  final _NavItemData item;
+  final String currentPath;
+  final Color? accent;
+  final bool nested;
+
+  bool get _isActive => currentPath.startsWith(item.path);
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Material(
-        color: Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-          side: BorderSide(
-            color: active ? AppColors.primary : AppColors.hairline,
-            width: active ? 1.4 : 1,
-          ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
+    final brand = AppColors.primary;
+    final tone = accent ?? brand;
+    final isActive = _isActive;
+
+    return Material(
+      color: isActive ? brand.withOpacity(0.07) : Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          Navigator.pop(context);
+          if (item.isPush) {
+            context.push(item.path);
+          } else {
+            context.go(item.path);
+          }
+        },
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.fromLTRB(nested ? 18 : 12, 7, 12, 7),
             child: Row(
               children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(11),
+                if (nested)
+                  SizedBox(
+                    width: 32,
+                    child: Icon(item.icon, size: 19, color: isActive ? brand : AppColors.muted),
+                  )
+                else
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [tone.withOpacity(0.18), tone.withOpacity(0.07)],
+                      ),
+                    ),
+                    child: Icon(item.icon, size: 18, color: tone),
                   ),
-                  child: Icon(icon, size: 20, color: accent),
-                ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        label,
-                        style: const TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.ink,
-                        ),
-                      ),
-                      const SizedBox(height: 1),
-                      Text(
-                        itemCount == 1 ? '1 menu' : '$itemCount menus',
-                        style: const TextStyle(fontSize: 12, color: AppColors.muted),
-                      ),
-                    ],
-                  ),
-                ),
-                if (badge > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: _DrawerBadge(
-                      value: badge,
-                      asString: false,
-                      tone: AppColors.primary,
+                  child: Text(
+                    item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                      color: isActive ? brand : AppColors.ink,
+                      letterSpacing: -0.1,
                     ),
                   ),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  size: 22,
-                  color: active ? AppColors.primary : AppColors.faint,
                 ),
+                if (item.badge != null && item.badge! > 0)
+                  _DrawerBadge(
+                    value: item.badge!,
+                    asString: item.badgeAsString,
+                    tone: brand,
+                  )
+                else
+                  Icon(
+                    isActive ? Icons.circle : Icons.chevron_right_rounded,
+                    size: isActive ? 7 : 20,
+                    color: isActive ? brand : AppColors.faint,
+                  ),
               ],
             ),
           ),
@@ -1160,118 +1607,7 @@ class _ModuleCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Nav tile — active = brand tint + brand icon/label
-// ─────────────────────────────────────────────────────────────────────
-
-class _DrawerNavTile extends StatelessWidget {
-  const _DrawerNavTile({
-    required this.item,
-    required this.currentPath,
-    this.nested = false,
-  });
-
-  final _NavItemData item;
-  final String currentPath;
-  final bool nested;
-
-  bool get _isActive => currentPath.startsWith(item.path);
-
-  @override
-  Widget build(BuildContext context) {
-    final color = AppColors.primary;
-    final isActive = _isActive;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 1),
-      child: Material(
-        color: isActive ? color.withOpacity(0.09) : Colors.transparent,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: () {
-            Navigator.pop(context);
-            if (item.isPush) {
-              context.push(item.path);
-            } else {
-              context.go(item.path);
-            }
-          },
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 44),
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(nested ? 8 : 10, 6, 8, 6),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: nested ? 28 : 34,
-                    height: nested ? 28 : 34,
-                    child: nested
-                        ? Icon(
-                            item.icon,
-                            size: 18,
-                            color: isActive ? color : AppColors.muted,
-                          )
-                        : DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: isActive
-                                  ? color.withOpacity(0.14)
-                                  : Colors.white,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: isActive
-                                    ? Colors.transparent
-                                    : AppColors.hairline,
-                              ),
-                            ),
-                            child: Icon(
-                              item.icon,
-                              size: 18,
-                              color: isActive ? color : AppColors.inkSoft,
-                            ),
-                          ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      item.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
-                        color: isActive ? color : AppColors.inkSoft,
-                        letterSpacing: -0.1,
-                      ),
-                    ),
-                  ),
-                  if (item.badge != null && item.badge! > 0)
-                    _DrawerBadge(
-                      value: item.badge!,
-                      asString: item.badgeAsString,
-                      tone: color,
-                    )
-                  else if (isActive)
-                    Container(
-                      width: 6,
-                      height: 6,
-                      margin: const EdgeInsets.only(right: 4),
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Badge — numeric (solid brand pill) or string-style "New" (success)
+// Badge — numeric (solid pill) or string-style "New" (success)
 // ─────────────────────────────────────────────────────────────────────
 
 class _DrawerBadge extends StatelessWidget {
@@ -1339,11 +1675,10 @@ class _DrawerUserCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        // Avatar with online status dot.
         Stack(
           clipBehavior: Clip.none,
           children: [
-            UserAvatar(name: name, size: 38, radius: 11),
+            UserAvatar(name: name, size: 38, radius: 12),
             Positioned(
               right: -1,
               bottom: -1,
@@ -1384,13 +1719,13 @@ class _DrawerUserCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
                     decoration: BoxDecoration(
-                      color: AppColors.neutralTint,
+                      color: AppColors.primary.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(AppRadii.pill),
                     ),
                     child: Text(
                       _roleLabel,
-                      style: const TextStyle(
-                        color: AppColors.inkSoft,
+                      style: TextStyle(
+                        color: AppColors.primary,
                         fontSize: 10.5,
                         fontWeight: FontWeight.w600,
                       ),
@@ -1418,18 +1753,14 @@ class _DrawerUserCard extends StatelessWidget {
           label: 'Sign out',
           child: Material(
             color: AppColors.dangerTint,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(13),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               onTap: onSignOut,
               child: const SizedBox(
                 width: 40,
                 height: 40,
-                child: Icon(
-                  Icons.logout_rounded,
-                  size: 18,
-                  color: AppColors.danger,
-                ),
+                child: Icon(Icons.logout_rounded, size: 18, color: AppColors.danger),
               ),
             ),
           ),
@@ -1443,73 +1774,303 @@ class _DrawerUserCard extends StatelessWidget {
 // Bottom nav item
 // ─────────────────────────────────────────────────────────────────────
 
-/// Floating deep capsule tab bar. The active tab expands into a white pill
-/// with its label; the others show their icon only.
+/// Floating white tab bar with a raised glossy quick-action orb sitting in a
+/// curved notch — the HTML design's `.bnav` + `.bn-fab`. The active tab is a
+/// brand-tinted pill with its label (when there is room); tabs can carry a
+/// red count badge.
 class _FloatingTabBar extends StatelessWidget {
   const _FloatingTabBar({
     required this.tabs,
     required this.index,
     required this.onTap,
+    this.onQuickActions,
   });
 
   final List<_Tab> tabs;
   final int index;
   final ValueChanged<int> onTap;
 
+  /// Opens the quick-actions arc; null hides the centre orb.
+  final VoidCallback? onQuickActions;
+
+  static const double barHeight = 68;
+  static const double _slot = 70;
+
+  Widget _half(List<int> items) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final active = items.contains(index);
+        const grow = 2.4;
+        final unit = c.maxWidth / (items.length - (active ? 1 : 0) + (active ? grow : 0));
+        return Row(
+          children: [
+            for (final i in items)
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 420),
+                curve: Curves.easeOutBack,
+                width: i == index ? unit * grow : unit,
+                child: _NavItem(
+                  tab: tabs[i],
+                  selected: i == index,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    onTap(i);
+                  },
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final safe = MediaQuery.of(context).padding.bottom;
+    final hasOrb = onQuickActions != null;
+    final split = hasOrb ? (tabs.length / 2).ceil() : tabs.length;
+    final left = [for (var i = 0; i < split; i++) i];
+    final right = [for (var i = split; i < tabs.length; i++) i];
+
     return Padding(
-      padding: EdgeInsets.fromLTRB(12, 0, 12, 12 + safe),
-      child: Container(
-        height: 64,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          color: AppColors.deep,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: Colors.white.withOpacity(0.07)),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x6604181C),
-              blurRadius: 40,
-              spreadRadius: -16,
-              offset: Offset(0, 20),
-            ),
-            BoxShadow(
-              color: Color(0x3304181C),
-              blurRadius: 6,
-              offset: Offset(0, 2),
-            ),
-          ],
-        ),
-        child: LayoutBuilder(
-          builder: (context, c) {
-            final n = tabs.length;
-            final grow = index >= 0 ? 2.2 : 1.0;
-            final unit = c.maxWidth / (n - 1 + grow);
-            return Row(
-              children: [
-                for (var i = 0; i < n; i++)
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 420),
-                    curve: Curves.easeOutBack,
-                    width: i == index ? unit * grow : unit,
-                    child: _NavItem(
-                      tab: tabs[i],
-                      selected: i == index,
-                      onTap: () {
-                        HapticFeedback.selectionClick();
-                        onTap(i);
-                      },
+      padding: EdgeInsets.fromLTRB(10, 0, 10, 10 + safe),
+      child: SizedBox(
+        height: barHeight + (hasOrb ? 34 : 0),
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.bottomCenter,
+          children: [
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: barHeight,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x6B2A2470),
+                      blurRadius: 40,
+                      spreadRadius: -18,
+                      offset: Offset(0, 20),
                     ),
-                  ),
-              ],
-            );
-          },
+                    BoxShadow(
+                      color: Color(0x122A2470),
+                      blurRadius: 6,
+                      offset: Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: hasOrb
+                    ? Row(
+                        children: [
+                          Expanded(child: _half(left)),
+                          const SizedBox(width: _slot),
+                          Expanded(child: _half(right)),
+                        ],
+                      )
+                    : _half(left),
+              ),
+            ),
+            if (hasOrb) ...[
+              // Curved notch the orb sits in.
+              const Positioned(
+                bottom: barHeight - 5,
+                child: CustomPaint(size: Size(136, 26), painter: _BumpPainter()),
+              ),
+              Positioned(
+                bottom: barHeight - 38 - 9,
+                child: _QuickOrb(onTap: onQuickActions!),
+              ),
+            ],
+          ],
         ),
       ),
     );
   }
+}
+
+/// The white bump: `M0 26 C 28 26, 34 1, 68 1 C 102 1, 108 26, 136 26 Z`.
+class _BumpPainter extends CustomPainter {
+  const _BumpPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final sx = size.width / 136, sy = size.height / 26;
+    final path = Path()
+      ..moveTo(0, 26 * sy)
+      ..cubicTo(28 * sx, 26 * sy, 34 * sx, 1 * sy, 68 * sx, 1 * sy)
+      ..cubicTo(102 * sx, 1 * sy, 108 * sx, 26 * sy, 136 * sx, 26 * sy)
+      ..close();
+    canvas.drawPath(path, Paint()..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// Glossy brand orb (62) inside a slowly turning dashed ring with an
+/// orbiting dot. [open] turns it white with an × (used by the overlay).
+class _QuickOrb extends StatefulWidget {
+  const _QuickOrb({required this.onTap, this.open = false});
+  final VoidCallback onTap;
+  final bool open;
+
+  @override
+  State<_QuickOrb> createState() => _QuickOrbState();
+}
+
+class _QuickOrbState extends State<_QuickOrb> with TickerProviderStateMixin {
+  late final AnimationController _ring =
+      AnimationController(vsync: this, duration: const Duration(seconds: 24))..repeat();
+  late final AnimationController _dot = AnimationController(
+    vsync: this,
+    duration: Duration(milliseconds: widget.open ? 1300 : 4500),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _ring.dispose();
+    _dot.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final brand = AppColors.primary;
+    return Semantics(
+      button: true,
+      label: widget.open ? 'Close quick actions' : 'Quick actions',
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          widget.onTap();
+        },
+        child: RepaintBoundary(
+          child: SizedBox(
+            width: 80,
+            height: 80,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Rotations only move cached layers — no per-frame repaint.
+                RotationTransition(
+                  turns: _ring,
+                  child: CustomPaint(
+                    size: const Size(80, 80),
+                    painter: _DashedRingPainter(brand.withOpacity(0.3)),
+                  ),
+                ),
+                RotationTransition(
+                  turns: _dot,
+                  child: SizedBox(
+                    width: 80,
+                    height: 80,
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: Container(
+                        width: 8,
+                        height: 8,
+                        margin: const EdgeInsets.only(top: 0),
+                        decoration: BoxDecoration(
+                          color: brand,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(color: brand.withOpacity(0.2), spreadRadius: 3),
+                            BoxShadow(color: brand.withOpacity(0.6), blurRadius: 8),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  width: 62,
+                  height: 62,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: widget.open ? Colors.white : null,
+                    gradient: widget.open
+                        ? null
+                        : LinearGradient(
+                            begin: const Alignment(-0.6, -0.9),
+                            end: const Alignment(0.6, 0.9),
+                            colors: [
+                              Color.lerp(brand, Colors.white, 0.32)!,
+                              brand,
+                              Color.lerp(brand, Colors.black, 0.2)!,
+                            ],
+                            stops: const [0, 0.62, 1],
+                          ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: brand.withOpacity(widget.open ? 0.35 : 0.75),
+                        blurRadius: 28,
+                        spreadRadius: -12,
+                        offset: const Offset(0, 16),
+                      ),
+                    ],
+                  ),
+                  foregroundDecoration: widget.open
+                      ? null
+                      : BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            center: const Alignment(-0.36, -0.52),
+                            radius: 0.62,
+                            colors: [
+                              Colors.white.withOpacity(0.85),
+                              Colors.white.withOpacity(0),
+                            ],
+                            stops: const [0, 0.5],
+                          ),
+                        ),
+                  child: AnimatedRotation(
+                    turns: widget.open ? 0.375 : 0,
+                    duration: const Duration(milliseconds: 500),
+                    curve: Curves.easeOutBack,
+                    child: Icon(
+                      Icons.add_rounded,
+                      size: 30,
+                      color: widget.open ? brand : Colors.white,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashedRingPainter extends CustomPainter {
+  _DashedRingPainter(this.color);
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = size.width / 2 - 1;
+    final c = size.center(Offset.zero);
+    final p = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round;
+    const dashes = 28;
+    const sweep = 2 * math.pi / dashes;
+    for (var i = 0; i < dashes; i++) {
+      canvas.drawArc(Rect.fromCircle(center: c, radius: r), i * sweep, sweep * 0.55, false, p);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedRingPainter old) => old.color != color;
 }
 
 class _NavItem extends StatelessWidget {
@@ -1525,67 +2086,321 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final brand = AppColors.primary;
     return Semantics(
       button: true,
       selected: selected,
-      label: tab.label,
+      label: tab.badge > 0 ? '${tab.label}, ${tab.badge} pending' : tab.label,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
-        child: Center(
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 320),
-            curve: Curves.easeOutCubic,
-            height: 48,
-            margin: const EdgeInsets.symmetric(horizontal: 2),
-            padding: EdgeInsets.symmetric(horizontal: selected ? 14 : 0),
-            decoration: BoxDecoration(
-              color: selected ? Colors.white : Colors.transparent,
-              borderRadius: BorderRadius.circular(999),
-              boxShadow: selected
-                  ? const [
-                      BoxShadow(
-                        color: Color(0x80000000),
-                        blurRadius: 16,
-                        spreadRadius: -8,
-                        offset: Offset(0, 6),
-                      ),
-                    ]
-                  : null,
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedScale(
-                  scale: selected ? 1.0 : 0.94,
-                  duration: const Duration(milliseconds: 320),
-                  curve: Curves.easeOutBack,
-                  child: Icon(
-                    selected ? tab.selectedIcon : tab.icon,
-                    size: 21,
-                    color: selected ? AppColors.deep : Colors.white.withOpacity(0.62),
+        child: LayoutBuilder(
+          builder: (context, c) {
+            // Label only when the active pill has room for it.
+            final showLabel = selected && c.maxWidth >= 78;
+            return Center(
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 320),
+                    curve: Curves.easeOutCubic,
+                    height: 48,
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    padding: EdgeInsets.symmetric(horizontal: showLabel ? 10 : 0),
+                    decoration: BoxDecoration(
+                      color: selected ? brand.withOpacity(0.11) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        AnimatedScale(
+                          scale: selected ? 1.0 : 0.94,
+                          duration: const Duration(milliseconds: 320),
+                          curve: Curves.easeOutBack,
+                          child: Icon(
+                            selected ? tab.selectedIcon : tab.icon,
+                            size: 22,
+                            color: selected ? brand : AppColors.muted,
+                          ),
+                        ),
+                        if (showLabel)
+                          Flexible(
+                            child: Padding(
+                              padding: const EdgeInsets.only(left: 6),
+                              // Short form ("My Team" → "Team") and shrink-to-
+                              // fit so the label never clips on small phones.
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  tab.label.startsWith('My ')
+                                      ? tab.label.substring(3)
+                                      : tab.label,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: brand,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-                if (selected)
-                  Flexible(
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 7),
-                      child: Text(
-                        tab.label,
-                        maxLines: 1,
-                        overflow: TextOverflow.fade,
-                        softWrap: false,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: -0.1,
-                          color: AppColors.deep,
+                  if (tab.badge > 0 && !showLabel)
+                    Positioned(
+                      top: 5,
+                      left: c.maxWidth / 2 + 4,
+                      child: Container(
+                        constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                        padding: const EdgeInsets.symmetric(horizontal: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE5484D),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          tab.badge > 99 ? '99+' : '${tab.badge}',
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            height: 1.1,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
                     ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// One quick action shown on the arc.
+class _QuickAction {
+  const _QuickAction(this.label, this.icon, this.color, this.run);
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback run;
+}
+
+/// Full-screen quick-actions arc (the HTML design's `.orb`): a violet glow
+/// scrim, a title, a thin arc and up to five white action bubbles that fly
+/// out of the orb. The orb itself (now white with an ×) closes it.
+Future<void> _showQuickActions(BuildContext context, List<_QuickAction> actions) {
+  return showGeneralDialog<void>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: 'Close quick actions',
+    barrierColor: Colors.transparent,
+    transitionDuration: const Duration(milliseconds: 260),
+    pageBuilder: (ctx, _, __) => _QuickActionsOverlay(actions: actions),
+    transitionBuilder: (ctx, a, _, child) => FadeTransition(opacity: a, child: child),
+  );
+}
+
+class _QuickActionsOverlay extends StatefulWidget {
+  const _QuickActionsOverlay({required this.actions});
+  final List<_QuickAction> actions;
+
+  @override
+  State<_QuickActionsOverlay> createState() => _QuickActionsOverlayState();
+}
+
+class _QuickActionsOverlayState extends State<_QuickActionsOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..forward();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final w = mq.size.width;
+    final brand = AppColors.primary;
+    // Same spot as the tab-bar orb: bar bottom margin 10 + safe, bar 68,
+    // orb centre 7px below the bar top.
+    final fabFromBottom = 10 + mq.padding.bottom + _FloatingTabBar.barHeight - 7;
+    final fab = Offset(w / 2, mq.size.height - fabFromBottom);
+    final r = math.min(140.0, w / 2 - 52);
+    final n = widget.actions.length;
+
+    return Material(
+      type: MaterialType.transparency,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () => Navigator.of(context).pop(),
+              // Blurred, deep violet scrim with a brand glow around the orb.
+              child: ClipRect(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: RadialGradient(
+                        center: Alignment(0, (fab.dy / mq.size.height) * 2 - 1),
+                        radius: 1.1,
+                        colors: [
+                          Color.lerp(brand, const Color(0xFF140F35), 0.25)!
+                              .withOpacity(0.9),
+                          const Color(0xEB140F35),
+                        ],
+                        stops: const [0, 0.62],
+                      ),
+                    ),
                   ),
-              ],
+                ),
+              ),
             ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: fab.dy - r - 118,
+            child: FadeTransition(
+              opacity: CurvedAnimation(parent: _c, curve: const Interval(0.1, 0.5)),
+              child: const Column(
+                children: [
+                  Text(
+                    'Quick actions',
+                    style: TextStyle(
+                      fontSize: 22,
+                      height: 1.25,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    'Pick one, or tap × to close',
+                    style: TextStyle(fontSize: 13, color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            left: fab.dx - r,
+            top: fab.dy - r,
+            child: IgnorePointer(
+              child: AnimatedBuilder(
+                animation: _c,
+                builder: (_, __) => CustomPaint(
+                  size: Size(r * 2, r * 2),
+                  painter: _ArcPainter(
+                    Curves.easeInOutCubic.transform(
+                        const Interval(0, 0.6).transform(_c.value)),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          for (var i = 0; i < n; i++)
+            _bubble(i, n, fab, r),
+          Positioned(
+            left: fab.dx - 40,
+            top: fab.dy - 40,
+            child: _QuickOrb(open: true, onTap: () => Navigator.of(context).pop()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bubble(int i, int n, Offset fab, double r) {
+    final a = widget.actions[i];
+    // Spread over 192°–348° (left to right across the top), like the design.
+    final deg = n == 1 ? 270.0 : 192 + i * (156 / (n - 1));
+    final rad = deg * math.pi / 180;
+    final target = fab + Offset(math.cos(rad) * r, math.sin(rad) * r);
+    final start = 0.06 * i;
+    final t = CurvedAnimation(
+      parent: _c,
+      curve: Interval(start, math.min(1, start + 0.62), curve: Curves.easeOutBack),
+    );
+    return AnimatedBuilder(
+      animation: t,
+      builder: (context, child) {
+        final p = Offset.lerp(fab, target, t.value)!;
+        return Positioned(
+          left: p.dx - 44,
+          top: p.dy - 29,
+          child: Opacity(
+            opacity: t.value.clamp(0.0, 1.0),
+            child: Transform.scale(scale: 0.4 + 0.6 * t.value.clamp(0.0, 1.2), child: child),
+          ),
+        );
+      },
+      child: GestureDetector(
+        onTap: () {
+          Navigator.of(context).pop();
+          a.run();
+        },
+        child: SizedBox(
+          width: 88,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    const BoxShadow(
+                      color: Color(0x80000000),
+                      blurRadius: 24,
+                      spreadRadius: -10,
+                      offset: Offset(0, 12),
+                    ),
+                    BoxShadow(color: Colors.white.withOpacity(0.12), spreadRadius: 5),
+                  ],
+                ),
+                foregroundDecoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    center: const Alignment(-0.4, -0.6),
+                    radius: 0.8,
+                    colors: [Colors.white.withOpacity(0), a.color.withOpacity(0.06)],
+                  ),
+                ),
+                child: Icon(a.icon, size: 24, color: a.color),
+              ),
+              const SizedBox(height: 7),
+              Text(
+                a.label,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  height: 1.2,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1593,15 +2408,46 @@ class _NavItem extends StatelessWidget {
   }
 }
 
+class _ArcPainter extends CustomPainter {
+  _ArcPainter(this.progress);
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (progress <= 0) return;
+    final rect = Offset.zero & size;
+    const start = 192 * math.pi / 180;
+    const sweep = 156 * math.pi / 180;
+    canvas.drawArc(
+      rect,
+      start,
+      sweep * progress,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..strokeCap = StrokeCap.round
+        ..color = Colors.white.withOpacity(0.35),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ArcPainter old) => old.progress != progress;
+}
+
 class _Tab {
   final String label;
   final IconData icon;
   final IconData selectedIcon;
   final String path;
+
+  /// Red count on the tab (0 hides it).
+  final int badge;
   const _Tab({
     required this.label,
     required this.icon,
     required this.selectedIcon,
     required this.path,
+    this.badge = 0,
   });
 }

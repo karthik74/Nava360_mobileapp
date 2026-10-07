@@ -908,10 +908,6 @@ class _MapPickerState extends State<_MapPicker> {
             onPressed: _chosen == null
                 ? null
                 : () => Navigator.of(context).pop(_chosen),
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.white,
-              disabledForegroundColor: Colors.white38,
-            ),
             child: const Text('Use'),
           ),
           const SizedBox(width: 6),

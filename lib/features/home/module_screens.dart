@@ -166,6 +166,44 @@ class _MenuRow extends StatelessWidget {
   }
 }
 
+/// Section label + 2-column grid of "lesson card" tiles (soft theme).
+class _MenuGrid extends StatelessWidget {
+  const _MenuGrid({required this.label, required this.items, required this.color});
+  final String label;
+  final List<MobileMenuItem> items;
+  final Color Function(MobileMenuItem) color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ProSectionHeader(title: label, small: true),
+        const SizedBox(height: 10),
+        GridView.count(
+          padding: EdgeInsets.zero,
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 1.16,
+          children: [
+            for (final it in items)
+              ProMenuTile(
+                icon: it.icon,
+                color: color(it),
+                title: it.label,
+                subtitle: _kMenuSubtitles[it.key],
+                onTap: () => context.push(it.route),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 /// Section label + grouped list.
 class _MenuGroup extends StatelessWidget {
   const _MenuGroup({required this.label, required this.children});
@@ -208,6 +246,9 @@ class ModuleGridScreen extends ConsumerStatefulWidget {
 class _ModuleGridScreenState extends ConsumerState<ModuleGridScreen> {
   final _q = TextEditingController();
   String _query = '';
+
+  /// Tiles (grid, default) or rows (list) — like the reference "Your lessons".
+  bool _grid = true;
 
   @override
   void dispose() {
@@ -260,13 +301,32 @@ class _ModuleGridScreenState extends ConsumerState<ModuleGridScreen> {
       ];
     } else {
       body = [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '${items.length} ${items.length == 1 ? 'menu' : 'menus'}',
+                style: const TextStyle(
+                  fontSize: 15.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ),
+            ProViewToggle(grid: _grid, onChanged: (g) => setState(() => _grid = g)),
+          ],
+        ),
         for (final g in _groupItems(items))
-          _MenuGroup(
-            label: g.key.label,
-            children: [
-              for (final it in g.value) _MenuRow(item: it, color: g.key.color),
-            ],
-          ),
+          if (_grid)
+            _MenuGrid(label: g.key.label, items: g.value, color: (_) => g.key.color)
+          else
+            _MenuGroup(
+              label: g.key.label,
+              children: [
+                for (final it in g.value) _MenuRow(item: it, color: g.key.color),
+              ],
+            ),
       ];
     }
 

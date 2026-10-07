@@ -40,6 +40,18 @@ void main() {
     await finishPreview(tester);
   });
 
+  previewTest('quick actions arc', (tester) async {
+    await pumpPreview(tester,
+        router: previewRouter(
+            initialLocation: '/home', shell: _shell, shellPages: _pages));
+    await tester.tap(find.bySemanticsLabel('Quick actions'));
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 60));
+    }
+    await snap(tester, 'quick_actions');
+    await finishPreview(tester);
+  });
+
   previewTest('hrms module', (tester) async {
     await pumpPreview(tester,
         router: previewRouter(

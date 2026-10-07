@@ -119,22 +119,13 @@ class _AuditHomeScreenState extends ConsumerState<AuditHomeScreen>
       backgroundColor: AppColors.bg,
       appBar: AppBar(
         title: const Text('Internal audit'),
-        // Tabs sit on the deep app bar so each tab's hero continues it.
+        // Tabs on the light app bar use the theme's ink + brand underline.
         bottom: _tabs.length > 1
             ? TabBar(
                 controller: ctrl,
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.white.withValues(alpha: 0.62),
-                indicatorSize: TabBarIndicatorSize.label,
-                indicator: const UnderlineTabIndicator(
-                  borderSide: BorderSide(color: Colors.white, width: 2.5),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(3)),
-                ),
                 dividerColor: Colors.transparent,
-                overlayColor: WidgetStatePropertyAll(
-                    Colors.white.withValues(alpha: 0.06)),
                 tabs: [for (final t in _tabs) Tab(text: _label(t))],
               )
             : null,

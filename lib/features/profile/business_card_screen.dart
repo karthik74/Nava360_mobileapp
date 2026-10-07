@@ -186,9 +186,13 @@ class _BusinessCardScreenState extends ConsumerState<BusinessCardScreen> {
                     onTap: canShare ? _shareCard : null,
                   ),
                 ],
-                // The card renders at its design size inside a FittedBox;
-                // the RepaintBoundary is what gets rasterized on share.
-                overlap: DecoratedBox(
+              ),
+              children: [
+                // Card preview sits below the header on the page gutter, so it
+                // lines up with the cards beneath it. The card renders at its
+                // design size inside a FittedBox; the RepaintBoundary is what
+                // gets rasterized on share.
+                DecoratedBox(
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(10),
                     boxShadow: AppShadows.lifted,
@@ -210,8 +214,6 @@ class _BusinessCardScreenState extends ConsumerState<BusinessCardScreen> {
                     ),
                   ),
                 ),
-              ),
-              children: [
                 GlassCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -293,7 +295,16 @@ class _BusinessCardScreenState extends ConsumerState<BusinessCardScreen> {
           onChanged: (_) => setState(() {}), // live preview + button state
           style: const TextStyle(fontSize: 15, color: AppColors.ink),
           decoration: InputDecoration(
-            prefixIcon: Icon(icon, size: 19),
+            // Multi-line fields keep the icon on the first text line instead
+            // of centring it against the whole box.
+            // (The decorator always centres the icon, so pad it upward by the
+            // extra lines' height — ~20px per line at this text size.)
+            prefixIcon: lines > 1
+                ? Padding(
+                    padding: EdgeInsets.only(bottom: (lines - 1) * 20.0),
+                    child: Icon(icon, size: 19),
+                  )
+                : Icon(icon, size: 19),
           ),
         ),
       ),

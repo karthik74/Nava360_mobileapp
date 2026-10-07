@@ -31,6 +31,21 @@ void main() {
     await finishPreview(tester);
   });
 
+  previewTest('tasks hub - my tasks filter sheet', (tester) async {
+    await pumpShellTab(tester,
+        location: '/tasks', shell: _shell, shellPages: _pages);
+    await tapAny(tester, [find.text('My tasks')]);
+    await tapAny(tester, [find.text('Filter')]);
+    await tapAny(tester, [find.text('In progress').last]);
+    await tapAny(tester, [find.text('High').last]);
+    await settle(tester, rounds: 2);
+    await snap(tester, 'tasks_filter_sheet');
+    Navigator.of(tester.element(find.text('Filter tasks').last)).pop();
+    await settle(tester, rounds: 2);
+    await snap(tester, 'tasks_filtered');
+    await finishPreview(tester);
+  });
+
   previewTest('tasks hub - team', (tester) async {
     await pumpShellTab(tester,
         location: '/tasks', shell: _shell, shellPages: _pages);

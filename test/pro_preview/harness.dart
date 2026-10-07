@@ -22,6 +22,7 @@ import 'package:flutter_test/flutter_test.dart';
 // ignore: depend_on_referenced_packages
 import 'package:geocoding_platform_interface/geocoding_platform_interface.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nava360/core/pro_ui.dart';
 import 'package:nava360/core/api_client.dart';
 import 'package:nava360/core/branding.dart';
 import 'package:nava360/core/theme.dart';
@@ -39,8 +40,12 @@ export 'fake_api.dart' show FakeApi, Raw, page;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Phone frame (logical px) and the tall variant for long scrolling screens.
-const Size kPhone = Size(390, 844);
-const Size kPhoneTall = Size(390, 1500);
+/// Override for a specific phone, e.g. --dart-define=PREVIEW_W=360
+/// --dart-define=PREVIEW_H=800 (a 720×1600 @2x Android phone).
+const double _kW = 0.0 + int.fromEnvironment('PREVIEW_W', defaultValue: 390);
+const double _kH = 0.0 + int.fromEnvironment('PREVIEW_H', defaultValue: 844);
+const Size kPhone = Size(_kW, _kH);
+const Size kPhoneTall = Size(_kW, 1500);
 const double kDpr = 2;
 
 /// Status-bar inset simulated at the top of every frame (logical px).
@@ -562,6 +567,9 @@ Future<void> pumpPreview(
         debugShowCheckedModeBanner: false,
         theme: previewTheme(),
         routerConfig: router,
+        // Same root wrapper as app.dart (narrow-phone text density).
+        builder: (context, child) =>
+            ProTextDensity(child: child ?? const SizedBox.shrink()),
       ),
     ),
   );

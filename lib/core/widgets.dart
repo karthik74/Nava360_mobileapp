@@ -585,7 +585,7 @@ class _DeepCard extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: DecoratedBox(
-        decoration: BoxDecoration(color: AppColors.deep),
+        decoration: BoxDecoration(gradient: AppColors.heroGradient),
         child: Stack(
           children: [
             Positioned.fill(
@@ -596,8 +596,8 @@ class _DeepCard extends StatelessWidget {
                       center: const Alignment(1.05, -1.1),
                       radius: 1.3,
                       colors: [
-                        AppColors.primary.withOpacity(0.62),
-                        AppColors.primary.withOpacity(0),
+                        Colors.white.withOpacity(0.28),
+                        Colors.white.withOpacity(0),
                       ],
                     ),
                   ),
@@ -612,8 +612,8 @@ class _DeepCard extends StatelessWidget {
                       center: const Alignment(-1.1, 1.2),
                       radius: 1.0,
                       colors: [
-                        AppColors.live.withOpacity(0.2),
-                        AppColors.live.withOpacity(0),
+                        AppColors.glow.withOpacity(0.42),
+                        AppColors.glow.withOpacity(0),
                       ],
                     ),
                   ),
@@ -789,185 +789,204 @@ class AttendanceHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final onClock = hasCheckedIn && !hasCheckedOut;
     final pillLabel = hasCheckedOut
-        ? 'Done for today'
+        ? 'Checked out'
         : hasCheckedIn
-            ? 'On the clock'
+            ? 'Checked in'
             : 'Not checked in';
-    final dotColor = hasCheckedOut
-        ? const Color(0xFF9FB3B8)
+    final pillColor = hasCheckedOut
+        ? AppColors.muted
         : hasCheckedIn
-            ? AppColors.live
-            : const Color(0xFFF2B347);
-    final pulse = hasCheckedIn && !hasCheckedOut;
+            ? AppColors.checkIn
+            : AppColors.warning;
     final caption = hasCheckedOut
         ? 'Shift complete · well done'
         : hasCheckedIn
             ? 'On the clock since $checkInTime'
             : 'Slide below when you reach work';
 
+    // Soft theme: a white card floating on the canvas; colour carries meaning
+    // only — green to check in, red to check out.
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: AppShadows.lifted,
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: AppShadows.card,
       ),
-      child: _DeepCard(
-        radius: 22,
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(
-                  "Today's shift",
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(AppRadii.pill),
-                    border: Border.all(color: Colors.white.withOpacity(0.14)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _PulseDot(color: dotColor, animate: pulse),
-                      const SizedBox(width: 7),
-                      Text(
-                        pillLabel,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              child: Text(
-                timerText,
-                key: ValueKey(timerText.length),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 46,
-                  fontWeight: FontWeight.w600,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                  height: 1.1,
-                  letterSpacing: -1.2,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                "Today's shift",
+                style: TextStyle(
+                  color: AppColors.muted,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Icon(Icons.place_outlined, size: 14, color: Colors.white.withOpacity(0.72)),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    location == '—' ? caption : '$caption · $location',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.72),
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.06),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.white.withOpacity(0.1)),
-              ),
-              child: IntrinsicHeight(
-                child: Row(
-                  children: [
-                    Expanded(child: _HeroMiniCard(label: 'Check-in', value: checkInTime)),
-                    VerticalDivider(width: 1, color: Colors.white.withOpacity(0.1)),
-                    Expanded(child: _HeroMiniCard(label: 'Check-out', value: checkOutTime)),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            if (hasCheckedOut)
+              const Spacer(),
               Container(
-                height: 52,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: Colors.white.withOpacity(0.12)),
+                  color: pillColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
                 ),
-                alignment: Alignment.center,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.check_circle_rounded, size: 18, color: AppColors.live),
-                    const SizedBox(width: 8),
-                    const Text(
-                      'Done for today',
+                    _PulseDot(color: pillColor, animate: onClock),
+                    const SizedBox(width: 7),
+                    Text(
+                      pillLabel,
                       style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
+                        color: pillColor,
+                        fontSize: 12,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
-              )
-            else
-              _SlideToConfirm(
-                label: hasCheckedIn ? 'Slide to check out' : 'Slide to check in',
-                busy: busy,
-                onConfirmed: onTap,
               ),
-          ],
-        ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: Text(
+              timerText,
+              key: ValueKey(timerText.length),
+              style: const TextStyle(
+                color: AppColors.ink,
+                fontSize: 34,
+                fontWeight: FontWeight.w700,
+                fontFeatures: [FontFeature.tabularFigures()],
+                height: 1.1,
+                letterSpacing: -1.2,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.place_outlined, size: 14, color: AppColors.muted),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  location == '—' ? caption : '$caption · $location',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _HeroMiniCard(
+                  label: 'Check-in',
+                  value: checkInTime,
+                  icon: Icons.login_rounded,
+                  color: AppColors.checkIn,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _HeroMiniCard(
+                  label: 'Check-out',
+                  value: checkOutTime,
+                  icon: Icons.logout_rounded,
+                  color: AppColors.checkOut,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (hasCheckedOut)
+            Container(
+              height: 48,
+              decoration: BoxDecoration(
+                color: AppColors.successTint,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              alignment: Alignment.center,
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_circle_rounded, size: 18, color: AppColors.success),
+                  SizedBox(width: 8),
+                  Text(
+                    'Done for today',
+                    style: TextStyle(
+                      color: AppColors.success,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            _SlideToConfirm(
+              label: hasCheckedIn ? 'Slide to check out' : 'Slide to check in',
+              color: hasCheckedIn ? AppColors.checkOut : AppColors.checkIn,
+              icon: hasCheckedIn ? Icons.logout_rounded : Icons.login_rounded,
+              busy: busy,
+              onConfirmed: onTap,
+            ),
+        ],
       ),
     );
   }
 }
 
 class _HeroMiniCard extends StatelessWidget {
-  const _HeroMiniCard({required this.label, required this.value});
+  const _HeroMiniCard({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.color,
+  });
   final String label;
   final String value;
+  final IconData icon;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
+    return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.62),
-              fontSize: 11.5,
-              fontWeight: FontWeight.w500,
-            ),
+          Row(
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.muted,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 2),
           Text(
             value,
             style: const TextStyle(
-              color: Colors.white,
+              color: AppColors.ink,
               fontSize: 16,
               fontWeight: FontWeight.w600,
               fontFeatures: [FontFeature.tabularFigures()],
@@ -984,10 +1003,16 @@ class _SlideToConfirm extends StatefulWidget {
   const _SlideToConfirm({
     required this.label,
     required this.onConfirmed,
+    required this.color,
+    required this.icon,
     this.busy = false,
   });
   final String label;
   final VoidCallback onConfirmed;
+
+  /// Action colour — green to check in, red to check out.
+  final Color color;
+  final IconData icon;
   final bool busy;
 
   @override
@@ -1021,7 +1046,7 @@ class _SlideToConfirmState extends State<_SlideToConfirm>
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, c) {
-      const knob = 52.0;
+      const knob = 46.0;
       final max = (c.maxWidth - knob - 8).clamp(1.0, double.infinity);
       final p = (_drag / max).clamp(0.0, 1.0);
       return Semantics(
@@ -1029,11 +1054,11 @@ class _SlideToConfirmState extends State<_SlideToConfirm>
         label: widget.label,
         onTap: widget.busy ? null : widget.onConfirmed,
         child: Container(
-          height: 60,
+          height: 54,
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.08),
+            color: widget.color.withOpacity(0.1),
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: Colors.white.withOpacity(0.14)),
+            border: Border.all(color: widget.color.withOpacity(0.35)),
           ),
           child: Stack(
             children: [
@@ -1046,8 +1071,8 @@ class _SlideToConfirmState extends State<_SlideToConfirm>
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(999),
                     gradient: LinearGradient(colors: [
-                      AppColors.live.withOpacity(0),
-                      AppColors.live.withOpacity(0.42),
+                      widget.color.withOpacity(0),
+                      widget.color.withOpacity(0.3),
                     ]),
                   ),
                 ),
@@ -1059,9 +1084,9 @@ class _SlideToConfirmState extends State<_SlideToConfirm>
                     padding: const EdgeInsets.only(left: 40),
                     child: Text(
                       widget.busy ? 'Please wait…' : widget.label,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
+                      style: TextStyle(
+                        color: Color.lerp(widget.color, Colors.black, 0.18),
+                        fontSize: 14.5,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -1089,28 +1114,38 @@ class _SlideToConfirmState extends State<_SlideToConfirm>
                   child: Container(
                     width: knob,
                     height: knob,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
+                    decoration: BoxDecoration(
+                      color: widget.color,
+                      // Glossy knob: highlight top-left over the action colour.
+                      gradient: RadialGradient(
+                        center: const Alignment(-0.4, -0.55),
+                        radius: 0.9,
+                        colors: [
+                          Color.lerp(widget.color, Colors.white, 0.45)!,
+                          widget.color,
+                          Color.lerp(widget.color, Colors.black, 0.12)!,
+                        ],
+                        stops: const [0, 0.55, 1],
+                      ),
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Color(0x8C000000),
-                          blurRadius: 16,
-                          spreadRadius: -6,
-                          offset: Offset(0, 6),
+                          color: widget.color.withOpacity(0.45),
+                          blurRadius: 14,
+                          spreadRadius: -4,
+                          offset: const Offset(0, 6),
                         ),
                       ],
                     ),
                     child: widget.busy
                         ? Padding(
                             padding: const EdgeInsets.all(16),
-                            child: CircularProgressIndicator(
+                            child: const CircularProgressIndicator(
                               strokeWidth: 2.4,
-                              valueColor: AlwaysStoppedAnimation(AppColors.primary),
+                              valueColor: AlwaysStoppedAnimation(Colors.white),
                             ),
                           )
-                        : Icon(Icons.keyboard_double_arrow_right_rounded,
-                            color: AppColors.deep, size: 24),
+                        : Icon(widget.icon, color: Colors.white, size: 22),
                   ),
                 ),
               ),

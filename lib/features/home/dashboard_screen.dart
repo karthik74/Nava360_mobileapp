@@ -521,7 +521,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       if (quickActions.length == 4) break;
     }
 
-    final firstName = user?.firstName?.trim() ?? '';
+    // First word only — a long full name wraps the hero title on small phones.
+    final firstName =
+        (user?.firstName?.trim() ?? '').split(RegExp(r'\s+')).first;
     final greetName = firstName.isNotEmpty ? firstName : (user?.username ?? '');
     final hour = _now.hour;
     final greeting = hour < 12
@@ -544,8 +546,41 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ref.invalidate(_dashTeamLeavesProvider);
           },
           hero: ProHero(
-            title: greetName.isEmpty ? greeting : '$greeting, $greetName',
-            subtitle: DateFormat('EEEE, d MMM').format(_now),
+            // Reference style: small "Hello Name," over a big bold line.
+            titleWidget: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (greetName.isNotEmpty)
+                  Text(
+                    'Hello $greetName,',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.white.withOpacity(0.88),
+                    ),
+                  ),
+                Text(
+                  '$greeting!',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 27,
+                    height: 1.15,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.9,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  DateFormat('EEEE, d MMM').format(_now),
+                  style: const TextStyle(fontSize: 12.5, color: Colors.white70),
+                ),
+              ],
+            ),
             children: [
               if (quickActions.isNotEmpty) ProHeroActions(actions: quickActions),
             ],
@@ -566,46 +601,50 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
             ),
 
-            // This month — grouped list (Pro)
+            // This month — 2×2 "lesson card" tiles (soft theme)
             if (!hiddenWidgets.contains('stats'))
               Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const ProSectionHeader(title: 'This month'),
                   const SizedBox(height: 10),
-                  ProListGroup(
+                  GridView.count(
+                    padding: EdgeInsets.zero,
+                    crossAxisCount: 2,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 1.32,
                     children: [
-                      ProListRow(
-                        leading: const ProIconWell(
-                            icon: Icons.check_circle_rounded,
-                            color: AppColors.success),
-                        title: 'Present days',
+                      _MonthTile(
+                        icon: Icons.check_circle_rounded,
+                        color: AppColors.success,
                         value: presentCount.toString(),
+                        label: 'Present days',
                         onTap: () => context.go('/attendance'),
                       ),
-                      ProListRow(
-                        leading: const ProIconWell(
-                            icon: Icons.access_time_rounded,
-                            color: AppColors.info),
-                        title: 'Hours worked',
+                      _MonthTile(
+                        icon: Icons.access_time_rounded,
+                        color: AppColors.info,
                         value: _fmtDuration(totalHours),
+                        label: 'Hours worked',
                         onTap: () => context.go('/attendance'),
                       ),
-                      ProListRow(
-                        leading: const ProIconWell(
-                            icon: Icons.event_available_rounded,
-                            color: AppColors.warning),
-                        title: 'Pending leave requests',
+                      _MonthTile(
+                        icon: Icons.event_available_rounded,
+                        color: AppColors.warning,
                         value: pendingLeaves.toString(),
-                        pill: pendingLeaves > 0 ? ProPill.warn('Waiting') : null,
+                        label: pendingLeaves > 0
+                            ? 'Leave requests waiting'
+                            : 'Pending leave requests',
                         onTap: () => context.go('/leaves'),
                       ),
-                      ProListRow(
-                        leading: ProIconWell(
-                            icon: Icons.task_alt_rounded,
-                            color: AppColors.primary),
-                        title: 'Active tasks',
+                      _MonthTile(
+                        icon: Icons.task_alt_rounded,
+                        color: AppColors.primary,
                         value: activeTasks.toString(),
+                        label: 'Active tasks',
                         onTap: () => context.go('/tasks'),
                       ),
                     ],
@@ -666,7 +705,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ),
         Positioned(
           right: 16,
-          bottom: mq.padding.bottom + AppChrome.bottomNavHeight + 14,
+          // Inside the shell padding.bottom already includes the tab bar.
+          bottom: (mq.padding.bottom > AppChrome.bottomNavHeight
+                  ? mq.padding.bottom
+                  : AppChrome.bottomNavHeight) +
+              8,
           child: const _ReportConcernButton(),
         ),
       ],
@@ -774,16 +817,22 @@ class _ReportConcernButton extends ConsumerWidget {
     if (!ref.watch(brandingProvider).featureEnabled('FEATURE_WHISTLEBLOWER')) {
       return const SizedBox.shrink();
     }
-    return Material(
-      color: AppColors.danger,
-      elevation: 4,
-      shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: () => context.push('/whistleblower'),
-        child: const Padding(
-          padding: EdgeInsets.all(15),
-          child: Icon(Icons.shield_outlined, color: Colors.white, size: 24),
+    // Small and dark — red is reserved for "check out" on this screen.
+    return Tooltip(
+      message: 'Report a concern',
+      child: Material(
+        color: AppColors.deep,
+        elevation: 3,
+        shape: CircleBorder(
+          side: BorderSide(color: Colors.white.withOpacity(0.14)),
+        ),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () => context.push('/whistleblower'),
+          child: const Padding(
+            padding: EdgeInsets.all(11),
+            child: Icon(Icons.shield_outlined, color: Colors.white, size: 20),
+          ),
         ),
       ),
     );
@@ -927,6 +976,75 @@ class _TeamLeaveRow extends StatelessWidget {
       subtitle: '${humanLeaveType(leave.leaveType)} · '
           '${leave.fromDate} → ${leave.toDate}',
       onTap: onTap,
+    );
+  }
+}
+
+/// White stat card: ring icon, big value, label (dashboard "This month").
+class _MonthTile extends StatelessWidget {
+  const _MonthTile({
+    required this.icon,
+    required this.color,
+    required this.value,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String value;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '$label: $value',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: AppShadows.card,
+        ),
+        child: Material(
+          color: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ProRingIcon(icon: icon, color: color, size: 42),
+                  const Spacer(),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      value,
+                      style: const TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                        letterSpacing: -0.6,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

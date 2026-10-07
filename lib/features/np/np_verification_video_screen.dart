@@ -11,6 +11,7 @@ import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/pro_ui.dart';
@@ -228,6 +229,10 @@ class _NpVerificationVideoScreenState extends State<NpVerificationVideoScreen> {
       child: Scaffold(
         backgroundColor: AppColors.deep,
         appBar: AppBar(
+          // Sits on the brand surface: white content, light status icons.
+          backgroundColor: AppColors.deep,
+          foregroundColor: Colors.white,
+          systemOverlayStyle: SystemUiOverlayStyle.light,
           title: const Text('Verification video'),
           automaticallyImplyLeading: false,
           leadingWidth: 64,

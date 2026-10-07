@@ -178,11 +178,11 @@ class _MisClientsScreenState extends ConsumerState<MisClientsScreen> {
             tooltip: 'Export CSV',
             onPressed: _exporting ? null : () => _export(async.valueOrNull),
             icon: _exporting
-                ? const SizedBox(
+                ? SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
+                        strokeWidth: 2, color: AppColors.primary),
                   )
                 : const Icon(Icons.download_rounded),
           ),

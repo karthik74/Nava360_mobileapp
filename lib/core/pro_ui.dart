@@ -51,10 +51,10 @@ class ProHero extends StatelessWidget {
     this.showBack = false,
     this.onBack,
     this.safeTop = false,
-    this.padding = const EdgeInsets.fromLTRB(16, 12, 16, 18),
+    this.padding = const EdgeInsets.fromLTRB(16, 6, 16, 14),
   });
 
-  /// Large title (24px). Ignored when [titleWidget] is set.
+  /// Large title (21px). Ignored when [titleWidget] is set.
   final String? title;
   final String? subtitle;
 
@@ -96,8 +96,14 @@ class ProHero extends StatelessWidget {
         kicker != null ||
         subtitle != null ||
         actions.isNotEmpty;
+    // Content sits inside the inset panel: panel inset + the given padding.
     final content = Padding(
-      padding: EdgeInsets.fromLTRB(padding.left, top, padding.right, padding.bottom),
+      padding: EdgeInsets.fromLTRB(
+        padding.left + _kPanelInset,
+        top + 4 + (padding.top < 10 ? 10 - padding.top : 0),
+        padding.right + _kPanelInset,
+        padding.bottom + 2,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -117,7 +123,7 @@ class ProHero extends StatelessWidget {
                             Text(
                               kicker!,
                               style: const TextStyle(
-                                fontSize: 12.5,
+                                fontSize: 12,
                                 fontWeight: FontWeight.w600,
                                 color: Colors.white70,
                               ),
@@ -128,10 +134,10 @@ class ProHero extends StatelessWidget {
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 24,
-                                height: 1.2,
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: -0.65,
+                                fontSize: 23,
+                                height: 1.15,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.7,
                                 color: Colors.white,
                               ),
                             ),
@@ -155,16 +161,18 @@ class ProHero extends StatelessWidget {
               ],
             ),
           for (var i = 0; i < children.length; i++) ...[
-            if (hasTitleRow || i > 0) const SizedBox(height: 14),
+            if (hasTitleRow || i > 0) const SizedBox(height: 12),
             children[i],
           ],
         ],
       ),
     );
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      // The panel starts under a light app bar (dark status icons) unless the
+      // screen has no app bar and the panel reaches the status bar.
+      value: safeTop ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: _HeroFrame(
-        lift: overlap == null ? 0 : 38,
+        lift: overlap == null ? 0 : 30,
         children: [
           const _DeepBackground(),
           content,
@@ -245,13 +253,33 @@ class _RenderHeroFrame extends RenderBox
       defaultHitTestChildren(result, position: position);
 }
 
+/// Horizontal inset of the hero panel from the screen edge.
+const double _kPanelInset = 10;
+
 class _DeepBackground extends StatelessWidget {
   const _DeepBackground();
 
   @override
-  Widget build(BuildContext context) => const ProDeepSurface(
-        padding: EdgeInsets.zero,
-        child: SizedBox.expand(),
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(_kPanelInset, 4, _kPanelInset, 0),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.deep.withOpacity(0.28),
+                blurRadius: 30,
+                spreadRadius: -14,
+                offset: const Offset(0, 16),
+              ),
+            ],
+          ),
+          child: const ProDeepSurface(
+            radius: 28,
+            padding: EdgeInsets.zero,
+            child: SizedBox.expand(),
+          ),
+        ),
       );
 }
 
@@ -341,36 +369,55 @@ class ProDeepSurface extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: DecoratedBox(
-        decoration: BoxDecoration(color: AppColors.deep),
+        decoration: BoxDecoration(gradient: AppColors.heroGradient),
         child: Stack(
           children: [
+            // Soft light bloom, top-right.
             Positioned.fill(
               child: IgnorePointer(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: RadialGradient(
-                      center: const Alignment(1.05, -1.1),
-                      radius: 1.25,
+                      center: const Alignment(0.95, -1.05),
+                      radius: 1.05,
                       colors: [
-                        Color.lerp(AppColors.primary, Colors.white, 0.05)!
-                            .withOpacity(0.62),
-                        AppColors.primary.withOpacity(0),
+                        Colors.white.withOpacity(0.30),
+                        Colors.white.withOpacity(0),
                       ],
                     ),
                   ),
                 ),
               ),
             ),
+            // Glossy sheen across the top half (glass highlight).
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.white.withOpacity(0.18),
+                        Colors.white.withOpacity(0),
+                      ],
+                      stops: const [0, 0.46],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            // Hue-shifted glow, bottom-left.
             Positioned.fill(
               child: IgnorePointer(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: RadialGradient(
-                      center: const Alignment(-1.1, 1.15),
-                      radius: 1.0,
+                      center: const Alignment(-1.0, 1.1),
+                      radius: 1.1,
                       colors: [
-                        AppColors.live.withOpacity(0.2),
-                        AppColors.live.withOpacity(0),
+                        AppColors.glow.withOpacity(0.45),
+                        AppColors.glow.withOpacity(0),
                       ],
                     ),
                   ),
@@ -379,7 +426,7 @@ class ProDeepSurface extends StatelessWidget {
             ),
             Positioned(
               right: -70,
-              top: -40,
+              top: -50,
               child: IgnorePointer(
                 child: CustomPaint(
                   size: const Size(240, 240),
@@ -402,19 +449,17 @@ class _RingsPainter extends CustomPainter {
     final p = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1
-      ..color = Colors.white.withOpacity(0.07);
-    canvas.drawCircle(c, size.width / 2, p);
-    p.color = Colors.white.withOpacity(0.04);
-    canvas.drawCircle(c, size.width / 2 + 32, p);
-    p.color = Colors.white.withOpacity(0.03);
-    canvas.drawCircle(c, size.width / 2 + 64, p);
+      ..color = Colors.white.withOpacity(0.14);
+    for (final r in [60.0, 92.0, 124.0]) {
+      canvas.drawCircle(c, r, p);
+    }
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// 40×40 translucent icon button for use on deep surfaces.
+/// 36×36 translucent icon button for use on deep surfaces.
 class ProHeroIconButton extends StatelessWidget {
   const ProHeroIconButton({
     super.key,
@@ -422,7 +467,7 @@ class ProHeroIconButton extends StatelessWidget {
     required this.onTap,
     this.tooltip,
     this.badge = false,
-    this.iconSize = 20,
+    this.iconSize = 19,
   });
 
   final IconData icon;
@@ -436,25 +481,25 @@ class ProHeroIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final btn = Material(
-      color: Colors.white.withOpacity(0.1),
+      color: Colors.white.withOpacity(0.2),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.white.withOpacity(0.14)),
+        side: BorderSide(color: Colors.white.withOpacity(0.24)),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: SizedBox(
-          width: 40,
-          height: 40,
+          width: 36,
+          height: 36,
           child: Stack(
             alignment: Alignment.center,
             children: [
               Icon(icon, size: iconSize, color: Colors.white),
               if (badge)
                 Positioned(
-                  top: 8,
-                  right: 9,
+                  top: 7,
+                  right: 8,
                   child: Container(
                     width: 8,
                     height: 8,
@@ -523,11 +568,11 @@ class _ProStatTile extends StatelessWidget {
     final on = stat.selected;
     final fg = on ? AppColors.deep : Colors.white;
     return Material(
-      color: on ? Colors.white : Colors.white.withOpacity(0.07),
+      color: on ? Colors.white : Colors.white.withOpacity(0.16),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         side: BorderSide(
-          color: on ? Colors.white : Colors.white.withOpacity(0.12),
+          color: on ? Colors.white : Colors.white.withOpacity(0.22),
         ),
       ),
       clipBehavior: Clip.antiAlias,
@@ -535,7 +580,7 @@ class _ProStatTile extends StatelessWidget {
         onTap: stat.onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.fromLTRB(11, 10, 8, 10),
+          padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -556,7 +601,7 @@ class _ProStatTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 11.5,
+                        fontSize: 11,
                         fontWeight: FontWeight.w600,
                         color: fg.withOpacity(0.82),
                       ),
@@ -571,7 +616,7 @@ class _ProStatTile extends StatelessWidget {
                 child: Text(
                   stat.value,
                   style: TextStyle(
-                    fontSize: 21,
+                    fontSize: 18,
                     height: 1.25,
                     fontWeight: FontWeight.w600,
                     letterSpacing: -0.4,
@@ -586,7 +631,7 @@ class _ProStatTile extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 11.5,
+                    fontSize: 11,
                     color: fg.withOpacity(0.72),
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
@@ -617,12 +662,12 @@ class ProHeroSegmented extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 42,
+      height: 38,
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.12)),
+        color: Colors.white.withOpacity(0.16),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withOpacity(0.22)),
       ),
       child: Row(
         children: [
@@ -639,7 +684,7 @@ class ProHeroSegmented extends StatelessWidget {
                   curve: Curves.easeOutCubic,
                   decoration: BoxDecoration(
                     color: i == selected ? Colors.white : Colors.transparent,
-                    borderRadius: BorderRadius.circular(9),
+                    borderRadius: BorderRadius.circular(999),
                     boxShadow: i == selected
                         ? const [
                             BoxShadow(
@@ -658,7 +703,7 @@ class ProHeroSegmented extends StatelessWidget {
                       if (icons != null && i < icons!.length) ...[
                         Icon(
                           icons![i],
-                          size: 15,
+                          size: 14,
                           color: i == selected ? AppColors.deep : Colors.white70,
                         ),
                         const SizedBox(width: 6),
@@ -669,7 +714,7 @@ class ProHeroSegmented extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                             color: i == selected ? AppColors.deep : Colors.white70,
                           ),
@@ -826,13 +871,13 @@ class ProHeroActions extends StatelessWidget {
                 child: Column(
                   children: [
                     Container(
-                      width: 50,
-                      height: 50,
+                      width: 44,
+                      height: 44,
                       decoration: BoxDecoration(
                         color: a.primary
                             ? Colors.white
                             : Colors.white.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(14),
                         border: Border.all(
                           color: a.primary
                               ? Colors.white
@@ -841,18 +886,18 @@ class ProHeroActions extends StatelessWidget {
                       ),
                       child: Icon(
                         a.icon,
-                        size: 21,
+                        size: 19,
                         color: a.primary ? AppColors.deep : Colors.white,
                       ),
                     ),
-                    const SizedBox(height: 7),
+                    const SizedBox(height: 6),
                     Text(
                       a.label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
-                        fontSize: 12,
+                        fontSize: 11.5,
                         fontWeight: FontWeight.w600,
                         color: Colors.white,
                       ),
@@ -896,11 +941,11 @@ class ProHeroIdentity extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 64,
-          height: 64,
+          width: 54,
+          height: 54,
           decoration: BoxDecoration(
             color: initials != null ? Colors.white : Colors.white.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(17),
             border: initials != null
                 ? null
                 : Border.all(color: Colors.white.withOpacity(0.18)),
@@ -918,7 +963,7 @@ class ProHeroIdentity extends StatelessWidget {
               ? Text(
                   initials!,
                   style: TextStyle(
-                    fontSize: 21,
+                    fontSize: 18,
                     fontWeight: FontWeight.w600,
                     letterSpacing: -0.4,
                     color: AppColors.deep,
@@ -927,7 +972,7 @@ class ProHeroIdentity extends StatelessWidget {
               : Icon(icon ?? Icons.description_outlined,
                   size: 28, color: Colors.white),
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 13),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -937,7 +982,7 @@ class ProHeroIdentity extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 22,
+                  fontSize: 19,
                   height: 1.22,
                   fontWeight: FontWeight.w600,
                   letterSpacing: -0.55,
@@ -950,7 +995,7 @@ class ProHeroIdentity extends StatelessWidget {
                   child: Text(
                     role!,
                     style: const TextStyle(
-                      fontSize: 13,
+                      fontSize: 12.5,
                       height: 1.35,
                       color: Colors.white70,
                     ),
@@ -958,7 +1003,7 @@ class ProHeroIdentity extends StatelessWidget {
                 ),
               if (tags.isNotEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(top: 9),
+                  padding: const EdgeInsets.only(top: 7),
                   child: Wrap(spacing: 6, runSpacing: 6, children: tags),
                 ),
             ],
@@ -1111,8 +1156,7 @@ class ProKpiStrip extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.hairline),
+        borderRadius: BorderRadius.circular(22),
         boxShadow: AppShadows.lifted,
       ),
       clipBehavior: Clip.antiAlias,
@@ -1123,7 +1167,7 @@ class ProKpiStrip extends StatelessWidget {
             for (var i = 0; i < cells.length; i++) ...[
               if (i > 0)
                 const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 14),
+                  padding: EdgeInsets.symmetric(vertical: 11),
                   child: VerticalDivider(
                       width: 1, thickness: 1, color: AppColors.hairlineSoft),
                 ),
@@ -1143,7 +1187,7 @@ class _KpiCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final body = Padding(
-      padding: const EdgeInsets.fromLTRB(12, 14, 12, 13),
+      padding: const EdgeInsets.fromLTRB(11, 10, 10, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -1154,7 +1198,7 @@ class _KpiCell extends StatelessWidget {
             child: Text(
               cell.value,
               style: TextStyle(
-                fontSize: 20,
+                fontSize: 17.5,
                 height: 1.3,
                 fontWeight: FontWeight.w600,
                 letterSpacing: -0.4,
@@ -1166,10 +1210,10 @@ class _KpiCell extends StatelessWidget {
           Text(
             cell.label,
             maxLines: 2,
-            style: const TextStyle(fontSize: 11.5, height: 1.3, color: AppColors.muted),
+            style: const TextStyle(fontSize: 11, height: 1.3, color: AppColors.muted),
           ),
           if (cell.progress != null) ...[
-            const SizedBox(height: 9),
+            const SizedBox(height: 7),
             ProBar(value: cell.progress!, color: cell.color, height: 3),
           ],
         ],
@@ -1250,8 +1294,8 @@ class ProSearchField extends StatelessWidget {
     final field = Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: raised ? AppShadows.lifted : null,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: raised ? AppShadows.lifted : AppShadows.soft,
       ),
       child: ValueListenableBuilder<TextEditingValue>(
         valueListenable: controller,
@@ -1261,10 +1305,10 @@ class ProSearchField extends StatelessWidget {
           onSubmitted: onSubmitted,
           autofocus: autofocus,
           textInputAction: TextInputAction.search,
-          style: const TextStyle(fontSize: 15, color: AppColors.ink),
+          style: const TextStyle(fontSize: 14, color: AppColors.ink),
           decoration: InputDecoration(
             hintText: hint,
-            prefixIcon: const Icon(Icons.search_rounded, size: 21),
+            prefixIcon: const Icon(Icons.search_rounded, size: 20),
             suffixIcon: v.text.isNotEmpty
                 ? IconButton(
                     tooltip: 'Clear search',
@@ -1276,21 +1320,21 @@ class ProSearchField extends StatelessWidget {
                     },
                   )
                 : trailing,
-            contentPadding: const EdgeInsets.symmetric(vertical: 15),
+            contentPadding: const EdgeInsets.symmetric(vertical: 12),
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(15),
+              borderRadius: BorderRadius.circular(18),
               borderSide: BorderSide(
-                color: raised ? AppColors.hairline : const Color(0xFFDBE3E5),
+                color: Colors.transparent,
               ),
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(15),
+              borderRadius: BorderRadius.circular(18),
               borderSide: BorderSide(
-                color: raised ? AppColors.hairline : const Color(0xFFDBE3E5),
+                color: Colors.transparent,
               ),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(15),
+              borderRadius: BorderRadius.circular(18),
               borderSide: BorderSide(color: AppColors.primary, width: 1.6),
             ),
           ),
@@ -1377,8 +1421,7 @@ class ProListGroup extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.hairline),
+        borderRadius: BorderRadius.circular(22),
         boxShadow: AppShadows.card,
       ),
       clipBehavior: Clip.antiAlias,
@@ -1445,7 +1488,7 @@ class ProListRow extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: EdgeInsets.fromLTRB(12, dense ? 9 : 11, 12, dense ? 9 : 11),
+          padding: EdgeInsets.fromLTRB(12, dense ? 8 : 10, 12, dense ? 8 : 10),
           child: Row(
             children: [
               if (leading != null) ...[leading!, const SizedBox(width: 12)],
@@ -1458,8 +1501,8 @@ class ProListRow extends StatelessWidget {
                       maxLines: titleMaxLines,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 15,
-                        height: 1.33,
+                        fontSize: 14.5,
+                        height: 1.3,
                         fontWeight: FontWeight.w500,
                         letterSpacing: -0.15,
                         color: AppColors.ink,
@@ -1471,7 +1514,7 @@ class ProListRow extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 12.5,
+                          fontSize: 12,
                           height: 1.35,
                           color: AppColors.muted,
                           fontFeatures: [FontFeature.tabularFigures()],
@@ -1483,7 +1526,7 @@ class ProListRow extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 12.5,
+                          fontSize: 12,
                           height: 1.35,
                           fontWeight: FontWeight.w500,
                           color: AppColors.inkSoft,
@@ -1502,7 +1545,7 @@ class ProListRow extends StatelessWidget {
                       Text(
                         value!,
                         style: TextStyle(
-                          fontSize: 14.5,
+                          fontSize: 14,
                           fontWeight: FontWeight.w600,
                           color: valueColor ?? AppColors.ink,
                           fontFeatures: const [FontFeature.tabularFigures()],
@@ -1534,7 +1577,7 @@ class ProIconWell extends StatelessWidget {
     required this.icon,
     this.color,
     this.background,
-    this.size = 34,
+    this.size = 32,
   });
   final IconData icon;
   final Color? color;
@@ -1547,9 +1590,27 @@ class ProIconWell extends StatelessWidget {
     return Container(
       width: size,
       height: size,
+      // Jelly gloss: a soft white highlight across the top of the tile.
+      foregroundDecoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(size * 0.34),
+        gradient: RadialGradient(
+          center: const Alignment(-0.45, -1.15),
+          radius: 1.05,
+          colors: [Colors.white.withOpacity(0.6), Colors.white.withOpacity(0)],
+        ),
+      ),
       decoration: BoxDecoration(
-        color: background ?? (color == null ? AppColors.neutralTint : c.withOpacity(0.11)),
-        borderRadius: BorderRadius.circular(size * 0.3),
+        color: background,
+        gradient: background != null
+            ? null
+            : LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: color == null
+                    ? const [Color(0xFFF3F2FA), Color(0xFFE9E8F4)]
+                    : [c.withOpacity(0.18), c.withOpacity(0.07)],
+              ),
+        borderRadius: BorderRadius.circular(size * 0.34),
       ),
       alignment: Alignment.center,
       child: Icon(icon, size: size * 0.53, color: c),
@@ -1562,7 +1623,7 @@ class ProAvatar extends StatelessWidget {
   const ProAvatar({
     super.key,
     required this.name,
-    this.size = 42,
+    this.size = 38,
     this.dot,
     this.color,
     this.dark = false,
@@ -1891,19 +1952,22 @@ class ProBackButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: 'Back',
-      child: Material(
-        color: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: AppColors.hairline),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: AppShadows.soft,
         ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: SizedBox(
-            width: 42,
-            height: 42,
-            child: Icon(icon, size: 24, color: AppColors.ink),
+        child: Material(
+          color: AppColors.surface,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: SizedBox(
+              width: 40,
+              height: 40,
+              child: Icon(icon, size: 24, color: AppColors.ink),
+            ),
           ),
         ),
       ),
@@ -1956,8 +2020,15 @@ class ProBottomBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: Color(0xF0F4F6F6),
-        border: Border(top: BorderSide(color: AppColors.hairline)),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x142A2470),
+            blurRadius: 24,
+            offset: Offset(0, -6),
+          ),
+        ],
       ),
       child: SafeArea(
         top: false,
@@ -2278,7 +2349,7 @@ class ProChipBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 40,
+      height: 36,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         clipBehavior: Clip.none,
@@ -2294,21 +2365,30 @@ class ProChipBar extends StatelessWidget {
             },
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
-                color: on ? AppColors.ink : AppColors.surface,
+                color: on ? AppColors.primary : AppColors.surface,
+                gradient: on
+                    ? LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color.lerp(AppColors.primary, Colors.white, 0.22)!,
+                          AppColors.primary,
+                        ],
+                      )
+                    : null,
                 borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: on ? AppColors.ink : const Color(0xFFDBE3E5)),
                 boxShadow: on
-                    ? const [
+                    ? [
                         BoxShadow(
-                          color: Color(0x660B1D21),
+                          color: AppColors.primary.withOpacity(0.38),
                           blurRadius: 14,
-                          spreadRadius: -8,
-                          offset: Offset(0, 6),
+                          spreadRadius: -6,
+                          offset: const Offset(0, 6),
                         ),
                       ]
-                    : null,
+                    : AppShadows.soft,
               ),
               alignment: Alignment.center,
               child: Row(
@@ -2316,7 +2396,7 @@ class ProChipBar extends StatelessWidget {
                   Text(
                     labels[i],
                     style: TextStyle(
-                      fontSize: 13.5,
+                      fontSize: 13,
                       fontWeight: on ? FontWeight.w600 : FontWeight.w500,
                       color: on ? Colors.white : AppColors.inkSoft,
                     ),
@@ -2517,25 +2597,11 @@ PreferredSizeWidget proDarkAppBar(
   List<Widget>? actions,
   PreferredSizeWidget? bottom,
 }) {
-  return AppBar(
-    backgroundColor: AppColors.deep,
-    foregroundColor: Colors.white,
-    systemOverlayStyle: SystemUiOverlayStyle.light,
-    titleSpacing: 4,
-    title: title == null
-        ? null
-        : Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 17, fontWeight: FontWeight.w600, letterSpacing: -0.3)),
-              if (subtitle != null)
-                Text(subtitle,
-                    style: const TextStyle(fontSize: 12, color: Colors.white70)),
-            ],
-          ),
+  // Soft theme: every app bar is light; the colour lives in the hero panel.
+  return proLightAppBar(
+    context,
+    title: title ?? '',
+    subtitle: subtitle,
     actions: actions,
     bottom: bottom,
   );
@@ -2562,24 +2628,310 @@ PreferredSizeWidget proLightAppBar(
             child: Center(child: ProBackButton(onTap: () => Navigator.of(context).maybePop())),
           )
         : null,
-    titleSpacing: canPop ? 4 : 16,
+    centerTitle: true,
+    titleSpacing: 8,
     title: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-                fontSize: 19,
+                fontSize: 16.5,
                 fontWeight: FontWeight.w600,
-                letterSpacing: -0.4,
+                letterSpacing: -0.3,
                 color: AppColors.ink)),
         if (subtitle != null)
-          Text(subtitle, style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
+          Text(subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: AppColors.muted)),
       ],
     ),
     actions: actions,
     bottom: bottom,
   );
+}
+
+/// App-wide text density. Narrow phones (≤ 360dp wide) get slightly smaller
+/// text (92%), easing back to 100% at 412dp, so the Pro layouts keep their
+/// proportions on small screens. Also caps the system font-size setting at
+/// 130% so headers, tiles and bars don't break apart.
+class ProTextDensity extends StatelessWidget {
+  const ProTextDensity({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    final t = ((mq.size.width - 360) / (412 - 360)).clamp(0.0, 1.0);
+    final factor = 0.92 + 0.08 * t;
+    final system = (mq.textScaler.scale(100) / 100).clamp(0.85, 1.3);
+    return MediaQuery(
+      data: mq.copyWith(textScaler: TextScaler.linear(system * factor)),
+      child: child,
+    );
+  }
+}
+
+/// Icon on a soft gradient disc wrapped in a partial accent ring — the soft
+/// theme's "lesson card" glyph (menus, modules, shortcuts).
+class ProRingIcon extends StatelessWidget {
+  const ProRingIcon({
+    super.key,
+    required this.icon,
+    required this.color,
+    this.size = 48,
+    this.progress = 0.72,
+  });
+
+  final IconData icon;
+  final Color color;
+  final double size;
+
+  /// Portion of the ring drawn in the accent colour (0–1).
+  final double progress;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(
+        painter: _ProRingPainter(color, progress),
+        child: Padding(
+          padding: EdgeInsets.all(size * 0.13),
+          // Glossy orb: saturated gradient sphere, white glyph, specular dot.
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color.lerp(color, Colors.white, 0.38)!,
+                  color,
+                  Color.lerp(color, Colors.black, 0.18)!,
+                ],
+                stops: const [0, 0.55, 1],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withOpacity(0.42),
+                  blurRadius: size * 0.22,
+                  spreadRadius: -size * 0.06,
+                  offset: Offset(0, size * 0.1),
+                ),
+              ],
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Positioned(
+                  left: size * 0.1,
+                  top: size * 0.06,
+                  child: Container(
+                    width: size * 0.36,
+                    height: size * 0.22,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(size),
+                      gradient: RadialGradient(
+                        colors: [
+                          Colors.white.withOpacity(0.75),
+                          Colors.white.withOpacity(0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Icon(icon, size: size * 0.36, color: Colors.white),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProRingPainter extends CustomPainter {
+  _ProRingPainter(this.color, this.progress);
+  final Color color;
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final r = rect.deflate(1.2);
+    canvas.drawArc(
+      r,
+      0,
+      math.pi * 2,
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.4
+        ..color = color.withOpacity(0.12),
+    );
+    canvas.drawArc(
+      r,
+      -math.pi / 2,
+      math.pi * 2 * progress.clamp(0.0, 1.0),
+      false,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.4
+        ..strokeCap = StrokeCap.round
+        ..shader = SweepGradient(
+          startAngle: -math.pi / 2,
+          endAngle: math.pi * 1.5,
+          colors: [color.withOpacity(0.35), color],
+        ).createShader(rect),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ProRingPainter old) =>
+      old.color != color || old.progress != progress;
+}
+
+/// Grid / list switch: two small squares, the active one white and lifted.
+class ProViewToggle extends StatelessWidget {
+  const ProViewToggle({super.key, required this.grid, required this.onChanged});
+  final bool grid;
+  final ValueChanged<bool> onChanged;
+
+  Widget _btn(IconData icon, bool on, VoidCallback tap, String label) {
+    return Semantics(
+      button: true,
+      selected: on,
+      label: label,
+      child: GestureDetector(
+        onTap: tap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: on ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(11),
+            boxShadow: on ? AppShadows.soft : null,
+          ),
+          child: Icon(icon, size: 18, color: on ? AppColors.primary : AppColors.faint),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _btn(Icons.grid_view_rounded, grid, () => onChanged(true), 'Grid view'),
+        const SizedBox(width: 6),
+        _btn(Icons.view_agenda_outlined, !grid, () => onChanged(false), 'List view'),
+      ],
+    );
+  }
+}
+
+/// White "lesson card" tile for menu grids: ring icon, title, one-line hint.
+class ProMenuTile extends StatelessWidget {
+  const ProMenuTile({
+    super.key,
+    required this.icon,
+    required this.color,
+    required this.title,
+    this.subtitle,
+    this.badge = 0,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String? subtitle;
+  final int badge;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: title,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: AppShadows.card,
+        ),
+        child: Material(
+          color: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ProRingIcon(icon: icon, color: color),
+                      const Spacer(),
+                      if (badge > 0)
+                        Container(
+                          constraints: const BoxConstraints(minWidth: 22, minHeight: 20),
+                          padding: const EdgeInsets.symmetric(horizontal: 7),
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            badge > 99 ? '99+' : '$badge',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const Spacer(),
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        height: 1.3,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

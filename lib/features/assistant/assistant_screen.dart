@@ -103,6 +103,9 @@ class _AssistantScreenState extends ConsumerState<AssistantScreen> {
       appBar: AppBar(
         toolbarHeight: 60,
         titleSpacing: 4,
+        // Gradient header (flexibleSpace) → white content, light status icons.
+        foregroundColor: Colors.white,
+        systemOverlayStyle: SystemUiOverlayStyle.light,
         flexibleSpace: const ProDeepSurface(
           padding: EdgeInsets.zero,
           child: SizedBox.expand(),

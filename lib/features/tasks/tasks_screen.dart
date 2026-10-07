@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -314,6 +315,148 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
     ref.invalidate(_taskDashboardProvider);
   }
 
+  /// Filters chosen in the Filter sheet (title search is separate).
+  int get _activeFilterCount =>
+      (_selectedFilter != _TaskFilter.all ? 1 : 0) +
+      (_priorityFilter != null ? 1 : 0) +
+      (_fromDate != null || _toDate != null ? 1 : 0);
+
+  void _clearAllFilters() {
+    setState(() {
+      _selectedFilter = _TaskFilter.all;
+      _priorityFilter = null;
+      _fromDate = null;
+      _toDate = null;
+    });
+  }
+
+  String _fmtDay(DateTime d) => DateFormat('d MMM').format(d);
+
+  /// One sheet for every filter type — applied live; "Show tasks" closes it.
+  Future<void> _openFilters() {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (sheetCtx, setSheet) {
+          void update(VoidCallback f) {
+            setState(f);
+            setSheet(() {});
+          }
+
+          Widget group(String label, List<Widget> chips) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: AppText.label.copyWith(color: AppColors.muted)),
+                  const SizedBox(height: 9),
+                  Wrap(spacing: 8, runSpacing: 8, children: chips),
+                ],
+              );
+
+          return Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            padding: EdgeInsets.fromLTRB(
+                20, 10, 20, 16 + MediaQuery.of(sheetCtx).padding.bottom),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD9D7E8),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Filter tasks',
+                          style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.ink,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _activeFilterCount == 0
+                            ? null
+                            : () => update(() {
+                                  _selectedFilter = _TaskFilter.all;
+                                  _priorityFilter = null;
+                                  _fromDate = null;
+                                  _toDate = null;
+                                }),
+                        child: const Text('Reset'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  group('Status', [
+                    for (final f in _TaskFilter.values)
+                      _FilterChoice(
+                        label: f.label,
+                        selected: _selectedFilter == f,
+                        onTap: () => update(() => _selectedFilter = f),
+                      ),
+                  ]),
+                  const SizedBox(height: 18),
+                  group('Priority', [
+                    for (var i = 0; i < _kPriorityKeys.length; i++)
+                      _FilterChoice(
+                        label: i == 0 ? 'Any' : _kPriorityLabels[i],
+                        selected: _priorityFilter == _kPriorityKeys[i],
+                        onTap: () =>
+                            update(() => _priorityFilter = _kPriorityKeys[i]),
+                      ),
+                  ]),
+                  const SizedBox(height: 18),
+                  _DateRangeBar(
+                    from: _fromDate,
+                    to: _toDate,
+                    onPickFrom: () async {
+                      await _pickFromDate();
+                      setSheet(() {});
+                    },
+                    onPickTo: () async {
+                      await _pickToDate();
+                      setSheet(() {});
+                    },
+                    onClear: () => update(() {
+                      _fromDate = null;
+                      _toDate = null;
+                    }),
+                  ),
+                  const SizedBox(height: 22),
+                  FilledButton(
+                    onPressed: () => Navigator.of(sheetCtx).pop(),
+                    child: Text(_activeFilterCount == 0
+                        ? 'Show all tasks'
+                        : 'Show tasks · $_activeFilterCount '
+                            '${_activeFilterCount == 1 ? 'filter' : 'filters'}'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   /// Hero stat tiles double as status filters (tap again to clear).
   void _toggleFilter(_TaskFilter f) {
     setState(() => _selectedFilter = _selectedFilter == f ? _TaskFilter.all : f);
@@ -414,47 +557,77 @@ class _TasksScreenState extends ConsumerState<TasksScreen> {
           ],
         ),
         children: [
-          // Status — single-line scrollable chips.
-          ProChipBar(
-            labels: [for (final f in _TaskFilter.values) f.label],
-            selected: _selectedFilter.index,
-            onSelected: (i) =>
-                setState(() => _selectedFilter = _TaskFilter.values[i]),
-            bleed: 0,
-          ),
-          // Priority — single-line scrollable chips.
-          Row(
-            children: [
-              const Icon(Icons.flag_outlined, size: 16, color: AppColors.muted),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ProChipBar(
-                  labels: _kPriorityLabels,
-                  selected: math.max(0, _kPriorityKeys.indexOf(_priorityFilter)),
-                  onSelected: (i) =>
-                      setState(() => _priorityFilter = _kPriorityKeys[i]),
-                  bleed: 0,
+          // One Filter button (status, priority, due date live in a sheet);
+          // the chosen filters show as removable tags underneath.
+          Builder(builder: (context) {
+            final rows = tasks.valueOrNull;
+            final n = rows == null ? null : _applyFilters(rows).length;
+            final active = _activeFilterCount;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${active > 0 ? 'Filtered tasks' : 'All tasks'}'
+                        '${n == null ? '' : ' · $n'}',
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.muted,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                    _FilterButton(count: active, onTap: _openFilters),
+                  ],
                 ),
-              ),
-            ],
-          ),
-          _DateRangeBar(
-            from: _fromDate,
-            to: _toDate,
-            onPickFrom: _pickFromDate,
-            onPickTo: _pickToDate,
-            onClear: _clearDates,
-          ),
+                if (active > 0) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (_selectedFilter != _TaskFilter.all)
+                        _ActiveFilterTag(
+                          label: _selectedFilter.label,
+                          onRemove: () =>
+                              setState(() => _selectedFilter = _TaskFilter.all),
+                        ),
+                      if (_priorityFilter != null)
+                        _ActiveFilterTag(
+                          label:
+                              '${_kPriorityLabels[_kPriorityKeys.indexOf(_priorityFilter)]} priority',
+                          onRemove: () => setState(() => _priorityFilter = null),
+                        ),
+                      if (_fromDate != null || _toDate != null)
+                        _ActiveFilterTag(
+                          label: 'Due ${_fromDate == null ? '…' : _fmtDay(_fromDate!)}'
+                              ' – ${_toDate == null ? '…' : _fmtDay(_toDate!)}',
+                          onRemove: _clearDates,
+                        ),
+                      TextButton(
+                        onPressed: _clearAllFilters,
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(0, 32),
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                        ),
+                        child: const Text('Clear all'),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            );
+          }),
           tasks.when(
             data: (rows) {
               final filtered = _applyFilters(rows);
-              final heading =
-                  '${_selectedFilter == _TaskFilter.all ? 'All tasks' : _selectedFilter.label} · ${filtered.length}';
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  ProSectionHeader(title: heading, small: true),
-                  const SizedBox(height: 10),
                   if (filtered.isEmpty)
                     ProEmpty(
                       icon: Icons.task_alt_rounded,
@@ -1014,6 +1187,189 @@ class TaskTemplateTile extends StatelessWidget {
               const Icon(Icons.chevron_right_rounded,
                   size: 20, color: Color(0xFFB3C0C3)),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// White pill "Filter" button with a brand count badge when filters are on.
+class _FilterButton extends StatelessWidget {
+  const _FilterButton({required this.count, required this.onTap});
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: count > 0 ? 'Filter tasks, $count active' : 'Filter tasks',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: AppShadows.soft,
+        ),
+        child: Material(
+          color: Colors.white,
+          shape: const StadiumBorder(),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 9, 12, 9),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.tune_rounded, size: 17, color: AppColors.primary),
+                  const SizedBox(width: 7),
+                  const Text(
+                    'Filter',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                  if (count > 0) ...[
+                    const SizedBox(width: 7),
+                    Container(
+                      constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Color.lerp(AppColors.primary, Colors.white, 0.22)!,
+                            AppColors.primary,
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        '$count',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A single-choice pill inside the Filter sheet.
+class _FilterChoice extends StatelessWidget {
+  const _FilterChoice({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final brand = AppColors.primary;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          height: 38,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: selected ? brand : Colors.white,
+            gradient: selected
+                ? LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color.lerp(brand, Colors.white, 0.22)!, brand],
+                  )
+                : null,
+            borderRadius: BorderRadius.circular(999),
+            border: selected ? null : Border.all(color: AppColors.hairline),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: brand.withOpacity(0.35),
+                      blurRadius: 14,
+                      spreadRadius: -6,
+                      offset: const Offset(0, 6),
+                    ),
+                  ]
+                : null,
+          ),
+          // widthFactor 1: the pill hugs its label instead of filling the row.
+          child: Center(
+            widthFactor: 1,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                color: selected ? Colors.white : AppColors.inkSoft,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Brand-tinted tag for an applied filter; tap × to remove it.
+class _ActiveFilterTag extends StatelessWidget {
+  const _ActiveFilterTag({required this.label, required this.onRemove});
+  final String label;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final brand = AppColors.primary;
+    return Semantics(
+      button: true,
+      label: 'Remove filter $label',
+      child: Material(
+        color: brand.withOpacity(0.1),
+        shape: const StadiumBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onRemove,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 9, 6),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: brand,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Icon(Icons.close_rounded, size: 15, color: brand),
+              ],
+            ),
           ),
         ),
       ),

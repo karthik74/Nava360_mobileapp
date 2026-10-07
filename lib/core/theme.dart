@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-/// Centralised design tokens — "Pro" theme (Nava360 redesign).
+/// Centralised design tokens — "Soft" theme (Nava360 redesign v2).
 ///
-/// Quiet neutral canvas, white cards with hairline borders, one action colour
-/// (the deployment's runtime brand colour, teal for NLPL), a deep premium
-/// surface derived from that brand for headers and hero cards, and Geist type.
-/// Token names are kept stable so every screen reskins without code changes.
+/// Airy lavender canvas, white rounded cards that float on soft tinted
+/// shadows, pill buttons, and a vivid brand-gradient panel for headers and
+/// hero cards (white text). One action colour: the deployment's runtime brand
+/// colour. Token names are kept stable so every screen reskins without code
+/// changes.
 class AppColors {
   AppColors._();
 
@@ -22,24 +23,30 @@ class AppColors {
 
   /// Lime "live" accent — success, live and in-progress states only, never
   /// big buttons.
-  static const live = Color(0xFF8CC63F);
+  static const live = Color(0xFF2FBF71);
 
-  /// Deep premium surface derived from the brand (headers, hero cards).
-  static const Color _defaultDeep = Color(0xFF06272E);
+  /// Attendance actions — always green to check IN and red to check OUT, so
+  /// the next action is obvious at a glance (readable on deep and white).
+  static const checkIn = Color(0xFF22A35A);
+  static const checkOut = Color(0xFFE5484D);
+
+  /// Vivid brand surface for header panels and hero cards (white text on
+  /// it). Derived from the brand by [applyBrand]; name kept for API stability.
+  static const Color _defaultDeep = Color(0xFF00839E);
   static Color deep = _defaultDeep;
 
   // Page chrome
-  static const bg = Color(0xFFF4F6F6); // neutral canvas
+  static const bg = Color(0xFFF3F2FA); // lavender canvas
   static const surface = Colors.white; // cards / sheets
-  static const surfaceAlt = Color(0xFFF5F7F7); // subtle fills, cells
+  static const surfaceAlt = Color(0xFFF7F6FC); // subtle fills, cells
 
   // Type
-  static const ink = Color(0xFF0B1D21);
-  static const inkSoft = Color(0xFF26393E);
-  static const muted = Color(0xFF62777C);
-  static const faint = Color(0xFF8A9A9E);
-  static const hairline = Color(0xFFE3E9EA); // card borders
-  static const hairlineSoft = Color(0xFFEDF1F2); // in-card dividers
+  static const ink = Color(0xFF1D1B38);
+  static const inkSoft = Color(0xFF3A3858);
+  static const muted = Color(0xFF7A7896);
+  static const faint = Color(0xFFA6A4BF);
+  static const hairline = Color(0xFFE9E8F3); // card borders
+  static const hairlineSoft = Color(0xFFF1F0F8); // in-card dividers
 
   // Status (ink-strength so they read as text on their tints)
   static const success = Color(0xFF1D7A3E);
@@ -52,30 +59,33 @@ class AppColors {
   static const warningTint = Color(0xFFFFF1DB);
   static const dangerTint = Color(0xFFFDE8E7);
   static const infoTint = Color(0xFFE3EEFB);
-  static const neutralTint = Color(0xFFEEF2F3);
+  static const neutralTint = Color(0xFFEFEEF7);
 
   // ── Surface tokens (kept names; flat surfaces) ──
   static const glassFill = Colors.white;
   static const glassFillStrong = Colors.white;
-  static const glassFillSubtle = Color(0xFFF5F7F7);
-  static const glassBorder = Color(0xFFE3E9EA);
-  static const glassBorderSubtle = Color(0xFFEDF1F2);
+  static const glassFillSubtle = Color(0xFFF7F6FC);
+  static const glassBorder = Color(0xFFE9E8F3);
+  static const glassBorderSubtle = Color(0xFFF1F0F8);
 
   // Decorative palette — glows on deep surfaces.
   static const meshA = Color(0xFF008CA8);
   static const meshB = Color(0xFF3CC2D8);
   static const meshC = Color(0xFF8CC63F);
   static const meshD = Color(0xFF4253A8);
-  static const meshBase = Color(0xFFF4F6F6);
+  static const meshBase = Color(0xFFF3F2FA);
 
   // Deep brand gradient — hero cards, avatars (kept names). Recomputed from
   // the runtime brand colour by [applyBrand].
   static const LinearGradient _defaultHeroGradient = LinearGradient(
-    begin: Alignment.bottomLeft,
-    end: Alignment.topRight,
-    colors: [Color(0xFF06272E), Color(0xFF0B4A57)],
+    begin: Alignment.bottomRight,
+    end: Alignment.topLeft,
+    colors: [Color(0xFF00839E), Color(0xFF3FB0C9)],
   );
   static LinearGradient heroGradient = _defaultHeroGradient;
+
+  /// Soft light accent for glows on the vivid surface (hue-shifted brand).
+  static Color glow = const Color(0xFF8FD8F0);
 
   /// Applies the deployment's runtime brand colour (null = product default).
   /// Called by the branding bootstrap before/while the first screens build;
@@ -86,23 +96,44 @@ class AppColors {
       primaryDark = _defaultPrimaryDark;
       deep = _defaultDeep;
       heroGradient = _defaultHeroGradient;
+      glow = const Color(0xFF8FD8F0);
       return;
     }
     primary = brand;
     primaryDark = _shiftLightness(brand, -0.08);
     deep = _deepOf(brand);
     heroGradient = LinearGradient(
-      begin: Alignment.bottomLeft,
-      end: Alignment.topRight,
-      colors: [deep, Color.lerp(deep, brand, 0.32)!],
+      begin: Alignment.bottomRight,
+      end: Alignment.topLeft,
+      colors: [deep, _lightOf(deep)],
     );
+    glow = _glowOf(brand);
   }
 
+  /// Vivid but white-text-safe version of the brand (lightness 0.32–0.48).
   static Color _deepOf(Color c) {
     final hsl = HSLColor.fromColor(c);
     return hsl
-        .withLightness(0.105)
-        .withSaturation((hsl.saturation * 0.8).clamp(0.0, 1.0))
+        .withLightness(hsl.lightness.clamp(0.32, 0.48))
+        .withSaturation(hsl.saturation.clamp(0.45, 0.9))
+        .toColor();
+  }
+
+  /// Lighter, slightly hue-shifted end of the panel gradient.
+  static Color _lightOf(Color c) {
+    final hsl = HSLColor.fromColor(c);
+    return hsl
+        .withHue((hsl.hue + 14) % 360)
+        .withLightness((hsl.lightness + 0.14).clamp(0.0, 0.66))
+        .toColor();
+  }
+
+  static Color _glowOf(Color c) {
+    final hsl = HSLColor.fromColor(c);
+    return hsl
+        .withHue((hsl.hue + 38) % 360)
+        .withSaturation(0.85)
+        .withLightness(0.78)
         .toColor();
   }
 
@@ -135,45 +166,42 @@ class AppColors {
 class AppShadows {
   AppShadows._();
 
-  // Hairline cards barely lift off the canvas.
+  // Cards float on a soft, cool-tinted shadow (no hairline borders).
   static const card = [
     BoxShadow(
-      color: Color(0x0A0B1D21),
-      blurRadius: 2,
-      offset: Offset(0, 1),
+      color: Color(0x142A2470),
+      blurRadius: 24,
+      spreadRadius: -8,
+      offset: Offset(0, 10),
     ),
   ];
 
   static const soft = [
     BoxShadow(
-      color: Color(0x0A0B1D21),
-      blurRadius: 2,
-      offset: Offset(0, 1),
+      color: Color(0x102A2470),
+      blurRadius: 16,
+      spreadRadius: -6,
+      offset: Offset(0, 6),
     ),
   ];
 
   /// Floating surfaces: overlapping KPI cards, sheets, the bottom nav.
   static const lifted = [
     BoxShadow(
-      color: Color(0x380B1D21),
-      blurRadius: 32,
-      spreadRadius: -18,
-      offset: Offset(0, 20),
-    ),
-    BoxShadow(
-      color: Color(0x0A0B1D21),
-      blurRadius: 2,
-      offset: Offset(0, 1),
+      color: Color(0x262A2470),
+      blurRadius: 36,
+      spreadRadius: -12,
+      offset: Offset(0, 18),
     ),
   ];
 }
 
 class AppRadii {
   AppRadii._();
-  static const sm = 10.0;
-  static const md = 12.0;
-  static const lg = 16.0;
-  static const xl = 20.0;
+  static const sm = 12.0;
+  static const md = 14.0;
+  static const lg = 20.0;
+  static const xl = 26.0;
   static const pill = 999.0;
 }
 
@@ -191,10 +219,10 @@ class GlassBlur {
 /// cleanly below the app bar and above the floating bottom navigation.
 class AppChrome {
   AppChrome._();
-  static const appBarHeight = 52.0;
+  static const appBarHeight = 48.0;
 
-  /// Floating capsule (64) + its bottom margin (12) + breathing room (8).
-  static const bottomNavHeight = 84.0;
+  /// Floating capsule (56) + its bottom margin (8) + breathing room (8).
+  static const bottomNavHeight = 72.0;
 }
 
 /// Shared text styles for the Pro components.
@@ -202,7 +230,7 @@ class AppText {
   AppText._();
   static const display = TextStyle(
     fontFamily: 'Geist',
-    fontSize: 26,
+    fontSize: 23,
     height: 1.18,
     fontWeight: FontWeight.w600,
     letterSpacing: -0.7,
@@ -210,7 +238,7 @@ class AppText {
   );
   static const title = TextStyle(
     fontFamily: 'Geist',
-    fontSize: 17,
+    fontSize: 16,
     height: 1.3,
     fontWeight: FontWeight.w600,
     letterSpacing: -0.25,
@@ -218,7 +246,7 @@ class AppText {
   );
   static const section = TextStyle(
     fontFamily: 'Geist',
-    fontSize: 16,
+    fontSize: 15,
     height: 1.35,
     fontWeight: FontWeight.w600,
     letterSpacing: -0.24,
@@ -226,20 +254,20 @@ class AppText {
   );
   static const body = TextStyle(
     fontFamily: 'Geist',
-    fontSize: 15,
+    fontSize: 14,
     height: 1.45,
     color: AppColors.ink,
   );
   static const label = TextStyle(
     fontFamily: 'Geist',
-    fontSize: 13,
+    fontSize: 12.5,
     height: 1.35,
     fontWeight: FontWeight.w600,
     color: AppColors.inkSoft,
   );
   static const caption = TextStyle(
     fontFamily: 'Geist',
-    fontSize: 12.5,
+    fontSize: 12,
     height: 1.35,
     color: AppColors.muted,
   );
@@ -285,31 +313,31 @@ ThemeData buildAppTheme() {
       )
       .copyWith(
         headlineLarge: const TextStyle(
-          fontSize: 28,
+          fontSize: 24,
           fontWeight: FontWeight.w600,
           letterSpacing: -0.8,
           color: AppColors.ink,
         ),
         headlineMedium: const TextStyle(
-          fontSize: 24,
+          fontSize: 21,
           fontWeight: FontWeight.w600,
           letterSpacing: -0.6,
           color: AppColors.ink,
         ),
         headlineSmall: const TextStyle(
-          fontSize: 20,
+          fontSize: 18,
           fontWeight: FontWeight.w600,
           letterSpacing: -0.45,
           color: AppColors.ink,
         ),
         titleLarge: const TextStyle(
-          fontSize: 17,
+          fontSize: 16,
           fontWeight: FontWeight.w600,
           letterSpacing: -0.25,
           color: AppColors.ink,
         ),
         titleMedium: const TextStyle(
-          fontSize: 15,
+          fontSize: 14,
           fontWeight: FontWeight.w600,
           letterSpacing: -0.15,
           color: AppColors.ink,
@@ -320,7 +348,7 @@ ThemeData buildAppTheme() {
           color: AppColors.ink,
         ),
         bodyLarge: const TextStyle(
-          fontSize: 15,
+          fontSize: 14,
           height: 1.45,
           color: AppColors.ink,
         ),
@@ -335,7 +363,7 @@ ThemeData buildAppTheme() {
           color: AppColors.muted,
         ),
         labelLarge: const TextStyle(
-          fontSize: 14,
+          fontSize: 13.5,
           fontWeight: FontWeight.w600,
           letterSpacing: -0.1,
         ),
@@ -355,12 +383,32 @@ ThemeData buildAppTheme() {
       // copyWith replaced whole styles above — put the family back on all.
       .apply(fontFamily: 'Geist');
 
-  final buttonShape = RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(14),
-  );
+  // Pill buttons (soft theme).
+  const buttonShape = StadiumBorder();
+
+  // Glossy finish painted over any filled/elevated button's own colour:
+  // a soft top highlight and a faint bottom shade (keeps custom colours,
+  // e.g. green check-in / red check-out, and just makes them shine).
+  Widget gloss(BuildContext context, Set<WidgetState> states, Widget? child) {
+    if (states.contains(WidgetState.disabled)) return child ?? const SizedBox();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(999),
+      child: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0x47FFFFFF), Color(0x0AFFFFFF), Color(0x00000000), Color(0x1F000000)],
+            stops: [0, 0.48, 0.62, 1],
+          ),
+        ),
+        child: child,
+      ),
+    );
+  }
   const buttonText = TextStyle(
     fontFamily: 'Geist',
-    fontSize: 15,
+    fontSize: 14.5,
     fontWeight: FontWeight.w600,
     letterSpacing: -0.15,
   );
@@ -368,36 +416,41 @@ ThemeData buildAppTheme() {
   return base.copyWith(
     textTheme: textTheme,
     primaryTextTheme: textTheme,
-    appBarTheme: AppBarTheme(
-      backgroundColor: AppColors.deep,
-      foregroundColor: Colors.white,
+    // Every default back button becomes a white rounded square (soft theme).
+    actionIconTheme: ActionIconThemeData(
+      backButtonIconBuilder: (context) => const _SquareBackIcon(),
+    ),
+    // Light, centred app bar on the lavender canvas (soft theme).
+    appBarTheme: const AppBarTheme(
+      backgroundColor: AppColors.bg,
+      foregroundColor: AppColors.ink,
       elevation: 0,
       scrolledUnderElevation: 0,
-      centerTitle: false,
+      centerTitle: true,
       surfaceTintColor: Colors.transparent,
-      systemOverlayStyle: const SystemUiOverlayStyle(
+      systemOverlayStyle: SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.light,
-        statusBarBrightness: Brightness.dark,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
       ),
-      iconTheme: const IconThemeData(color: Colors.white, size: 22),
-      actionsIconTheme: const IconThemeData(color: Colors.white, size: 22),
-      titleTextStyle: const TextStyle(
+      iconTheme: IconThemeData(color: AppColors.ink, size: 22),
+      actionsIconTheme: IconThemeData(color: AppColors.ink, size: 22),
+      titleTextStyle: TextStyle(
         fontFamily: 'Geist',
-        color: Colors.white,
-        fontSize: 18,
+        color: AppColors.ink,
+        fontSize: 16.5,
         fontWeight: FontWeight.w600,
-        letterSpacing: -0.35,
+        letterSpacing: -0.3,
       ),
     ),
     chipTheme: ChipThemeData(
       backgroundColor: AppColors.surface,
-      selectedColor: AppColors.ink,
-      secondarySelectedColor: AppColors.ink,
+      selectedColor: AppColors.primary,
+      secondarySelectedColor: AppColors.primary,
       disabledColor: AppColors.surfaceAlt,
       checkmarkColor: Colors.white,
       showCheckmark: false,
-      side: const BorderSide(color: Color(0xFFDBE3E5)),
+      side: const BorderSide(color: AppColors.hairline),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadii.pill),
       ),
@@ -422,14 +475,14 @@ ThemeData buildAppTheme() {
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadii.lg),
-        side: const BorderSide(color: AppColors.hairline),
+        side: const BorderSide(color: AppColors.hairlineSoft),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: AppColors.surface,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      hintStyle: const TextStyle(color: AppColors.faint, fontSize: 15),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      hintStyle: const TextStyle(color: AppColors.faint, fontSize: 14),
       labelStyle: const TextStyle(color: AppColors.muted, fontSize: 14),
       floatingLabelStyle: TextStyle(color: AppColors.primary, fontSize: 14),
       helperStyle: const TextStyle(color: AppColors.muted, fontSize: 12.5),
@@ -438,11 +491,11 @@ ThemeData buildAppTheme() {
       suffixIconColor: AppColors.muted,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadii.md),
-        borderSide: const BorderSide(color: Color(0xFFD9E2E4)),
+        borderSide: const BorderSide(color: Color(0xFFE3E2EF)),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadii.md),
-        borderSide: const BorderSide(color: Color(0xFFD9E2E4)),
+        borderSide: const BorderSide(color: Color(0xFFE3E2EF)),
       ),
       disabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadii.md),
@@ -468,10 +521,11 @@ ThemeData buildAppTheme() {
         disabledBackgroundColor: AppColors.neutralTint,
         disabledForegroundColor: AppColors.faint,
         textStyle: buttonText,
-        minimumSize: const Size(64, 48),
+        minimumSize: const Size(64, 46),
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 18),
         elevation: 0,
         shape: buttonShape,
+        backgroundBuilder: gloss,
       ),
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
@@ -481,19 +535,20 @@ ThemeData buildAppTheme() {
         disabledBackgroundColor: AppColors.neutralTint,
         disabledForegroundColor: AppColors.faint,
         textStyle: buttonText,
-        minimumSize: const Size(64, 48),
+        minimumSize: const Size(64, 46),
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 18),
         elevation: 0,
         shadowColor: Colors.transparent,
         shape: buttonShape,
+        backgroundBuilder: gloss,
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: AppColors.ink,
         backgroundColor: AppColors.surface,
-        side: const BorderSide(color: Color(0xFFD4DEE0)),
-        minimumSize: const Size(64, 48),
+        side: const BorderSide(color: Color(0xFFE0DFEC)),
+        minimumSize: const Size(64, 46),
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         shape: buttonShape,
         textStyle: buttonText,
@@ -507,7 +562,7 @@ ThemeData buildAppTheme() {
           fontSize: 14,
           fontWeight: FontWeight.w600,
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: const StadiumBorder(),
       ),
     ),
     iconButtonTheme: IconButtonThemeData(
@@ -519,12 +574,12 @@ ThemeData buildAppTheme() {
     segmentedButtonTheme: SegmentedButtonThemeData(
       style: ButtonStyle(
         backgroundColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? AppColors.ink : AppColors.surface,
+          (s) => s.contains(WidgetState.selected) ? AppColors.primary : AppColors.surface,
         ),
         foregroundColor: WidgetStateProperty.resolveWith(
           (s) => s.contains(WidgetState.selected) ? Colors.white : AppColors.inkSoft,
         ),
-        side: const WidgetStatePropertyAll(BorderSide(color: Color(0xFFDBE3E5))),
+        side: const WidgetStatePropertyAll(BorderSide(color: AppColors.hairline)),
         textStyle: const WidgetStatePropertyAll(TextStyle(
           fontFamily: 'Geist',
           fontSize: 13.5,
@@ -732,13 +787,13 @@ class FieldReadyBackdrop extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        ColoredBox(color: AppColors.deep),
+        DecoratedBox(decoration: BoxDecoration(gradient: AppColors.heroGradient)),
         Positioned(
           top: -120,
           right: -120,
           child: _Blob(
             size: 380,
-            color: AppColors.primary.withOpacity(0.55),
+            color: Colors.white.withOpacity(0.28),
           ),
         ),
         Positioned(
@@ -746,7 +801,7 @@ class FieldReadyBackdrop extends StatelessWidget {
           left: -110,
           child: _Blob(
             size: 320,
-            color: AppColors.live.withOpacity(0.22),
+            color: AppColors.glow.withOpacity(0.45),
           ),
         ),
         Positioned(
@@ -776,7 +831,7 @@ class _BackdropRingsPainter extends CustomPainter {
     final paint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2
-      ..color = Colors.white.withValues(alpha: 0.07);
+      ..color = Colors.white.withValues(alpha: 0.12);
     for (final r in [90.0, 150.0, 210.0]) {
       canvas.drawCircle(c, r, paint);
     }
@@ -850,7 +905,7 @@ class GlassCard extends StatelessWidget {
         boxShadow: shadow ?? (hasGradient ? AppShadows.lifted : AppShadows.card),
         border: hasGradient
             ? null
-            : (border ?? Border.all(color: AppColors.hairline, width: 1)),
+            : border, // soft theme: floats on its shadow, no hairline
       ),
       child: child,
     );
@@ -998,5 +1053,25 @@ class StatusTone {
       default:
         return const StatusTone(AppColors.muted, 'Not In');
     }
+  }
+}
+
+/// White rounded square with a chevron — the soft theme's back button icon.
+class _SquareBackIcon extends StatelessWidget {
+  const _SquareBackIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(13),
+        boxShadow: AppShadows.soft,
+      ),
+      alignment: Alignment.center,
+      child: const Icon(Icons.chevron_left_rounded, size: 24, color: AppColors.ink),
+    );
   }
 }

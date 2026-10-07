@@ -832,11 +832,11 @@ class _TodayPanelState extends State<_TodayPanel> {
     final String status;
     final Color dot;
     if (checkedOut) {
-      status = 'Done for today';
+      status = 'Checked out';
       dot = const Color(0xFF9FB3B8);
     } else if (checkedIn) {
-      status = 'On the clock';
-      dot = AppColors.live;
+      status = 'Checked in';
+      dot = AppColors.checkIn;
     } else {
       status = 'Not checked in';
       dot = const Color(0xFFF2B347);
@@ -970,11 +970,19 @@ class _TodayPanelState extends State<_TodayPanel> {
               child: InkWell(
                 onTap: () => context.go('/home'),
                 borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                // Green = check in, red = check out (same as the Home card).
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+                  decoration: BoxDecoration(
+                    color: checkedIn ? AppColors.checkOut : AppColors.checkIn,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      Icon(checkedIn ? Icons.logout_rounded : Icons.login_rounded,
+                          size: 16, color: Colors.white),
+                      const SizedBox(width: 6),
                       Text(
                         checkedIn ? 'Go to check-out' : 'Go to check-in',
                         style: const TextStyle(
