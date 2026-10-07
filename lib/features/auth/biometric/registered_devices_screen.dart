@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/pro_ui.dart';
 import '../../../core/theme.dart';
+import '../../../core/widgets.dart';
 import 'biometric_controller.dart';
 import 'biometric_models.dart';
 
@@ -36,23 +38,21 @@ class _RegisteredDevicesScreenState
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.lg)),
-        title: Text(d.currentDevice ? 'Remove this device?' : 'Remove device?',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        title: Text(d.currentDevice ? 'Remove this device?' : 'Remove device?'),
         content: Text(
           d.currentDevice
               ? 'Biometric login will be turned off on this device. You can re-enable it anytime.'
               : 'Biometric login will be turned off on "${d.deviceName ?? 'this device'}".',
-          style: const TextStyle(color: AppColors.inkSoft, fontSize: 14),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.dangerTint,
+              foregroundColor: AppColors.danger,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Remove'),
           ),
@@ -77,59 +77,100 @@ class _RegisteredDevicesScreenState
 
   @override
   Widget build(BuildContext context) {
-    final mq = MediaQuery.of(context);
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: const Text('Registered devices'),
-      ),
-      body: GlassBackdrop(
-        child: RefreshIndicator(
-          onRefresh: () async => _reload(),
-          child: FutureBuilder<List<RegisteredDevice>>(
-            future: _future,
-            builder: (context, snap) {
-              if (snap.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snap.hasError) {
-                return _Message(
-                  padTop: mq.padding.top,
-                  icon: Icons.error_outline_rounded,
-                  text: 'Could not load devices.\n${snap.error}',
-                );
-              }
-              final devices = snap.data ?? const [];
-              if (devices.isEmpty) {
-                return _Message(
-                  padTop: mq.padding.top,
-                  icon: Icons.devices_other_rounded,
-                  text: 'No devices are registered for biometric login yet.',
-                );
-              }
-              return ListView.separated(
-                physics: const AlwaysScrollableScrollPhysics(
-                    parent: BouncingScrollPhysics()),
-                padding: EdgeInsets.fromLTRB(
-                    16, mq.padding.top + kToolbarHeight + 8, 16, 24),
-                itemCount: devices.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (_, i) =>
-                    _DeviceCard(device: devices[i], onRemove: () => _remove(devices[i])),
-              );
-            },
-          ),
-        ),
+      appBar: AppBar(title: const Text('Security')),
+      body: FutureBuilder<List<RegisteredDevice>>(
+        future: _future,
+        builder: (context, snap) {
+          final waiting = snap.connectionState == ConnectionState.waiting;
+          final devices = snap.data ?? const <RegisteredDevice>[];
+          final used = devices.where((d) => d.lastLoginAt != null).length;
+          final ready = !waiting && !snap.hasError;
+
+          final hero = ProHero(
+            title: 'Registered devices',
+            subtitle: !ready
+                ? 'Devices registered for biometric login'
+                : '${devices.length} ${devices.length == 1 ? 'device' : 'devices'} registered for biometric login',
+            children: [
+              ProHeroStats(
+                stats: [
+                  ProStat(
+                    label: 'Registered',
+                    value: ready ? '${devices.length}' : '–',
+                    sub: 'all devices',
+                    dot: const Color(0xFF6CC3D5),
+                  ),
+                  ProStat(
+                    label: 'Used',
+                    value: ready ? '$used' : '–',
+                    sub: 'signed in',
+                    dot: AppColors.live,
+                  ),
+                  ProStat(
+                    label: 'Not used',
+                    value: ready ? '${devices.length - used}' : '–',
+                    sub: 'yet to sign in',
+                    dot: const Color(0xFFB3C0C3),
+                  ),
+                ],
+              ),
+            ],
+          );
+
+          final List<Widget> body;
+          if (waiting) {
+            body = const [AppLoadingBlock(height: 72), AppLoadingBlock(height: 72)];
+          } else if (snap.hasError) {
+            body = [
+              AppErrorPanel(
+                message: 'Could not load devices.\n${snap.error}',
+                onRetry: _reload,
+              ),
+            ];
+          } else if (devices.isEmpty) {
+            body = const [
+              ProEmpty(
+                icon: Icons.devices_other_rounded,
+                title: 'No registered devices',
+                message: 'No devices are registered for biometric login yet.',
+              ),
+            ];
+          } else {
+            body = [
+              ProSectionHeader(
+                title: 'Devices · ${devices.length}',
+                small: true,
+              ),
+              ProListGroup(
+                children: [
+                  for (final d in devices)
+                    _DeviceRow(device: d, onRemove: () => _remove(d)),
+                ],
+              ),
+            ];
+          }
+
+          return ProPage(
+            onRefresh: () async => _reload(),
+            hero: hero,
+            children: [
+              ...body,
+              const ProNote(
+                'Removing a device turns off biometric login on it. You can '
+                'turn it on again from My profile → Security.',
+                tone: ProNoteTone.info,
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
-class _DeviceCard extends StatelessWidget {
-  const _DeviceCard({required this.device, required this.onRemove});
+class _DeviceRow extends StatelessWidget {
+  const _DeviceRow({required this.device, required this.onRemove});
   final RegisteredDevice device;
   final VoidCallback onRemove;
 
@@ -141,104 +182,23 @@ class _DeviceCard extends StatelessWidget {
     final lastLogin = last == null
         ? 'Not used yet'
         : 'Last login ${DateFormat('d MMM yyyy, h:mm a').format(last.toLocal())}';
-    return GlassCard(
-      padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.primary.withOpacity(0.22)),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              device.platform == 'IOS'
-                  ? Icons.phone_iphone_rounded
-                  : Icons.phone_android_rounded,
-              color: AppColors.primary,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        device.deviceName ?? 'Unknown device',
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.ink,
-                        ),
-                      ),
-                    ),
-                    if (device.currentDevice) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppColors.success.withOpacity(0.14),
-                          borderRadius: BorderRadius.circular(AppRadii.pill),
-                        ),
-                        child: const Text(
-                          'This device',
-                          style: TextStyle(
-                            color: AppColors.success,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text('$_platformIcon · $lastLogin',
-                    style:
-                        const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-              ],
-            ),
-          ),
-          IconButton(
-            tooltip: 'Remove',
-            onPressed: onRemove,
-            icon: const Icon(Icons.delete_outline_rounded,
-                color: AppColors.danger, size: 20),
-          ),
-        ],
+    return ProListRow(
+      leading: ProIconWell(
+        icon: device.platform == 'IOS'
+            ? Icons.phone_iphone_rounded
+            : Icons.phone_android_rounded,
+        color: device.currentDevice ? AppColors.success : AppColors.primary,
       ),
-    );
-  }
-}
-
-class _Message extends StatelessWidget {
-  const _Message({required this.padTop, required this.icon, required this.text});
-  final double padTop;
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-      padding: EdgeInsets.fromLTRB(24, padTop + kToolbarHeight + 60, 24, 24),
-      children: [
-        Icon(icon, size: 46, color: AppColors.muted.withOpacity(0.6)),
-        const SizedBox(height: 12),
-        Text(text,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.muted, fontSize: 14)),
-      ],
+      title: device.deviceName ?? 'Unknown device',
+      subtitle: '$_platformIcon · $lastLogin',
+      pill: device.currentDevice ? ProPill.ok('This device') : null,
+      chevron: false,
+      trailing: IconButton(
+        tooltip: 'Remove',
+        onPressed: onRemove,
+        icon: const Icon(Icons.delete_outline_rounded,
+            color: AppColors.danger, size: 20),
+      ),
     );
   }
 }

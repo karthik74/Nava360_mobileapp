@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/branding.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../requisitions/requisition_models.dart';
@@ -100,6 +101,7 @@ const _kSeverityColor = {
 };
 const _kSeverityLabel = {'HIGH': 'High', 'MODERATE': 'Moderate', 'LOW': 'Low'};
 
+
 /// Dashboard content (no Scaffold — hosted by the audit home tabs).
 class AuditDashboardBody extends ConsumerStatefulWidget {
   const AuditDashboardBody({super.key});
@@ -159,35 +161,9 @@ class _AuditDashboardBodyState extends ConsumerState<AuditDashboardBody> {
     ));
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final data = ref.watch(_dashDataProvider);
-    final branches =
-        ref.watch(auditBranchesProvider).asData?.value ?? const <BranchOption>[];
-
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: _refresh,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-        children: [
-          _filterCard(branches),
-          const SizedBox(height: 14),
-          data.when(
-            loading: () => const AppLoadingBlock(height: 320),
-            error: (e, __) => AppErrorPanel(
-              message: 'Could not load the audit dashboard.\n$e',
-              onRetry: () => ref.invalidate(_dashDataProvider),
-            ),
-            data: (d) => _content(d, branches),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _content(_DashData d, List<BranchOption> branches) {
+  /// Plans / findings narrowed to the picked period + org scope.
+  ({List<AuditPlan> plans, List<AuditFinding> findings}) _slice(
+      _DashData d, List<BranchOption> branches) {
     final scope = _branchScope(branches);
     final periodPlans =
         d.plans.where((p) => isPlanInPeriod(p, _month, _year)).toList();
@@ -200,98 +176,143 @@ class _AuditDashboardBodyState extends ConsumerState<AuditDashboardBody> {
     final findings = d.findings
         .where((f) => f.planId != null && planIds.contains(f.planId))
         .toList();
+    return (plans: plans, findings: findings);
+  }
 
-    final k = computeAuditKpis(plans, findings);
-    final funnel = computeFunnel(plans);
-    final side = computeFunnelSide(plans);
-    final dist = computeScoreDistribution(plans);
-    final trend = computeTrend(plans);
-    final recent = computeRecentActivity(plans);
-    final attention = computeAttentionGroups(plans, findings);
+  @override
+  Widget build(BuildContext context) {
+    final data = ref.watch(_dashDataProvider);
+    final branches =
+        ref.watch(auditBranchesProvider).asData?.value ?? const <BranchOption>[];
+    final d = data.valueOrNull;
+    final slice = d == null ? null : _slice(d, branches);
+    final k = slice == null ? null : computeAuditKpis(slice.plans, slice.findings);
 
-    String? pct(int n, int total) =>
-        total > 0 ? '${(n / total * 100).toStringAsFixed(1)}% of total' : null;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return ProPage(
+      onRefresh: _refresh,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      hero: _hero(k, branches),
       children: [
-        if (d.truncated)
-          _note('Only the most recent ${d.plans.length} audits and '
-              '${d.findings.length} findings were loaded — totals may be incomplete.'),
-        if (d.plansError != null)
-          _note('Audits could not be loaded: ${d.plansError}'),
-        if (d.findingsError != null)
-          _note('Findings could not be loaded: ${d.findingsError}'),
-        const AppSectionHeader(title: 'Audit Progress'),
-        const SizedBox(height: 8),
-        _kpiGrid([
-          _Kpi('Total Audits', '${k.totalAudits}', Icons.assignment_rounded,
-              AppColors.primary, null, () => _openPlans()),
-          _Kpi('Planned', '${k.plannedAudits}', Icons.event_available_rounded,
-              AppColors.info, pct(k.plannedAudits, k.totalAudits),
-              () => _openPlans(status: 'PLANNED')),
-          _Kpi('In Progress', '${k.inProgressAudits}',
-              Icons.pending_actions_rounded, AppColors.warning,
-              pct(k.inProgressAudits, k.totalAudits),
-              () => _openPlans(status: 'IN_PROGRESS')),
-          _Kpi('Submitted', '${k.submittedAudits}', Icons.send_rounded,
-              AppColors.pink, pct(k.submittedAudits, k.totalAudits),
-              () => _openPlans(status: 'SUBMITTED')),
-          _Kpi('Completed', '${k.completedAudits}',
-              Icons.check_circle_rounded, AppColors.success,
-              pct(k.completedAudits, k.totalAudits),
-              () => _openPlans(status: 'CLOSED')),
-          _Kpi('Overdue', '${k.overdueAudits}', Icons.warning_amber_rounded,
-              AppColors.danger, pct(k.overdueAudits, k.totalAudits), null),
-        ]),
-        const SizedBox(height: 16),
-        const AppSectionHeader(title: 'Findings & Compliance'),
-        const SizedBox(height: 8),
-        _kpiGrid([
-          _Kpi('Total Findings', '${k.totalFindings}',
-              Icons.report_problem_rounded, AppColors.primary, null,
-              () => _openFindings()),
-          _Kpi('Open', '${k.openFindings}', Icons.report_problem_rounded,
-              const Color(0xFFEA580C), pct(k.openFindings, k.totalFindings),
-              () => _openFindings(status: 'OPEN')),
-          _Kpi('Critical', '${k.criticalFindings}',
-              Icons.local_fire_department_rounded, AppColors.danger,
-              pct(k.criticalFindings, k.totalFindings),
-              () => _openFindings(severity: 'HIGH', status: 'OPEN')),
-          _Kpi('Overdue', '${k.overdueFindings}', Icons.warning_amber_rounded,
-              AppColors.danger, pct(k.overdueFindings, k.totalFindings),
-              () => _openFindings(overdue: true)),
-          _Kpi(
-              'Avg Score',
-              k.averageScore == null
-                  ? '—'
-                  : '${k.averageScore!.toStringAsFixed(1)}%',
-              Icons.speed_rounded,
-              AppColors.primary,
-              null,
-              null),
-        ]),
-        const SizedBox(height: 16),
-        _attentionCard(attention),
-        const SizedBox(height: 14),
-        _categoryCard(),
-        const SizedBox(height: 14),
-        _pipelineCard(funnel, side),
-        const SizedBox(height: 14),
-        _scoreCard(dist),
-        const SizedBox(height: 14),
-        _severityCard(k),
-        const SizedBox(height: 14),
-        _trendCard(trend),
-        const SizedBox(height: 14),
-        _recentCard(recent),
+        if (_filtersOpen && branches.isNotEmpty) _orgFilterCard(branches),
+        if (_orgActive || _periodActive) _scopeRow(),
+        data.when(
+          loading: () => const AppLoadingBlock(height: 320),
+          error: (e, __) => AppErrorPanel(
+            message: 'Could not load the audit dashboard.\n$e',
+            onRetry: () => ref.invalidate(_dashDataProvider),
+          ),
+          data: (d) {
+            final s = slice ?? _slice(d, branches);
+            return _content(d, s, k ?? computeAuditKpis(s.plans, s.findings));
+          },
+        ),
+      ],
+    );
+  }
+
+  // ── Hero ───────────────────────────────────────────────────────────────────
+
+  Widget _hero(AuditKpis? k, List<BranchOption> branches) {
+    String n(int? v) => v == null ? '—' : '$v';
+    String? pct(int v, int total) =>
+        total > 0 ? '${(v / total * 100).toStringAsFixed(1)}% of total' : null;
+    final tBranch = Branding.current.term('branch');
+    final scope = _scopeText();
+    return ProHero(
+      title: 'Audit dashboard',
+      subtitle: scope.isEmpty
+          ? 'All periods · every ${tBranch.toLowerCase()} in scope'
+          : scope,
+      actions: [
+        if (branches.isNotEmpty)
+          ProHeroIconButton(
+            icon: Icons.tune_rounded,
+            tooltip: 'Filter by $tBranch',
+            badge: _orgActive,
+            onTap: () => setState(() => _filtersOpen = !_filtersOpen),
+          ),
+      ],
+      overlap: ProKpiStrip(cells: [
+        ProKpi(
+          value: _month == null ? 'All' : _kMonths[_month! - 1],
+          label: 'Month',
+          onTap: _pickMonth,
+        ),
+        ProKpi(
+          value: _year == null ? 'All' : '$_year',
+          label: 'Year',
+          onTap: _pickYear,
+        ),
+        if (branches.isNotEmpty)
+          ProKpi(
+            value: _branchLabel(branches) ?? 'All',
+            label: tBranch,
+            onTap: () => _pickBranch(branches),
+          ),
+      ]),
+      children: [
+        Column(
+          children: [
+            ProHeroStats(stats: [
+              ProStat(
+                label: 'Total',
+                value: n(k?.totalAudits),
+                sub: 'All statuses',
+                dot: const Color(0xFF9FCBD5),
+                onTap: () => _openPlans(),
+              ),
+              ProStat(
+                label: 'Planned',
+                value: n(k?.plannedAudits),
+                sub: k == null ? null : pct(k.plannedAudits, k.totalAudits),
+                dot: const Color(0xFF9DB9F0),
+                onTap: () => _openPlans(status: 'PLANNED'),
+              ),
+              ProStat(
+                label: 'In progress',
+                value: n(k?.inProgressAudits),
+                sub: k == null ? null : pct(k.inProgressAudits, k.totalAudits),
+                dot: const Color(0xFF5FC3D6),
+                onTap: () => _openPlans(status: 'IN_PROGRESS'),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            ProHeroStats(stats: [
+              ProStat(
+                label: 'Submitted',
+                value: n(k?.submittedAudits),
+                sub: k == null ? null : pct(k.submittedAudits, k.totalAudits),
+                dot: const Color(0xFFB79BE0),
+                onTap: () => _openPlans(status: 'SUBMITTED'),
+              ),
+              ProStat(
+                label: 'Completed',
+                value: n(k?.completedAudits),
+                sub: k == null ? null : pct(k.completedAudits, k.totalAudits),
+                dot: AppColors.live,
+                onTap: () => _openPlans(status: 'CLOSED'),
+              ),
+              ProStat(
+                label: 'Overdue',
+                value: n(k?.overdueAudits),
+                sub: k == null ? null : pct(k.overdueAudits, k.totalAudits),
+                dot: const Color(0xFFE5484D),
+              ),
+            ]),
+          ],
+        ),
       ],
     );
   }
 
   // ── Filters ────────────────────────────────────────────────────────────────
 
-  Widget _filterCard(List<BranchOption> all) {
+  ({
+    List<String> regions,
+    List<String> divisions,
+    List<String> areas,
+    List<BranchOption> inScope,
+  }) _orgOptions(List<BranchOption> all) {
     List<String> distinct(Iterable<String?> v) =>
         v.where((s) => s != null && s.trim().isNotEmpty).cast<String>().toSet().toList()
           ..sort();
@@ -310,145 +331,196 @@ class _AuditDashboardBodyState extends ConsumerState<AuditDashboardBody> {
       if (_area != null && b.areaLabel != _area) return false;
       return true;
     }).toList();
+    return (regions: regions, divisions: divisions, areas: areas, inScope: inScope);
+  }
 
+  String? _branchLabel(List<BranchOption> all) {
+    if (_branchId == null) return null;
+    for (final b in all) {
+      if (b.id == _branchId) return b.label;
+    }
+    return null;
+  }
+
+  Future<void> _pick<T>({
+    required String title,
+    required T? selected,
+    required List<({T? value, String label})> options,
+    required ValueChanged<T?> onChanged,
+  }) async {
+    final r = await showAuditPicker<T>(
+      context,
+      title: title,
+      options: options,
+      selected: selected,
+    );
+    if (r == null || !mounted) return;
+    onChanged(r.value);
+  }
+
+  void _pickMonth() => _pick<int>(
+        title: 'Month',
+        selected: _month,
+        options: [
+          (value: null, label: 'All months'),
+          for (var i = 0; i < 12; i++) (value: i + 1, label: _kMonths[i]),
+        ],
+        onChanged: (v) => setState(() => _month = v),
+      );
+
+  void _pickYear() {
+    final year = DateTime.now().year;
+    _pick<int>(
+      title: 'Year',
+      selected: _year,
+      options: [
+        (value: null, label: 'All years'),
+        for (var y = year; y >= year - 5; y--) (value: y, label: '$y'),
+      ],
+      onChanged: (v) => setState(() => _year = v),
+    );
+  }
+
+  void _pickBranch(List<BranchOption> all) {
+    final tBranch = Branding.current.term('branch');
+    _pick<int>(
+      title: tBranch,
+      selected: _branchId,
+      options: [
+        (value: null, label: 'All ${_pl(tBranch)}'),
+        for (final b in _orgOptions(all).inScope) (value: b.id, label: b.label),
+      ],
+      onChanged: (v) => setState(() => _branchId = v),
+    );
+  }
+
+  Widget _orgFilterCard(List<BranchOption> all) {
+    final o = _orgOptions(all);
     final tRegion = Branding.current.term('region');
     final tDivision = Branding.current.term('division');
     final tArea = Branding.current.term('area');
     final tBranch = Branding.current.term('branch');
-    final year = DateTime.now().year;
+
+    List<({String? value, String label})> strOpts(List<String> v, String all) => [
+          (value: null, label: all),
+          for (final s in v) (value: s, label: s),
+        ];
+
+    final region = AuditPickField(
+      label: tRegion,
+      value: _region ?? 'All ${_pl(tRegion)}',
+      active: _region != null,
+      onTap: () => _pick<String>(
+        title: tRegion,
+        selected: _region,
+        options: strOpts(o.regions, 'All ${_pl(tRegion)}'),
+        onChanged: (v) => setState(() {
+          _region = v;
+          _division = null;
+          _area = null;
+          _branchId = null;
+        }),
+      ),
+    );
+    final division = AuditPickField(
+      label: tDivision,
+      value: _division ?? 'All ${_pl(tDivision)}',
+      active: _division != null,
+      onTap: () => _pick<String>(
+        title: tDivision,
+        selected: _division,
+        options: strOpts(o.divisions, 'All ${_pl(tDivision)}'),
+        onChanged: (v) => setState(() {
+          _division = v;
+          _area = null;
+          _branchId = null;
+        }),
+      ),
+    );
+    final area = AuditPickField(
+      label: tArea,
+      value: _area ?? 'All ${_pl(tArea)}',
+      active: _area != null,
+      onTap: () => _pick<String>(
+        title: tArea,
+        selected: _area,
+        options: strOpts(o.areas, 'All ${_pl(tArea)}'),
+        onChanged: (v) => setState(() {
+          _area = v;
+          _branchId = null;
+        }),
+      ),
+    );
+    final branch = AuditPickField(
+      label: tBranch,
+      value: _branchLabel(all) ?? 'All ${_pl(tBranch)}',
+      active: _branchId != null,
+      onTap: () => _pickBranch(all),
+    );
 
     return GlassCard(
-      padding: const EdgeInsets.all(12),
-      shadow: AppShadows.soft,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          ProSectionHeader(
+            title: 'Filter by $tBranch',
+            trailing: IconButton(
+              tooltip: 'Close filter',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.close_rounded, size: 20, color: AppColors.muted),
+              onPressed: () => setState(() => _filtersOpen = false),
+            ),
+          ),
+          const SizedBox(height: 8),
           Row(children: [
-            Expanded(
-              child: _dd<int>(
-                hint: 'All months',
-                value: _month,
-                items: [
-                  const DropdownMenuItem<int>(value: null, child: Text('All months')),
-                  for (var i = 0; i < 12; i++)
-                    DropdownMenuItem<int>(value: i + 1, child: Text(_kMonths[i])),
-                ],
-                onChanged: (v) => setState(() => _month = v),
-              ),
-            ),
+            Expanded(child: region),
             const SizedBox(width: 8),
-            Expanded(
-              child: _dd<int>(
-                hint: 'All years',
-                value: _year,
-                items: [
-                  const DropdownMenuItem<int>(value: null, child: Text('All years')),
-                  for (var y = year; y >= year - 5; y--)
-                    DropdownMenuItem<int>(value: y, child: Text('$y')),
-                ],
-                onChanged: (v) => setState(() => _year = v),
-              ),
-            ),
+            Expanded(child: division),
           ]),
-          if (all.isNotEmpty) ...[
-            InkWell(
-              onTap: () => setState(() => _filtersOpen = !_filtersOpen),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(children: [
-                  const Icon(Icons.tune_rounded, size: 16, color: AppColors.muted),
-                  const SizedBox(width: 6),
-                  Text('Filter by $tBranch',
-                      style: const TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.ink)),
-                  const Spacer(),
-                  Icon(
-                      _filtersOpen
-                          ? Icons.expand_less_rounded
-                          : Icons.expand_more_rounded,
-                      size: 20,
-                      color: AppColors.muted),
-                ]),
-              ),
-            ),
-            if (_filtersOpen) ...[
-              _dd<String>(
-                hint: 'All ${_pl(tRegion)}',
-                value: _region,
-                items: _strItems(regions, 'All ${_pl(tRegion)}'),
-                onChanged: (v) => setState(() {
-                  _region = v;
-                  _division = null;
-                  _area = null;
-                  _branchId = null;
-                }),
-              ),
-              const SizedBox(height: 8),
-              _dd<String>(
-                hint: 'All ${_pl(tDivision)}',
-                value: _division,
-                items: _strItems(divisions, 'All ${_pl(tDivision)}'),
-                onChanged: (v) => setState(() {
-                  _division = v;
-                  _area = null;
-                  _branchId = null;
-                }),
-              ),
-              const SizedBox(height: 8),
-              _dd<String>(
-                hint: 'All ${_pl(tArea)}',
-                value: _area,
-                items: _strItems(areas, 'All ${_pl(tArea)}'),
-                onChanged: (v) => setState(() {
-                  _area = v;
-                  _branchId = null;
-                }),
-              ),
-              const SizedBox(height: 8),
-              _dd<int>(
-                hint: 'All ${_pl(tBranch)}',
-                value: _branchId,
-                items: [
-                  DropdownMenuItem<int>(
-                      value: null, child: Text('All ${_pl(tBranch)}')),
-                  for (final b in inScope)
-                    DropdownMenuItem<int>(
-                        value: b.id,
-                        child: Text(b.label, overflow: TextOverflow.ellipsis)),
-                ],
-                onChanged: (v) => setState(() => _branchId = v),
-              ),
-            ],
-          ],
-          if (_orgActive || _periodActive) ...[
-            const SizedBox(height: 4),
-            Row(children: [
-              Expanded(
-                child: Text(_scopeText(),
-                    style: const TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.inkSoft)),
-              ),
-              TextButton(
-                onPressed: () => setState(() {
-                  _month = null;
-                  _year = null;
-                  _region = _division = _area = null;
-                  _branchId = null;
-                }),
-                style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                child: const Text('Clear filters', style: TextStyle(fontSize: 12)),
-              ),
-            ]),
-          ],
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: area),
+            const SizedBox(width: 8),
+            Expanded(child: branch),
+          ]),
         ],
       ),
+    );
+  }
+
+  Widget _scopeRow() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 2, 4, 2),
+      decoration: BoxDecoration(
+        color: AppColors.neutralTint,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(children: [
+        const Icon(Icons.filter_alt_outlined, size: 17, color: AppColors.inkSoft),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            _scopeText(),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: AppColors.inkSoft,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: () => setState(() {
+            _month = null;
+            _year = null;
+            _region = _division = _area = null;
+            _branchId = null;
+          }),
+          child: const Text('Clear filters'),
+        ),
+      ]),
     );
   }
 
@@ -470,199 +542,240 @@ class _AuditDashboardBodyState extends ConsumerState<AuditDashboardBody> {
 
   static String _pl(String t) => t.endsWith('s') ? t : '${t}s';
 
-  static List<DropdownMenuItem<String>> _strItems(
-          List<String> o, String allLabel) =>
-      [
-        DropdownMenuItem<String>(value: null, child: Text(allLabel)),
-        for (final s in o)
-          DropdownMenuItem<String>(
-              value: s, child: Text(s, overflow: TextOverflow.ellipsis)),
-      ];
+  // ── Content ────────────────────────────────────────────────────────────────
 
-  Widget _dd<T>({
-    required String hint,
-    required T? value,
-    required List<DropdownMenuItem<T>> items,
-    required ValueChanged<T?> onChanged,
-  }) {
-    return Container(
-      height: 44,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: AppColors.hairline),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<T>(
-          isExpanded: true,
-          value: value,
-          icon: const Icon(Icons.expand_more_rounded, size: 18, color: AppColors.muted),
-          hint: Text(hint,
-              style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.muted)),
-          style: const TextStyle(
-              fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.ink),
-          items: items,
-          onChanged: onChanged,
+  Widget _content(
+    _DashData d,
+    ({List<AuditPlan> plans, List<AuditFinding> findings}) s,
+    AuditKpis k,
+  ) {
+    final plans = s.plans;
+    final findings = s.findings;
+    final funnel = computeFunnel(plans);
+    final side = computeFunnelSide(plans);
+    final dist = computeScoreDistribution(plans);
+    final trend = computeTrend(plans);
+    final recent = computeRecentActivity(plans);
+    final attention = computeAttentionGroups(plans, findings);
+
+    String? pct(int n, int total) =>
+        total > 0 ? '${(n / total * 100).toStringAsFixed(1)}% of total' : null;
+
+    final sections = <Widget>[
+      if (d.truncated)
+        ProNote(
+          'Only the most recent ${d.plans.length} audits and '
+          '${d.findings.length} findings were loaded — totals may be incomplete.',
+          tone: ProNoteTone.warn,
         ),
+      if (d.plansError != null)
+        ProNote('Audits could not be loaded: ${d.plansError}',
+            tone: ProNoteTone.warn),
+      if (d.findingsError != null)
+        ProNote('Findings could not be loaded: ${d.findingsError}',
+            tone: ProNoteTone.warn),
+      _findingsCard(k, pct),
+      _attentionBlock(attention),
+      _pipelineCard(funnel, side),
+      _scoreCard(dist),
+      _severityCard(k),
+      _trendCard(trend),
+      _categoryCard(),
+      _recentBlock(recent),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < sections.length; i++) ...[
+          if (i > 0) const SizedBox(height: 14),
+          sections[i],
+        ],
+      ],
+    );
+  }
+
+  Widget _findingsCard(AuditKpis k, String? Function(int, int) pct) {
+    Widget pair(Widget a, Widget b) => IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: a),
+              const SizedBox(width: 10),
+              Expanded(child: b),
+            ],
+          ),
+        );
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ProSectionHeader(
+            title: 'Findings & compliance',
+            actionLabel: 'View all',
+            onAction: () => _openFindings(),
+          ),
+          const SizedBox(height: 10),
+          pair(
+            _MetricTile(
+              label: 'Total findings',
+              value: '${k.totalFindings}',
+              icon: Icons.report_problem_rounded,
+              tone: AppColors.primary,
+              hint: 'All severities',
+              onTap: () => _openFindings(),
+            ),
+            _MetricTile(
+              label: 'Open',
+              value: '${k.openFindings}',
+              icon: Icons.error_outline_rounded,
+              tone: AppColors.warning,
+              hint: pct(k.openFindings, k.totalFindings),
+              onTap: () => _openFindings(status: 'OPEN'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          pair(
+            _MetricTile(
+              label: 'Critical',
+              value: '${k.criticalFindings}',
+              icon: Icons.local_fire_department_rounded,
+              tone: AppColors.danger,
+              valueColor: k.criticalFindings > 0 ? AppColors.danger : null,
+              hint: pct(k.criticalFindings, k.totalFindings),
+              onTap: () => _openFindings(severity: 'HIGH', status: 'OPEN'),
+            ),
+            _MetricTile(
+              label: 'Overdue',
+              value: '${k.overdueFindings}',
+              icon: Icons.warning_amber_rounded,
+              tone: AppColors.danger,
+              hint: pct(k.overdueFindings, k.totalFindings),
+              onTap: () => _openFindings(overdue: true),
+            ),
+          ),
+          const SizedBox(height: 10),
+          _AvgScoreTile(score: k.averageScore),
+        ],
       ),
     );
   }
 
-  Widget _note(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: AppColors.warning.withValues(alpha: 0.10),
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            border: Border.all(color: AppColors.warning.withValues(alpha: 0.35)),
-          ),
-          child: Text(text,
-              style: const TextStyle(fontSize: 11.5, color: AppColors.inkSoft)),
-        ),
-      );
-
-  // ── KPI cards ──────────────────────────────────────────────────────────────
-
-  Widget _kpiGrid(List<_Kpi> items) {
-    return LayoutBuilder(builder: (context, c) {
-      final w = (c.maxWidth - 10) / 2;
-      return Wrap(
-        spacing: 10,
-        runSpacing: 10,
-        children: [
-          for (final i in items) SizedBox(width: w, child: _KpiCard(kpi: i)),
-        ],
-      );
-    });
+  void _openAttention(AttentionItem it) {
+    if (it.planId != null) {
+      Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => AuditDetailScreen(planId: it.planId!)));
+    } else if (it.findingId != null) {
+      Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => FindingDetailScreen(findingId: it.findingId!)));
+    }
   }
 
-  // ── Sections ───────────────────────────────────────────────────────────────
-
-  Widget _attentionCard(List<AttentionGroup> groups) {
-    return AuditSectionCard(
-      title: 'Attention Required',
-      icon: Icons.notification_important_rounded,
-      children: [
-        if (groups.isEmpty)
-          const _EmptyLine('Nothing needs attention right now.')
-        else
-          for (final g in groups) ...[
-            Padding(
-              padding: const EdgeInsets.only(top: 6, bottom: 4),
-              child: Text('${g.label} (${g.count})',
-                  style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.ink)),
-            ),
-            for (final it in g.items)
-              InkWell(
-                onTap: () {
-                  if (it.planId != null) {
-                    Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => AuditDetailScreen(planId: it.planId!)));
-                  } else if (it.findingId != null) {
-                    Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) =>
-                            FindingDetailScreen(findingId: it.findingId!)));
-                  }
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 5),
-                  child: Row(children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('${it.code}  ${it.title}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.ink)),
-                          Text(
-                              [
-                                if ((it.branchName ?? '').isNotEmpty) it.branchName!,
-                                it.detail
-                              ].join(' · '),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontSize: 11, color: AppColors.muted)),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    StatusPill(
-                      label: it.statusLabel,
-                      color: it.high ? AppColors.danger : AppColors.warning,
-                    ),
-                  ]),
-                ),
-              ),
+  Widget _attentionBlock(List<AttentionGroup> groups) {
+    if (groups.isEmpty) {
+      return const GlassCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ProSectionHeader(title: 'Attention required'),
+            _EmptyLine('Nothing needs attention right now.'),
           ],
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const ProSectionHeader(title: 'Attention required'),
+        for (final g in groups) ...[
+          const SizedBox(height: 12),
+          ProSectionHeader(title: '${g.label} · ${g.count}', small: true),
+          const SizedBox(height: 8),
+          ProListGroup(
+            children: [
+              for (final it in g.items)
+                ProListRow(
+                  leading: ProIconWell(
+                    icon: it.planId != null
+                        ? Icons.fact_check_rounded
+                        : Icons.report_problem_rounded,
+                    color: it.high ? AppColors.danger : AppColors.warning,
+                  ),
+                  title: it.title,
+                  subtitle: [
+                    if (it.code.isNotEmpty) it.code,
+                    if ((it.branchName ?? '').isNotEmpty) it.branchName!,
+                    it.detail,
+                  ].join(' · '),
+                  pill: auditPill(
+                    _sentence(it.statusLabel),
+                    it.high ? AppColors.danger : AppColors.warning,
+                  ),
+                  onTap: (it.planId != null || it.findingId != null)
+                      ? () => _openAttention(it)
+                      : null,
+                ),
+            ],
+          ),
+        ],
       ],
     );
   }
 
   Widget _categoryCard() {
     final async = ref.watch(_categoryScoresProvider((_month, _year)));
-    return AuditSectionCard(
-      title: 'Branch Administration Observations',
-      icon: Icons.bar_chart_rounded,
-      children: [
-        const Text('Average score per category.',
-            style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
-        const SizedBox(height: 8),
-        async.when(
-          loading: () => const AppLoadingBlock(height: 100),
-          // Not every dashboard role may read this endpoint — degrade quietly.
-          error: (e, __) => const _EmptyLine('Category scores are not available.'),
-          data: (rows) {
-            if (rows.isEmpty) {
-              return const _EmptyLine(
-                  'No categories found under Branch Administration Observations.');
-            }
-            if (rows.every((r) => r.averagePercentage == null)) {
-              return const _EmptyLine(
-                  'No question-level responses recorded yet for these categories.');
-            }
-            return Column(children: [
-              for (final r in rows)
-                _HBar(
-                  label: r.sectionName,
-                  fraction: (r.averagePercentage ?? 0) / 100,
-                  color: const Color(0xFF2A78D6),
-                  trailing: r.averagePercentage == null
-                      ? 'Not scored'
-                      : '${r.averagePercentage!.toStringAsFixed(1)}% · ${r.auditCount}',
-                ),
-            ]);
-          },
-        ),
-      ],
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProSectionHeader(
+            title: 'Branch administration observations',
+            subtitle: 'Average score per category.',
+          ),
+          const SizedBox(height: 6),
+          async.when(
+            loading: () => const AppLoadingBlock(height: 100),
+            // Not every dashboard role may read this endpoint — degrade quietly.
+            error: (e, __) => const _EmptyLine('Category scores are not available.'),
+            data: (rows) {
+              if (rows.isEmpty) {
+                return const _EmptyLine(
+                    'No categories found under Branch Administration Observations.');
+              }
+              if (rows.every((r) => r.averagePercentage == null)) {
+                return const _EmptyLine(
+                    'No question-level responses recorded yet for these categories.');
+              }
+              return Column(children: [
+                for (final r in rows)
+                  _HBar(
+                    label: r.sectionName,
+                    fraction: (r.averagePercentage ?? 0) / 100,
+                    color: AppColors.primary,
+                    trailing: r.averagePercentage == null
+                        ? 'Not scored'
+                        : '${r.averagePercentage!.toStringAsFixed(1)}% · ${r.auditCount}',
+                  ),
+              ]);
+            },
+          ),
+        ],
+      ),
     );
   }
 
   Widget _pipelineCard(List<FunnelStage> funnel, Map<String, int> side) {
     final max = funnel.fold<int>(1, (m, s) => math.max(m, s.count));
-    return AuditSectionCard(
-      title: 'Audit Progress',
-      icon: Icons.account_tree_rounded,
-      children: [
-        const Text('Tap a stage to see those audits.',
-            style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
-        const SizedBox(height: 6),
-        for (final s in funnel)
-          InkWell(
-            onTap: s.count > 0 ? () => _openPlans(status: s.status) : null,
-            child: _HBar(
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProSectionHeader(
+            title: 'Audit progress',
+            subtitle: 'Tap a stage to see those audits.',
+          ),
+          const SizedBox(height: 6),
+          for (final s in funnel)
+            _HBar(
               label: s.label,
               fraction: s.count / max,
               color: (s.status == 'BM_ACTION_PENDING' ||
@@ -671,55 +784,70 @@ class _AuditDashboardBodyState extends ConsumerState<AuditDashboardBody> {
                   ? AppColors.warning
                   : AppColors.primary,
               trailing: '${s.count}',
+              dim: s.count == 0,
+              onTap: s.count > 0 ? () => _openPlans(status: s.status) : null,
             ),
-          ),
-        if (side.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Wrap(spacing: 8, runSpacing: 6, children: [
-              for (final e in side.entries)
-                ActionChip(
-                  label: Text('${auditStatusTone(e.key).label}: ${e.value}',
-                      style: const TextStyle(fontSize: 11.5)),
-                  onPressed: () => _openPlans(status: e.key),
-                ),
-            ]),
-          ),
-      ],
+          if (side.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Wrap(spacing: 8, runSpacing: 8, children: [
+                for (final e in side.entries)
+                  _TapPill(
+                    label: '${auditStatusTone(e.key).label}: ${e.value}',
+                    color: auditStatusTone(e.key).color,
+                    onTap: () => _openPlans(status: e.key),
+                  ),
+              ]),
+            ),
+        ],
+      ),
     );
   }
 
   Widget _scoreCard(ScoreDistribution dist) {
-    return AuditSectionCard(
-      title: 'Audit Performance',
-      icon: Icons.speed_rounded,
-      children: [
-        if (dist.scoredCount == 0)
-          const _EmptyLine('No scored audits yet.')
-        else ...[
-          Text(auditPct(dist.averageScore),
-              style: const TextStyle(
-                  fontSize: 30,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink)),
-          Text('average score across ${dist.scoredCount} scored audits',
-              style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-          const SizedBox(height: 8),
-          for (final b in dist.bands)
-            _HBar(
-              label: b.label,
-              fraction: dist.scoredCount == 0 ? 0 : b.count / dist.scoredCount,
-              color: _kBandColor[b.key] ?? AppColors.primary,
-              trailing: '${b.count} audits',
-            ),
-          if (dist.unscoredCount > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text('${dist.unscoredCount} audit(s) not yet scored.',
-                  style: const TextStyle(fontSize: 11, color: AppColors.muted)),
-            ),
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProSectionHeader(title: 'Audit performance'),
+          const SizedBox(height: 10),
+          if (dist.scoredCount == 0)
+            const _EmptyLine('No scored audits yet.')
+          else ...[
+            Row(children: [
+              AuditScoreRing(score: dist.averageScore, size: 84, label: 'Avg score'),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Average score', style: AppText.title),
+                    const SizedBox(height: 2),
+                    Text(
+                      'across ${dist.scoredCount} scored audits',
+                      style: AppText.caption,
+                    ),
+                  ],
+                ),
+              ),
+            ]),
+            const SizedBox(height: 12),
+            for (final b in dist.bands)
+              _HBar(
+                label: b.label,
+                fraction: dist.scoredCount == 0 ? 0 : b.count / dist.scoredCount,
+                color: _kBandColor[b.key] ?? AppColors.primary,
+                trailing: '${b.count} audits',
+              ),
+            if (dist.unscoredCount > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text('${dist.unscoredCount} audit(s) not yet scored.',
+                    style: AppText.caption),
+              ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
@@ -729,138 +857,167 @@ class _AuditDashboardBodyState extends ConsumerState<AuditDashboardBody> {
         if ((k.findingsBySeverity[s] ?? 0) > 0) (s, k.findingsBySeverity[s]!),
     ];
     final total = rows.fold<int>(0, (a, r) => a + r.$2);
-    return AuditSectionCard(
-      title: 'Findings by Severity',
-      icon: Icons.donut_large_rounded,
-      children: [
-        if (rows.isEmpty)
-          const _EmptyLine('No findings recorded yet.')
-        else
-          Row(children: [
-            SizedBox(
-              width: 120,
-              height: 120,
-              child: CustomPaint(
-                painter: _DonutPainter([
-                  for (final r in rows)
-                    (r.$2.toDouble(), _kSeverityColor[r.$1] ?? AppColors.muted),
-                ]),
-                child: Center(
-                  child: Text('$total',
-                      style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.ink)),
-                ),
-              ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(children: [
-                for (final r in rows)
-                  InkWell(
-                    onTap: () => _openFindings(severity: r.$1),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Row(children: [
-                        Container(
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                                color: _kSeverityColor[r.$1],
-                                borderRadius: BorderRadius.circular(2))),
-                        const SizedBox(width: 8),
-                        Expanded(
-                            child: Text(_kSeverityLabel[r.$1] ?? r.$1,
-                                style: const TextStyle(
-                                    fontSize: 12.5, color: AppColors.ink))),
-                        Text(
-                            '${r.$2} (${(r.$2 / total * 100).toStringAsFixed(0)}%)',
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProSectionHeader(title: 'Findings by severity'),
+          const SizedBox(height: 10),
+          if (rows.isEmpty)
+            const _EmptyLine('No findings recorded yet.')
+          else
+            Row(children: [
+              SizedBox(
+                width: 116,
+                height: 116,
+                child: CustomPaint(
+                  painter: _DonutPainter([
+                    for (final r in rows)
+                      (r.$2.toDouble(), _kSeverityColor[r.$1] ?? AppColors.muted),
+                  ]),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('$total',
                             style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.inkSoft)),
-                      ]),
+                                fontSize: 22,
+                                height: 1.1,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.4,
+                                color: AppColors.ink,
+                                fontFeatures: [FontFeature.tabularFigures()])),
+                        const Text('findings', style: AppText.caption),
+                      ],
                     ),
                   ),
-              ]),
-            ),
-          ]),
-      ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(children: [
+                  for (final r in rows)
+                    InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => _openFindings(severity: r.$1),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(children: [
+                          Container(
+                              width: 10,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                  color: _kSeverityColor[r.$1],
+                                  borderRadius: BorderRadius.circular(3))),
+                          const SizedBox(width: 9),
+                          Expanded(
+                              child: Text(_kSeverityLabel[r.$1] ?? r.$1,
+                                  style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                      color: AppColors.ink))),
+                          Text(
+                              '${r.$2} (${(r.$2 / total * 100).toStringAsFixed(0)}%)',
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.inkSoft,
+                                  fontFeatures: [FontFeature.tabularFigures()])),
+                          const SizedBox(width: 2),
+                          const Icon(Icons.chevron_right_rounded,
+                              size: 18, color: Color(0xFFB3C0C3)),
+                        ]),
+                      ),
+                    ),
+                ]),
+              ),
+            ]),
+        ],
+      ),
     );
   }
 
   Widget _trendCard(List<TrendPoint> trend) {
     final has = trend.any((t) => t.planned > 0 || t.completed > 0);
-    return AuditSectionCard(
-      title: 'Audit Progress Trend',
-      icon: Icons.show_chart_rounded,
-      children: [
-        if (!has)
-          _EmptyLine('No planned/completed audits in the last ${trend.length} months.')
-        else ...[
-          SizedBox(
-            height: 180,
-            child: CustomPaint(
-              size: Size.infinite,
-              painter: _TrendPainter(trend),
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProSectionHeader(title: 'Audit progress trend'),
+          const SizedBox(height: 10),
+          if (!has)
+            _EmptyLine('No planned/completed audits in the last ${trend.length} months.')
+          else ...[
+            SizedBox(
+              height: 180,
+              child: CustomPaint(
+                size: Size.infinite,
+                painter: _TrendPainter(trend),
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            _Legend(color: Color(0xFF6366F1), label: 'Planned (start date)'),
-            SizedBox(width: 14),
-            _Legend(color: Color(0xFF10B981), label: 'Completed (end date)'),
-          ]),
+            const SizedBox(height: 10),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 16,
+              runSpacing: 6,
+              children: [
+                _Legend(color: AppColors.primary, label: 'Planned (start date)'),
+                const _Legend(color: AppColors.success, label: 'Completed (end date)'),
+              ],
+            ),
+          ],
         ],
+      ),
+    );
+  }
+
+  Widget _recentBlock(List<AuditPlan> recent) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const ProSectionHeader(title: 'Recent audit activity', small: true),
+        const SizedBox(height: 8),
+        if (recent.isEmpty)
+          const GlassCard(child: _EmptyLine('No recent audit activity.'))
+        else
+          ProListGroup(
+            children: [
+              for (final p in recent)
+                ProListRow(
+                  leading: ProIconWell(
+                    icon: Icons.fact_check_rounded,
+                    color: auditStatusTone(p.status).color,
+                  ),
+                  title: p.title ?? p.code ?? 'Audit',
+                  subtitle: [
+                    if ((p.code ?? '').isNotEmpty) p.code!,
+                    p.branchName ?? '—',
+                    'created ${_fmtDt(p.createdAt)}',
+                  ].join(' · '),
+                  pill: AuditStatusChip(status: p.status),
+                  onTap: p.id == null
+                      ? null
+                      : () => Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => AuditDetailScreen(planId: p.id!))),
+                ),
+            ],
+          ),
       ],
     );
   }
 
-  Widget _recentCard(List<AuditPlan> recent) {
-    return AuditSectionCard(
-      title: 'Recent Audit Activity',
-      icon: Icons.history_rounded,
-      children: [
-        if (recent.isEmpty)
-          const _EmptyLine('No recent audit activity.')
-        else
-          for (final p in recent)
-            InkWell(
-              onTap: p.id == null
-                  ? null
-                  : () => Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) => AuditDetailScreen(planId: p.id!))),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('${p.code ?? ''}  ${p.title ?? ''}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.ink)),
-                        Text(
-                            '${p.branchName ?? '—'} · created ${_fmtDt(p.createdAt)}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 11, color: AppColors.muted)),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  AuditStatusChip(status: p.status),
-                ]),
-              ),
-            ),
-      ],
-    );
+  /// "BM ACTION PENDING" → "BM action pending" (display only).
+  static String _sentence(String s) {
+    if (s.isEmpty || s != s.toUpperCase()) return s;
+    const keep = {'BM', 'CAPA', 'OD', 'NPA', 'NA'};
+    final words = [
+      for (final w in s.split(' ')) keep.contains(w) ? w : w.toLowerCase(),
+    ];
+    final first = words.first;
+    if (first.isNotEmpty && !keep.contains(first)) {
+      words[0] = first[0].toUpperCase() + first.substring(1);
+    }
+    return words.join(' ');
   }
 
   static String _fmtDt(String? iso) {
@@ -871,52 +1028,137 @@ class _AuditDashboardBodyState extends ConsumerState<AuditDashboardBody> {
 
 // ── Small widgets / painters ───────────────────────────────────────────────
 
-class _Kpi {
+/// Light metric cell (icon well, label, big value, hint) inside a card.
+class _MetricTile extends StatelessWidget {
+  const _MetricTile({
+    required this.label,
+    required this.value,
+    required this.icon,
+    required this.tone,
+    this.hint,
+    this.onTap,
+    this.valueColor,
+  });
+
   final String label, value;
   final IconData icon;
   final Color tone;
   final String? hint;
   final VoidCallback? onTap;
-  const _Kpi(this.label, this.value, this.icon, this.tone, this.hint, this.onTap);
-}
-
-class _KpiCard extends StatelessWidget {
-  const _KpiCard({required this.kpi});
-  final _Kpi kpi;
+  final Color? valueColor;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(AppRadii.lg),
-      onTap: kpi.onTap,
-      child: GlassCard(
-        padding: const EdgeInsets.all(12),
-        shadow: AppShadows.soft,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Icon(kpi.icon, size: 16, color: kpi.tone),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(kpi.label,
+    return Material(
+      color: AppColors.surfaceAlt,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 11),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ProIconWell(icon: icon, color: tone, size: 30),
+              const SizedBox(height: 10),
+              Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.muted)),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(value,
+                    style: TextStyle(
+                        fontSize: 22,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.4,
+                        color: valueColor ?? AppColors.ink,
+                        fontFeatures: const [FontFeature.tabularFigures()])),
+              ),
+              if (hint != null)
+                Text(hint!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                         fontSize: 11.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.muted)),
-              ),
-            ]),
-            const SizedBox(height: 6),
-            Text(kpi.value,
-                style: TextStyle(
-                    fontSize: 24, fontWeight: FontWeight.w800, color: kpi.tone)),
-            if (kpi.hint != null)
-              Text(kpi.hint!,
-                  style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
-          ],
+                        color: AppColors.faint,
+                        fontFeatures: [FontFeature.tabularFigures()])),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+/// Full-width "Avg score" cell with a thin bar.
+class _AvgScoreTile extends StatelessWidget {
+  const _AvgScoreTile({required this.score});
+  final double? score;
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = auditScoreTone(score);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(children: [
+        ProIconWell(icon: Icons.speed_rounded, color: tone, size: 30),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Avg score',
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.muted)),
+              const SizedBox(height: 7),
+              ProBar(value: (score ?? 0) / 100, color: tone),
+            ],
+          ),
+        ),
+        const SizedBox(width: 14),
+        Text(
+          score == null ? '—' : '${score!.toStringAsFixed(1)}%',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.4,
+            color: score == null ? AppColors.ink : auditInk(tone),
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// Tappable tinted pill (status side-counts).
+class _TapPill extends StatelessWidget {
+  const _TapPill({required this.label, required this.color, required this.onTap});
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+        onTap: onTap,
+        child: auditPill(label, color),
       ),
     );
   }
@@ -927,9 +1169,9 @@ class _EmptyLine extends StatelessWidget {
   final String text;
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Text(text,
-            style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+            style: const TextStyle(fontSize: 13, height: 1.4, color: AppColors.muted)),
       );
 }
 
@@ -938,14 +1180,14 @@ class _Legend extends StatelessWidget {
   final Color color;
   final String label;
   @override
-  Widget build(BuildContext context) => Row(children: [
+  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
         Container(
             width: 10,
             height: 10,
             decoration: BoxDecoration(
-                color: color, borderRadius: BorderRadius.circular(2))),
-        const SizedBox(width: 5),
-        Text(label, style: const TextStyle(fontSize: 11, color: AppColors.inkSoft)),
+                color: color, borderRadius: BorderRadius.circular(3))),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(fontSize: 12, color: AppColors.inkSoft)),
       ]);
 }
 
@@ -956,16 +1198,22 @@ class _HBar extends StatelessWidget {
     required this.fraction,
     required this.color,
     required this.trailing,
+    this.onTap,
+    this.dim = false,
   });
   final String label, trailing;
   final double fraction;
   final Color color;
+  final VoidCallback? onTap;
+
+  /// Greys the label of an empty stage.
+  final bool dim;
 
   @override
   Widget build(BuildContext context) {
     final f = fraction.isNaN ? 0.0 : fraction.clamp(0.0, 1.0);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
+    final body = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -974,30 +1222,29 @@ class _HBar extends StatelessWidget {
               child: Text(label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.inkSoft)),
+                  style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      color: dim ? AppColors.faint : AppColors.inkSoft)),
             ),
+            const SizedBox(width: 8),
             Text(trailing,
-                style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink)),
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: dim ? AppColors.faint : AppColors.ink,
+                    fontFeatures: const [FontFeature.tabularFigures()])),
           ]),
-          const SizedBox(height: 4),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: Stack(children: [
-              Container(height: 10, color: AppColors.hairline),
-              FractionallySizedBox(
-                widthFactor: f,
-                child: Container(height: 10, color: color),
-              ),
-            ]),
-          ),
+          const SizedBox(height: 6),
+          ProBar(value: f, color: color, height: 8),
         ],
       ),
+    );
+    if (onTap == null) return body;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: body,
     );
   }
 }
@@ -1010,7 +1257,7 @@ class _DonutPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final total = slices.fold<double>(0, (a, s) => a + s.$1);
     if (total <= 0) return;
-    final stroke = size.shortestSide * 0.22;
+    final stroke = size.shortestSide * 0.16;
     final rect = Rect.fromLTWH(stroke / 2, stroke / 2, size.width - stroke,
         size.height - stroke);
     var start = -math.pi / 2;
@@ -1019,11 +1266,12 @@ class _DonutPainter extends CustomPainter {
       canvas.drawArc(
         rect,
         start,
-        math.max(0, sweep - 0.03),
+        math.max(0, sweep - 0.05),
         false,
         Paint()
           ..color = s.$2
           ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.butt
           ..strokeWidth = stroke,
       );
       start += sweep;
@@ -1034,7 +1282,7 @@ class _DonutPainter extends CustomPainter {
   bool shouldRepaint(covariant _DonutPainter old) => old.slices != slices;
 }
 
-/// Grouped bars: planned (indigo) + completed (green) per month.
+/// Grouped bars: planned (brand) + completed (green) per month.
 class _TrendPainter extends CustomPainter {
   _TrendPainter(this.trend);
   final List<TrendPoint> trend;
@@ -1047,7 +1295,7 @@ class _TrendPainter extends CustomPainter {
     final maxV = trend.fold<int>(
         1, (m, t) => math.max(m, math.max(t.planned, t.completed)));
     final grid = Paint()
-      ..color = AppColors.hairline
+      ..color = AppColors.hairlineSoft
       ..strokeWidth = 1;
     for (var i = 0; i <= 3; i++) {
       final y = topPad + chartH * i / 3;
@@ -1058,30 +1306,37 @@ class _TrendPainter extends CustomPainter {
     void bar(double cx, int v, Color c) {
       if (v <= 0) return;
       final h = chartH * v / maxV;
-      final r = RRect.fromRectAndRadius(
+      final r = RRect.fromRectAndCorners(
         Rect.fromLTWH(cx, topPad + chartH - h, barW, h),
-        const Radius.circular(3),
+        topLeft: const Radius.circular(4),
+        topRight: const Radius.circular(4),
       );
       canvas.drawRRect(r, Paint()..color = c);
-      _text(canvas, '$v', Offset(cx + barW / 2, topPad + chartH - h - 12),
-          AppColors.inkSoft, 9.5);
+      _text(canvas, '$v', Offset(cx + barW / 2, topPad + chartH - h - 13),
+          AppColors.inkSoft, 10);
     }
 
     for (var i = 0; i < trend.length; i++) {
       final t = trend[i];
       final center = slot * i + slot / 2;
-      bar(center - barW - 1, t.planned, const Color(0xFF6366F1));
-      bar(center + 1, t.completed, const Color(0xFF10B981));
+      bar(center - barW - 1, t.planned, AppColors.primary);
+      bar(center + 1, t.completed, AppColors.success);
       final parts = t.month.split('-');
       final d = DateTime(int.parse(parts[0]), int.parse(parts[1]), 1);
       _text(canvas, DateFormat("MMM yy").format(d),
-          Offset(center, size.height - labelH + 3), AppColors.muted, 10);
+          Offset(center, size.height - labelH + 3), AppColors.muted, 10.5);
     }
   }
 
   void _text(Canvas canvas, String s, Offset centerTop, Color color, double fs) {
     final tp = TextPainter(
-      text: TextSpan(text: s, style: TextStyle(fontSize: fs, color: color)),
+      text: TextSpan(
+          text: s,
+          style: TextStyle(
+              fontFamily: 'Geist',
+              fontSize: fs,
+              color: color,
+              fontFeatures: const [FontFeature.tabularFigures()])),
       textDirection: ui.TextDirection.ltr,
     )..layout();
     tp.paint(canvas, Offset(centerTop.dx - tp.width / 2, centerTop.dy));

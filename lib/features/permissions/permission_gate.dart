@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/branding.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../auth/auth_controller.dart';
 
@@ -304,101 +305,166 @@ class _PermissionWall extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
-    return Material(
-      color: AppColors.bg,
-      child: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(24, 28, 24, mq.padding.bottom + 24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 440),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+    final granted = required.where(isOk).length;
+    final total = required.length;
+    // Note: this wall renders above the app's Navigator (MaterialApp.builder),
+    // so nothing here may need an Overlay (no tooltips).
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Material(
+        color: AppColors.bg,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                physics: const ClampingScrollPhysics(),
                 children: [
-                  Container(
-                    width: 84,
-                    height: 84,
-                    decoration: BoxDecoration(
-                      gradient: AppColors.heroGradient,
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primary.withOpacity(0.35),
-                          blurRadius: 24,
-                          offset: const Offset(0, 12),
+                  // Deep header: shield, title, why, progress.
+                  ProDeepSurface(
+                    padding: EdgeInsets.fromLTRB(20, mq.padding.top + 22, 20, 22),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 52,
+                          height: 52,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                                color: Colors.white.withOpacity(0.18)),
+                          ),
+                          child: const Icon(Icons.shield_outlined,
+                              color: Colors.white, size: 26),
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Permissions required',
+                          style: TextStyle(
+                            fontSize: 24,
+                            height: 1.2,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.65,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '${Branding.current.productName} needs these permissions '
+                          'to track attendance reliably. Please enable all of them '
+                          'to continue.',
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            height: 1.45,
+                            color: Colors.white70,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ProBar(
+                                value: total == 0 ? 0 : granted / total,
+                                color: AppColors.live,
+                                track: Colors.white.withOpacity(0.12),
+                                height: 6,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              '$granted of $total enabled',
+                              style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                                fontFeatures: [FontFeature.tabularFigures()],
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                    child: const Icon(Icons.shield_moon_rounded,
-                        color: Colors.white, size: 40),
                   ),
-                  const SizedBox(height: 22),
-                  const Text(
-                    'Permissions required',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.ink,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '${Branding.current.productName} needs these permissions '
-                    'to track attendance reliably. Please enable all of them '
-                    'to continue.',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: AppColors.inkSoft,
-                      height: 1.45,
-                    ),
-                  ),
-                  const SizedBox(height: 22),
-                  for (final k in required) ...[
-                    _PermissionRow(
-                      info: _info(k),
-                      granted: isOk(k),
-                      onFix: () => onFix(k),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  const SizedBox(height: 6),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: requesting ? null : onEnableAll,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        minimumSize: const Size.fromHeight(52),
-                      ),
-                      icon: requesting
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.2,
-                                valueColor:
-                                    AlwaysStoppedAnimation(Colors.white),
-                              ),
-                            )
-                          : const Icon(Icons.lock_open_rounded),
-                      label: Text(
-                        requesting ? 'Requesting…' : 'Enable all',
-                        style: const TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w800),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 480),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const ProSectionHeader(
+                              title: 'Required on this phone',
+                              small: true,
+                            ),
+                            const SizedBox(height: 8),
+                            ProListGroup(
+                              children: [
+                                for (final k in required)
+                                  _PermissionRow(
+                                    info: _info(k),
+                                    granted: isOk(k),
+                                    onFix: () => onFix(k),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: () => onRefresh(),
-                    child: const Text("I've enabled them — re-check"),
                   ),
                 ],
               ),
             ),
-          ),
+            // Sticky actions.
+            Container(
+              decoration: const BoxDecoration(
+                color: AppColors.bg,
+                border: Border(top: BorderSide(color: AppColors.hairline)),
+              ),
+              padding: EdgeInsets.fromLTRB(16, 12, 16, mq.padding.bottom + 8),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 480),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: requesting ? null : onEnableAll,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(52),
+                          disabledBackgroundColor:
+                              requesting ? AppColors.primary : null,
+                          disabledForegroundColor:
+                              requesting ? Colors.white : null,
+                        ),
+                        icon: requesting
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  valueColor:
+                                      AlwaysStoppedAnimation(Colors.white),
+                                ),
+                              )
+                            : const Icon(Icons.lock_open_rounded, size: 19),
+                        label: Text(requesting ? 'Requesting…' : 'Enable all'),
+                      ),
+                      const SizedBox(height: 4),
+                      TextButton(
+                        onPressed: () => onRefresh(),
+                        child: const Text("I've enabled them — re-check"),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -429,24 +495,12 @@ class _PermissionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tone = granted ? AppColors.success : AppColors.primary;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: tone.withOpacity(0.22)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: tone.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: Icon(info.icon, color: tone, size: 21),
-          ),
+          ProIconWell(icon: info.icon, color: tone),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -456,8 +510,10 @@ class _PermissionRow extends StatelessWidget {
                 Text(
                   info.title,
                   style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                    height: 1.33,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: -0.15,
                     color: AppColors.ink,
                   ),
                 ),
@@ -465,10 +521,9 @@ class _PermissionRow extends StatelessWidget {
                 Text(
                   info.subtitle,
                   style: const TextStyle(
-                    fontSize: 11.5,
-                    color: AppColors.muted,
-                    fontWeight: FontWeight.w500,
+                    fontSize: 12.5,
                     height: 1.35,
+                    color: AppColors.muted,
                   ),
                 ),
               ],
@@ -476,20 +531,18 @@ class _PermissionRow extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           if (granted)
-            const Icon(Icons.check_circle_rounded,
-                color: AppColors.success, size: 24)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: ProPill.ok('On'),
+            )
           else
             TextButton(
               onPressed: onFix,
               style: TextButton.styleFrom(
-                foregroundColor: AppColors.primary,
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 minimumSize: const Size(0, 36),
               ),
-              child: const Text(
-                'Enable',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-              ),
+              child: const Text('Enable'),
             ),
         ],
       ),

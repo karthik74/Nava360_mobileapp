@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/env.dart';
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -165,147 +166,173 @@ class _TravelPlanFormScreenState extends ConsumerState<TravelPlanFormScreen> {
   @override
   Widget build(BuildContext context) {
     final df = DateFormat('d MMM yyyy');
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Text(_isEdit ? 'Edit Travel Plan' : 'New Travel Plan'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _label('Title *'),
-            ref.watch(travelPlanTitlesProvider).when(
-              data: (options) {
-                final current = _title.text.trim();
-                // Keep a legacy free-text title selectable when editing.
-                final items = [
-                  ...options,
-                  if (current.isNotEmpty && !options.contains(current)) current,
-                ];
-                return DropdownButtonFormField<String>(
-                  value: current.isEmpty ? null : current,
-                  isExpanded: true,
-                  hint: const Text('Select a purpose'),
-                  decoration: const InputDecoration(
-                      prefixIcon: Icon(Icons.flag_rounded, size: 20)),
-                  items: [
-                    for (final t in items)
-                      DropdownMenuItem(value: t, child: Text(t)),
-                  ],
-                  onChanged: (v) => setState(() => _title.text = v ?? ''),
-                );
-              },
-              loading: () => const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: LinearProgressIndicator(minHeight: 2),
-              ),
-              // Lookup unavailable → fall back to free text so saving still works.
-              error: (_, __) => TextField(
-                controller: _title,
-                maxLength: 150,
-                textCapitalization: TextCapitalization.words,
-                inputFormatters: const [TitleCaseTextFormatter()],
-              ),
-            ),
-            const SizedBox(height: 12),
-            _label('From *'),
-            _BranchField(controller: _from, hint: 'Type or pick a branch'),
-            const SizedBox(height: 12),
-            _label('Destination *'),
-            _BranchField(controller: _destination, hint: 'Type or pick a branch'),
-            const SizedBox(height: 12),
-            _label('Travel mode *'),
-            DropdownButtonFormField<String>(
-              value: _mode,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.commute_rounded, size: 20)),
-              items: [
-                for (final m in TravelEnums.travelModes)
-                  DropdownMenuItem(value: m, child: Text(TravelEnums.label(m))),
-              ],
-              onChanged: (v) => setState(() => _mode = v),
-            ),
-            const SizedBox(height: 12),
-            Row(
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: _isEdit ? 'Edit travel plan' : 'New travel plan',
+        subtitle: _isEdit ? widget.plan!.title : 'Record an upcoming trip',
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: _DateField(
-                    label: 'Start date *',
-                    value: _startDate == null ? 'Not set' : df.format(_startDate!),
-                    onTap: () => _pickDate(isStart: true),
+                const ProSectionHeader(title: 'Trip'),
+                const SizedBox(height: 12),
+                ProField(
+                  label: 'Title',
+                  required: true,
+                  child: ref.watch(travelPlanTitlesProvider).when(
+                    data: (options) {
+                      final current = _title.text.trim();
+                      // Keep a legacy free-text title selectable when editing.
+                      final items = [
+                        ...options,
+                        if (current.isNotEmpty && !options.contains(current)) current,
+                      ];
+                      return DropdownButtonFormField<String>(
+                        value: current.isEmpty ? null : current,
+                        isExpanded: true,
+                        hint: const Text('Select a purpose'),
+                        decoration: const InputDecoration(
+                            prefixIcon: Icon(Icons.flag_rounded, size: 20)),
+                        items: [
+                          for (final t in items)
+                            DropdownMenuItem(value: t, child: Text(t)),
+                        ],
+                        onChanged: (v) => setState(() => _title.text = v ?? ''),
+                      );
+                    },
+                    loading: () => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: LinearProgressIndicator(minHeight: 2),
+                    ),
+                    // Lookup unavailable → fall back to free text so saving still works.
+                    error: (_, __) => TextField(
+                      controller: _title,
+                      maxLength: 150,
+                      textCapitalization: TextCapitalization.words,
+                      inputFormatters: const [TitleCaseTextFormatter()],
+                    ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _DateField(
-                    label: 'End date *',
-                    value: _endDate == null ? 'Not set' : df.format(_endDate!),
-                    onTap: () => _pickDate(isStart: false),
+                const SizedBox(height: 14),
+                ProField(
+                  label: 'From',
+                  required: true,
+                  child: _BranchField(controller: _from, hint: 'Type or pick a branch'),
+                ),
+                const SizedBox(height: 14),
+                ProField(
+                  label: 'Destination',
+                  required: true,
+                  child: _BranchField(controller: _destination, hint: 'Type or pick a branch'),
+                ),
+                const SizedBox(height: 14),
+                ProField(
+                  label: 'Travel mode',
+                  required: true,
+                  child: DropdownButtonFormField<String>(
+                    value: _mode,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.commute_rounded, size: 20)),
+                    items: [
+                      for (final m in TravelEnums.travelModes)
+                        DropdownMenuItem(value: m, child: Text(TravelEnums.label(m))),
+                    ],
+                    onChanged: (v) => setState(() => _mode = v),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            _label('Estimated cost'),
-            TextField(
-              controller: _cost,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(prefixText: '₹ '),
-            ),
-            const SizedBox(height: 12),
-            _label('Purpose'),
-            TextField(
-              controller: _purpose,
-              minLines: 2,
-              maxLines: 5,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
-            ),
-            const SizedBox(height: 18),
-            if (_isEdit && widget.plan!.attachments.isNotEmpty) ...[
-              // Legacy plan attachments stay viewable; new uploads happen on the
-              // CLAIM raised for this plan (policy 2026-07-04).
-              const AppSectionHeader(title: 'Existing attachments'),
-              const SizedBox(height: 8),
-              for (final att in widget.plan!.attachments)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _ExistingAttachmentTile(att: att),
+          ),
+          const SizedBox(height: 14),
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const ProSectionHeader(title: 'Dates and cost'),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _DateField(
+                        label: 'Start date *',
+                        value: _startDate == null ? 'Not set' : df.format(_startDate!),
+                        onTap: () => _pickDate(isStart: true),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _DateField(
+                        label: 'End date *',
+                        value: _endDate == null ? 'Not set' : df.format(_endDate!),
+                        onTap: () => _pickDate(isStart: false),
+                      ),
+                    ),
+                  ],
                 ),
-              const SizedBox(height: 12),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              AppErrorPanel(message: _error!),
-            ],
-            const SizedBox(height: 18),
-            SizedBox(
-              height: 50,
-              child: FilledButton(
-                onPressed: _saving ? null : _save,
-                child: Text(_saving
-                    ? 'Saving…'
-                    : (_isEdit ? 'Save changes' : 'Create plan')),
-              ),
+                const SizedBox(height: 14),
+                ProField(
+                  label: 'Estimated cost',
+                  child: TextField(
+                    controller: _cost,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(prefixText: '₹ '),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                ProField(
+                  label: 'Purpose',
+                  child: TextField(
+                    controller: _purpose,
+                    minLines: 2,
+                    maxLines: 5,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [TitleCaseTextFormatter()],
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 24),
+          ),
+          if (_isEdit && widget.plan!.attachments.isNotEmpty) ...[
+            // Legacy plan attachments stay viewable; new uploads happen on the
+            // CLAIM raised for this plan (policy 2026-07-04).
+            const SizedBox(height: 22),
+            ProSectionHeader(
+              title: 'Existing attachments',
+              subtitle: '${widget.plan!.attachments.length} file(s)',
+            ),
+            const SizedBox(height: 10),
+            ProListGroup(
+              children: [
+                for (final att in widget.plan!.attachments)
+                  _ExistingAttachmentTile(att: att),
+              ],
+            ),
           ],
-        ),
+          if (_error != null) ...[
+            const SizedBox(height: 14),
+            AppErrorPanel(message: _error!),
+          ],
+        ],
+      ),
+      bottomNavigationBar: ProBottomBar(
+        children: [
+          FilledButton(
+            onPressed: _saving ? null : _save,
+            child: Text(_saving
+                ? 'Saving…'
+                : (_isEdit ? 'Save changes' : 'Create plan')),
+          ),
+        ],
       ),
     );
   }
-
-  Widget _label(String t) => Padding(
-        padding: const EdgeInsets.only(bottom: 4, top: 4),
-        child: Text(t,
-            style: const TextStyle(
-                fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
-      );
 }
 
 /// Location field backed by the branch directory: type to search, matching
@@ -356,31 +383,42 @@ class _BranchFieldState extends ConsumerState<_BranchField> {
         ),
         optionsViewBuilder: (context, onSelected, options) => Align(
           alignment: Alignment.topLeft,
-          child: Material(
-            elevation: 4,
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            clipBehavior: Clip.antiAlias,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxHeight: 240,
-                maxWidth: constraints.maxWidth,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Material(
+              color: AppColors.surface,
+              elevation: 6,
+              shadowColor: const Color(0x330B1D21),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadii.md),
+                side: const BorderSide(color: AppColors.hairline),
               ),
-              child: ListView.builder(
-                padding: EdgeInsets.zero,
-                shrinkWrap: true,
-                itemCount: options.length,
-                itemBuilder: (_, i) {
-                  final label = options.elementAt(i);
-                  return ListTile(
-                    dense: true,
-                    leading: Icon(Icons.store_mall_directory_rounded,
-                        size: 18, color: AppColors.primary),
-                    title: Text(label,
-                        style: const TextStyle(
-                            fontSize: 13.5, fontWeight: FontWeight.w600)),
-                    onTap: () => onSelected(label),
-                  );
-                },
+              clipBehavior: Clip.antiAlias,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: 240,
+                  maxWidth: constraints.maxWidth,
+                ),
+                child: ListView.separated(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  itemCount: options.length,
+                  separatorBuilder: (_, __) => const Divider(
+                      height: 1, indent: 56, color: AppColors.hairlineSoft),
+                  itemBuilder: (_, i) {
+                    final label = options.elementAt(i);
+                    return ProListRow(
+                      dense: true,
+                      chevron: false,
+                      leading: ProIconWell(
+                          icon: Icons.store_mall_directory_rounded,
+                          color: AppColors.primary,
+                          size: 30),
+                      title: label,
+                      onTap: () => onSelected(label),
+                    );
+                  },
+                ),
               ),
             ),
           ),
@@ -398,38 +436,29 @@ class _DateField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadii.md),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: Border.all(color: AppColors.hairline),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.calendar_today_rounded, size: 15, color: AppColors.primary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(label,
-                      style: const TextStyle(
-                          fontSize: 10.5, fontWeight: FontWeight.w600, color: AppColors.muted)),
-                  const SizedBox(height: 2),
-                  Text(value,
-                      style: const TextStyle(
-                          fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.ink),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                ],
-              ),
+    // The label keeps its trailing " *" marker; render it the ProField way.
+    final required = label.endsWith(' *');
+    return ProField(
+      label: required ? label.substring(0, label.length - 2) : label,
+      required: required,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        child: InputDecorator(
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.calendar_today_rounded, size: 17),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          ),
+          child: Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w500,
+              color: value == 'Not set' ? AppColors.faint : AppColors.ink,
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -442,29 +471,16 @@ class _ExistingAttachmentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.all(10),
-      shadow: AppShadows.soft,
-      child: InkWell(
-        onTap: () async {
-          final url = Env.fileUrl(att.downloadUrl);
-          if (url == null) return;
-          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-        },
-        child: Row(
-          children: [
-            Icon(Icons.description_rounded, color: AppColors.primary),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(att.fileName ?? 'Attachment',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink)),
-            ),
-            const Icon(Icons.open_in_new_rounded, size: 16, color: AppColors.muted),
-          ],
-        ),
-      ),
+    return ProListRow(
+      leading: ProIconWell(icon: Icons.description_rounded, color: AppColors.primary),
+      title: att.fileName ?? 'Attachment',
+      chevron: false,
+      trailing: const Icon(Icons.open_in_new_rounded, size: 17, color: AppColors.muted),
+      onTap: () async {
+        final url = Env.fileUrl(att.downloadUrl);
+        if (url == null) return;
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      },
     );
   }
 }

@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/text_formatters.dart';
 import '../../core/branding.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'audit_models.dart';
@@ -150,24 +151,26 @@ class _AuditFillScreenState extends ConsumerState<AuditFillScreen> {
     final pending = _pendingList();
     showModalBottomSheet<void>(
       context: context,
-      builder: (_) => SafeArea(
+      builder: (_) => AuditSheet(
+        title: 'Pending checklist',
+        subtitle: pending.isEmpty ? null : '${pending.length} item(s) to complete',
         child: pending.isEmpty
-            ? const Padding(padding: EdgeInsets.all(24), child: Text('All questions complete. You can submit.'))
+            ? const ProNote('All questions complete. You can submit.',
+                tone: ProNoteTone.ok)
             : ListView(
                 shrinkWrap: true,
+                padding: EdgeInsets.zero,
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.all(14),
-                    child: Text('Pending checklist', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                  ProListGroup(
+                    dividerIndent: 58,
+                    children: [
+                      for (final q in pending)
+                        _PendingRow(
+                          title: '${q.code ?? ''}  ${q.text ?? ''}',
+                          reason: _reasonFor(q),
+                        ),
+                    ],
                   ),
-                  for (final q in pending)
-                    ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.error_outline_rounded, color: AppColors.danger, size: 20),
-                      title: Text('${q.code ?? ''}  ${q.text ?? ''}',
-                          maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5)),
-                      subtitle: Text(_reasonFor(q), style: const TextStyle(fontSize: 11.5, color: AppColors.danger)),
-                    ),
                 ],
               ),
       ),
@@ -264,44 +267,77 @@ class _AuditFillScreenState extends ConsumerState<AuditFillScreen> {
         : 'Synced ${result.synced} change(s)');
   }
 
-  Widget _completionBar() {
-    final p = _progress();
+  /// Incomplete questions inside one category (tab badge).
+  int _pendingIn(CategoryBlock c) {
+    var n = 0;
+    for (final sub in c.subsections) {
+      for (final q in sub.questions) {
+        if (_isIncomplete(q)) n++;
+      }
+    }
+    return n;
+  }
+
+  Widget _progressCard(
+      ({int answered, int total, int pending, bool applicable}) p) {
     final pct = p.total == 0 ? 0.0 : p.answered / p.total;
     final done = p.pending == 0 && p.applicable;
-    return Material(
-      color: AppColors.surface,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+    final tone = done ? AppColors.success : AppColors.primary;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: GlassCard(
+        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
-                Icon(done ? Icons.verified_rounded : Icons.checklist_rounded,
-                    size: 16, color: done ? AppColors.success : AppColors.primary),
-                const SizedBox(width: 8),
+                ProIconWell(
+                  icon: done ? Icons.verified_rounded : Icons.checklist_rounded,
+                  color: tone,
+                  size: 32,
+                ),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: Text('${p.answered}/${p.total} answered'
-                      '${p.pending > 0 ? '  ·  ${p.pending} pending' : ''}',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.ink)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text.rich(
+                        TextSpan(children: [
+                          TextSpan(text: '${p.answered}/${p.total} answered'),
+                          if (p.pending > 0)
+                            TextSpan(
+                              text: '  ·  ${p.pending} pending',
+                              style: const TextStyle(color: AppColors.danger),
+                            ),
+                        ]),
+                        style: const TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.ink,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      Text('${(pct * 100).round()}% of the checklist',
+                          style: AppText.caption),
+                    ],
+                  ),
                 ),
                 if (p.pending > 0)
                   TextButton(
                     onPressed: _openPendingSheet,
-                    style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8)),
-                    child: const Text('View pending', style: TextStyle(fontSize: 12, color: AppColors.danger)),
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.danger,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                    ),
+                    child: const Text('View pending'),
                   ),
               ],
             ),
-            const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: pct,
-                minHeight: 6,
-                backgroundColor: AppColors.muted.withValues(alpha: 0.18),
-                valueColor: AlwaysStoppedAnimation(done ? AppColors.success : AppColors.primary),
-              ),
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: ProBar(value: pct, color: tone, height: 6),
             ),
           ],
         ),
@@ -313,97 +349,253 @@ class _AuditFillScreenState extends ConsumerState<AuditFillScreen> {
   Widget build(BuildContext context) {
     final async = ref.watch(auditExecutionProvider(widget.executionId));
     return async.when(
-      loading: () => const Scaffold(body: Center(child: AppLoadingBlock(height: 200))),
+      loading: () => Scaffold(
+        backgroundColor: AppColors.bg,
+        appBar: proLightAppBar(context, title: 'Audit'),
+        body: const Padding(
+          padding: EdgeInsets.all(16),
+          child: AppLoadingBlock(height: 200),
+        ),
+      ),
       error: (e, _) => Scaffold(
-        appBar: AppBar(title: const Text('Audit')),
-        body: AppErrorPanel(message: '$e', onRetry: () => ref.invalidate(auditExecutionProvider(widget.executionId))),
+        backgroundColor: AppColors.bg,
+        appBar: proLightAppBar(context, title: 'Audit'),
+        body: Padding(
+          padding: const EdgeInsets.all(16),
+          child: AppErrorPanel(
+              message: '$e',
+              onRetry: () =>
+                  ref.invalidate(auditExecutionProvider(widget.executionId))),
+        ),
       ),
       data: (d) {
         _seed(d);
         final editable = d.isEditable;
+        final p = _progress();
+        final labels = <String>[
+          'Rating',
+          for (final c in d.categories) c.code ?? c.name ?? '—',
+          'Center',
+          'Client',
+          'OD/NPA',
+          'Legal',
+          'Summary',
+        ];
         final tabs = <Tab>[
           const Tab(text: 'Rating'),
-          for (final c in d.categories) Tab(text: c.code ?? c.name ?? '—'),
+          for (final c in d.categories)
+            Tab(
+              child: _TabLabel(
+                c.code ?? c.name ?? '—',
+                badge: editable ? _pendingIn(c) : 0,
+              ),
+            ),
           const Tab(text: 'Center'),
           const Tab(text: 'Client'),
           const Tab(text: 'OD/NPA'),
           const Tab(text: 'Legal'),
           const Tab(text: 'Summary'),
         ];
+        final subtitle = [
+          if (d.branchName != null && d.planCode != null) d.planCode!,
+          editable ? 'Fill audit' : auditStatusTone(d.status).label,
+        ].join(' · ');
         return DefaultTabController(
           length: tabs.length,
           child: Scaffold(
             backgroundColor: AppColors.bg,
-            appBar: AppBar(
-              backgroundColor: AppColors.surface,
-              foregroundColor: AppColors.ink,
-              title: Text(d.branchName ?? d.planCode ?? 'Audit'),
+            appBar: proLightAppBar(
+              context,
+              title: d.branchName ?? d.planCode ?? 'Audit',
+              subtitle: subtitle,
+              actions: [
+                if (editable)
+                  IconButton(
+                    tooltip: 'Pending checklist',
+                    onPressed: _openPendingSheet,
+                    icon: Badge(
+                      isLabelVisible: p.pending > 0,
+                      label: Text('${p.pending}'),
+                      child: const Icon(Icons.checklist_rounded),
+                    ),
+                  ),
+                const SizedBox(width: 8),
+              ],
               bottom: TabBar(
                 isScrollable: true,
-                labelColor: AppColors.primary,
-                indicatorColor: AppColors.primary,
+                tabAlignment: TabAlignment.start,
                 tabs: tabs,
               ),
             ),
             body: Column(
               children: [
                 _PendingBanner(onSync: _syncNow),
-                if (editable) _completionBar(),
+                if (editable) _progressCard(p),
+                _TabStep(labels: labels),
                 Expanded(
                   child: TabBarView(
-              children: [
-                _RatingTab(executionId: widget.executionId, detail: d, editable: editable),
-                for (final c in d.categories) _CategoryTab(
-                  category: c,
-                  editable: editable,
-                  answers: _answers,
-                  obs: _obs,
-                  executionId: widget.executionId,
-                  isIncomplete: _isIncomplete,
-                  onChanged: () => setState(() {}),
-                  onAttachmentChanged: () => ref.invalidate(auditExecutionProvider(widget.executionId)),
-                ),
-                _AnnexureTab(executionId: widget.executionId, type: 'center', editable: editable),
-                _AnnexureTab(executionId: widget.executionId, type: 'client', editable: editable),
-                _AnnexureTab(executionId: widget.executionId, type: 'od', editable: editable),
-                _AnnexureTab(executionId: widget.executionId, type: 'branch', editable: editable),
-                _SummaryTab(executionId: widget.executionId, detail: d, editable: editable),
-              ],
+                    children: [
+                      _RatingTab(executionId: widget.executionId, detail: d, editable: editable),
+                      for (final c in d.categories) _CategoryTab(
+                        category: c,
+                        editable: editable,
+                        answers: _answers,
+                        obs: _obs,
+                        executionId: widget.executionId,
+                        isIncomplete: _isIncomplete,
+                        onChanged: () => setState(() {}),
+                        onAttachmentChanged: () => ref.invalidate(auditExecutionProvider(widget.executionId)),
+                      ),
+                      _AnnexureTab(executionId: widget.executionId, type: 'center', editable: editable),
+                      _AnnexureTab(executionId: widget.executionId, type: 'client', editable: editable),
+                      _AnnexureTab(executionId: widget.executionId, type: 'od', editable: editable),
+                      _AnnexureTab(executionId: widget.executionId, type: 'branch', editable: editable),
+                      _SummaryTab(executionId: widget.executionId, detail: d, editable: editable),
+                    ],
                   ),
                 ),
               ],
             ),
-            bottomNavigationBar: !editable ? null : SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _saving ? null : _saveResponses,
-                        icon: const Icon(Icons.save_rounded, size: 18),
-                        label: const Text('Save'),
-                      ),
+            bottomNavigationBar: !editable
+                ? null
+                : ProBottomBar(children: [
+                    OutlinedButton.icon(
+                      onPressed: _saving ? null : _saveResponses,
+                      icon: const Icon(Icons.save_rounded, size: 18),
+                      label: const Text('Save'),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                            backgroundColor: _progress().pending == 0 ? AppColors.primary : AppColors.muted),
-                        onPressed: _saving ? null : _submit,
-                        icon: const Icon(Icons.check_circle_rounded, size: 18),
-                        label: Text(_saving
-                            ? 'Working…'
-                            : (_progress().pending == 0 ? 'Submit' : 'Submit (${_progress().pending})')),
-                      ),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                          backgroundColor: p.pending == 0
+                              ? AppColors.primary
+                              : AppColors.muted),
+                      onPressed: _saving ? null : _submit,
+                      icon: const Icon(Icons.check_circle_rounded, size: 18),
+                      label: Text(_saving
+                          ? 'Working…'
+                          : (p.pending == 0 ? 'Submit' : 'Submit (${p.pending})')),
                     ),
-                  ],
-                ),
-              ),
-            ),
+                  ]),
           ),
         );
       },
+    );
+  }
+}
+
+// ── Header bits ───────────────────────────────────────────────────────────────
+
+/// Tab text with a small red count of incomplete questions.
+class _TabLabel extends StatelessWidget {
+  const _TabLabel(this.label, {this.badge = 0});
+  final String label;
+  final int badge;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label),
+        if (badge > 0) ...[
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+            decoration: BoxDecoration(
+              color: AppColors.dangerTint,
+              borderRadius: BorderRadius.circular(AppRadii.pill),
+            ),
+            child: Text(
+              '$badge',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: AppColors.danger,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Step bar showing which section tab is open ("3 of 10").
+class _TabStep extends StatelessWidget {
+  const _TabStep({required this.labels});
+  final List<String> labels;
+
+  @override
+  Widget build(BuildContext context) {
+    final tc = DefaultTabController.of(context);
+    return AnimatedBuilder(
+      animation: tc,
+      builder: (_, __) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+        child: Row(
+          children: [
+            Expanded(child: ProStepBar(total: labels.length, current: tc.index)),
+            const SizedBox(width: 10),
+            Text(
+              '${tc.index + 1} of ${labels.length}',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: AppColors.muted,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingRow extends StatelessWidget {
+  const _PendingRow({required this.title, required this.reason});
+  final String title;
+  final String reason;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const ProIconWell(
+              icon: Icons.error_outline_rounded, color: AppColors.danger),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.35,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.ink,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  reason,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.danger,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -418,17 +610,30 @@ class _PendingBanner extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final count = ref.watch(auditPendingCountProvider).asData?.value ?? 0;
     if (count == 0) return const SizedBox.shrink();
-    return Material(
-      color: AppColors.warning.withValues(alpha: 0.12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+    const ink = Color(0xFF8A5200);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF6E6),
+          borderRadius: BorderRadius.circular(14),
+        ),
         child: Row(
           children: [
-            const Icon(Icons.cloud_off_rounded, size: 16, color: AppColors.warning),
-            const SizedBox(width: 8),
+            const Icon(Icons.cloud_off_rounded, size: 18, color: ink),
+            const SizedBox(width: 10),
             Expanded(
-              child: Text('$count change(s) pending sync',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.ink)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('$count change(s) pending sync',
+                      style: const TextStyle(
+                          fontSize: 13.5, fontWeight: FontWeight.w600, color: ink)),
+                  const Text('Saved on this phone',
+                      style: TextStyle(fontSize: 12, color: ink)),
+                ],
+              ),
             ),
             TextButton(onPressed: onSync, child: const Text('Sync now')),
           ],
@@ -508,66 +713,91 @@ class _RatingTabState extends ConsumerState<_RatingTab> {
   @override
   Widget build(BuildContext context) {
     final d = widget.detail;
+    Widget pair(Widget a, Widget b) => Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: a),
+            const SizedBox(width: 10),
+            Expanded(child: b),
+          ],
+        );
     return ListView(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
       children: [
-        AuditScoreBar(
-          label: 'Overall Score',
-          score: d.finalScore,
-          sub: d.grade == null ? null : 'Grade ${d.grade}',
-          riskLevel: d.riskFlag,
+        GlassCard(
+          child: AuditScoreBar(
+            label: 'Overall score',
+            score: d.finalScore,
+            sub: d.grade == null ? null : 'Grade ${d.grade}',
+            riskLevel: d.riskFlag,
+          ),
         ),
-        const SizedBox(height: 12),
-        AuditSectionCard(
-          title: Branding.current.term('branch'),
-          icon: Icons.store_mall_directory_rounded,
-          children: [
-            AuditKeyValueRow(
-                label: Branding.current.term('branch'),
-                value: d.branchName ?? '—'),
-            AuditKeyValueRow(label: 'Code', value: d.branchCode ?? '—'),
-            AuditKeyValueRow(
-                label: Branding.current.term('state'), value: d.state ?? '—'),
-            AuditKeyValueRow(label: 'Auditor', value: d.auditorName ?? '—'),
-            AuditKeyValueRow(label: 'Period', value: '${d.periodFrom ?? '—'} → ${d.periodTo ?? '—'}'),
-          ],
-        ),
-        const SizedBox(height: 12),
-        AuditSectionCard(
-          title: 'Managers & Statistics',
-          icon: Icons.insights_rounded,
-          children: [
-            _field('Branch Manager', 'branchManagerName'),
-            _field('Area Manager', 'areaManagerName'),
-            _field('Division Manager', 'divisionManagerName'),
-            _field('Total Customers', 'totalCustomers', number: true),
-            _field('Total Centers', 'totalCenters', number: true),
-            _field('Portfolio Outstanding', 'portfolioOutstanding', number: true),
-            _field('OD Customers', 'odCustomers', number: true),
-            _field('OD Amount', 'odAmount', number: true),
-            _field('PAR %', 'parPercent', number: true),
-            if (widget.editable) ...[
-              const SizedBox(height: 10),
-              FilledButton(
-                onPressed: _saving ? null : _save,
-                child: Text(_saving ? 'Saving…' : 'Save branch details'),
-              ),
+        const SizedBox(height: 14),
+        GlassCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ProSectionHeader(title: Branding.current.term('branch')),
+              const SizedBox(height: 4),
+              ProKeyValue(rows: [
+                MapEntry(Branding.current.term('branch'), d.branchName ?? '—'),
+                MapEntry('Code', d.branchCode ?? '—'),
+                MapEntry(Branding.current.term('state'), d.state ?? '—'),
+                MapEntry('Auditor', d.auditorName ?? '—'),
+                MapEntry('Period', '${d.periodFrom ?? '—'} → ${d.periodTo ?? '—'}'),
+              ]),
             ],
-          ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        GlassCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const ProSectionHeader(title: 'Managers & statistics'),
+              const SizedBox(height: 12),
+              _field('Branch manager', 'branchManagerName'),
+              const SizedBox(height: 12),
+              _field('Area manager', 'areaManagerName'),
+              const SizedBox(height: 12),
+              _field('Division manager', 'divisionManagerName'),
+              const SizedBox(height: 12),
+              pair(
+                _field('Total customers', 'totalCustomers', number: true),
+                _field('Total centers', 'totalCenters', number: true),
+              ),
+              const SizedBox(height: 12),
+              pair(
+                _field('Portfolio outstanding', 'portfolioOutstanding', number: true),
+                _field('OD customers', 'odCustomers', number: true),
+              ),
+              const SizedBox(height: 12),
+              pair(
+                _field('OD amount', 'odAmount', number: true),
+                _field('PAR %', 'parPercent', number: true),
+              ),
+              if (widget.editable) ...[
+                const SizedBox(height: 16),
+                OutlinedButton(
+                  onPressed: _saving ? null : _save,
+                  child: Text(_saving ? 'Saving…' : 'Save branch details'),
+                ),
+              ],
+            ],
+          ),
         ),
       ],
     );
   }
 
-  Widget _field(String label, String key, {bool number = false}) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
+  Widget _field(String label, String key, {bool number = false}) => ProField(
+        label: label,
         child: TextField(
           controller: _c[key],
           enabled: widget.editable,
           keyboardType: number ? TextInputType.number : TextInputType.text,
           textCapitalization: number ? TextCapitalization.none : TextCapitalization.words,
           inputFormatters: number ? null : const [TitleCaseTextFormatter()],
-          decoration: InputDecoration(labelText: label, isDense: true, border: const OutlineInputBorder()),
         ),
       );
 }
@@ -589,16 +819,62 @@ class _CategoryTab extends StatelessWidget {
   final VoidCallback onChanged;
   final VoidCallback onAttachmentChanged;
 
+  /// (answered, total) across the given questions.
+  (int, int) _count(Iterable<QuestionLine> qs) {
+    var a = 0, t = 0;
+    for (final q in qs) {
+      if (q.questionId == null) continue;
+      t++;
+      if (answers[q.questionId] != null) a++;
+    }
+    return (a, t);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final all = _count(category.subsections.expand((s) => s.questions));
     return ListView(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 90),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
       children: [
-        for (final sub in category.subsections)
-          AuditSectionCard(
-            title: '${sub.code ?? ''} ${sub.name ?? ''}'.trim(),
-            children: [
-              for (final q in sub.questions) _QuestionCard(
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if ((category.code ?? '').isNotEmpty)
+                    Text(
+                      category.code!,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.muted,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  Text(category.name ?? category.code ?? '—', style: AppText.title),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            auditPill(
+              '${all.$1}/${all.$2}',
+              all.$2 > 0 && all.$1 == all.$2 ? AppColors.success : AppColors.muted,
+            ),
+          ],
+        ),
+        for (final sub in category.subsections) ...[
+          const SizedBox(height: 16),
+          _SubHeader(
+            code: sub.code,
+            name: sub.name,
+            count: _count(sub.questions),
+          ),
+          const SizedBox(height: 8),
+          for (final q in sub.questions)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _QuestionCard(
                 q: q, editable: editable, executionId: executionId,
                 answer: q.questionId == null ? null : answers[q.questionId],
                 obs: q.questionId == null ? null : obs[q.questionId],
@@ -606,9 +882,54 @@ class _CategoryTab extends StatelessWidget {
                 onAnswer: (v) { if (q.questionId != null) { answers[q.questionId!] = v; onChanged(); } },
                 onAttachmentChanged: onAttachmentChanged,
               ),
-            ],
-          ),
+            ),
+        ],
       ],
+    );
+  }
+}
+
+class _SubHeader extends StatelessWidget {
+  const _SubHeader({required this.code, required this.name, required this.count});
+  final String? code;
+  final String? name;
+  final (int, int) count;
+
+  @override
+  Widget build(BuildContext context) {
+    final done = count.$2 > 0 && count.$1 == count.$2;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text.rich(
+              TextSpan(children: [
+                if ((code ?? '').isNotEmpty)
+                  TextSpan(
+                    text: '$code  ',
+                    style: const TextStyle(
+                      color: AppColors.muted,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                TextSpan(text: name ?? ''),
+              ]),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 14.5,
+                height: 1.35,
+                fontWeight: FontWeight.w600,
+                color: AppColors.ink,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          auditPill('${count.$1}/${count.$2}',
+              done ? AppColors.success : AppColors.muted),
+        ],
+      ),
     );
   }
 }
@@ -640,73 +961,108 @@ class _QuestionCard extends StatelessWidget {
     }
   }
 
+  static String _answerLabel(String opt) => switch (opt) {
+        'YES' => 'Yes',
+        'NO' => 'No',
+        'NA' => 'N/A',
+        _ => opt,
+      };
+
+  static Color _answerTone(String opt) => switch (opt) {
+        'YES' => AppColors.success,
+        'NO' => AppColors.danger,
+        _ => AppColors.muted,
+      };
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: incomplete ? AppColors.danger.withValues(alpha: 0.55) : AppColors.hairline,
-          width: incomplete ? 1.2 : 1,
-        ),
-        color: incomplete ? AppColors.danger.withValues(alpha: 0.04) : Colors.transparent,
-      ),
+    final opts = q.naAllowed ? const ['YES', 'NO', 'NA'] : const ['YES', 'NO'];
+    return GlassCard(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      color: incomplete ? const Color(0xFFFFFBFB) : null,
+      border: incomplete
+          ? Border.all(color: AppColors.danger.withValues(alpha: 0.45), width: 1.2)
+          : null,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text('${q.code ?? ''}  ${q.text ?? ''}',
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.ink)),
+                child: Text.rich(
+                  TextSpan(children: [
+                    if ((q.code ?? '').isNotEmpty)
+                      TextSpan(
+                        text: '${q.code}  ',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.muted,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    TextSpan(text: q.text ?? ''),
+                  ]),
+                  style: const TextStyle(
+                    fontSize: 14.5,
+                    height: 1.4,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.ink,
+                  ),
+                ),
               ),
               if (q.mandatory)
                 const Padding(
                   padding: EdgeInsets.only(left: 6),
-                  child: Text('*', style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w900)),
+                  child: Text('*',
+                      style: TextStyle(
+                          fontSize: 15,
+                          color: AppColors.danger,
+                          fontWeight: FontWeight.w600)),
                 ),
             ],
           ),
-          const SizedBox(height: 4),
-          Wrap(
-            spacing: 6, runSpacing: 4,
-            children: [
-              if (q.weightage != null) _miniChip('Wt ${q.weightage}', AppColors.muted),
-              if (q.riskLevel != null) _miniChip(q.riskLevel!, _riskColor(q.riskLevel!)),
-            ],
-          ),
-          const SizedBox(height: 6),
+          if (q.weightage != null || q.riskLevel != null) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6, runSpacing: 4,
+              children: [
+                if (q.weightage != null) auditPill('Wt ${q.weightage}', AppColors.muted),
+                if (q.riskLevel != null)
+                  auditPill(_riskLabel(q.riskLevel!), _riskColor(q.riskLevel!)),
+              ],
+            ),
+          ],
+          const SizedBox(height: 12),
           Row(
             children: [
-              for (final opt in q.naAllowed ? const ['YES', 'NO', 'NA'] : const ['YES', 'NO'])
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: ChoiceChip(
-                    label: Text(opt),
-                    selected: answer == opt,
-                    onSelected: editable ? (_) => onAnswer(answer == opt ? null : opt) : null,
-                    selectedColor: opt == 'NO' ? AppColors.danger.withValues(alpha: 0.18)
-                        : opt == 'YES' ? AppColors.success.withValues(alpha: 0.18)
-                        : AppColors.muted.withValues(alpha: 0.18),
+              for (var i = 0; i < opts.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                Expanded(
+                  child: _AnswerButton(
+                    label: _answerLabel(opts[i]),
+                    tone: _answerTone(opts[i]),
+                    selected: answer == opts[i],
+                    onTap: editable
+                        ? () => onAnswer(answer == opts[i] ? null : opts[i])
+                        : null,
                   ),
                 ),
+              ],
             ],
           ),
-          const SizedBox(height: 6),
-          TextField(
-            controller: obs, enabled: editable, minLines: 1, maxLines: 3,
-            textCapitalization: TextCapitalization.words,
-            inputFormatters: const [TitleCaseTextFormatter()],
-            style: const TextStyle(fontSize: 12.5),
-            decoration: InputDecoration(
-              labelText: 'Auditor observation${_needsObservation ? ' *' : ''}',
-              isDense: true, border: const OutlineInputBorder(),
+          const SizedBox(height: 12),
+          ProField(
+            label: 'Auditor observation',
+            required: _needsObservation,
+            child: TextField(
+              controller: obs, enabled: editable, minLines: 1, maxLines: 3,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
+              style: const TextStyle(fontSize: 14.5),
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
           Row(
             children: [
               if (editable && q.questionId != null)
@@ -720,28 +1076,22 @@ class _QuestionCard extends StatelessWidget {
               const SizedBox(width: 8),
               if (q.attachmentCount > 0)
                 // Tapping the count opens the uploaded-file list with remove.
-                InkWell(
-                  borderRadius: BorderRadius.circular(6),
+                _FilesChip(
+                  count: q.attachmentCount,
                   onTap: q.questionId == null
                       ? null
                       : () => showModalBottomSheet<void>(
                             context: context,
                             isScrollControlled: true,
-                            shape: const RoundedRectangleBorder(
-                              borderRadius: BorderRadius.vertical(
-                                  top: Radius.circular(16)),
-                            ),
                             builder: (_) => _QuestionAttachmentsSheet(
                               questionId: q.questionId!,
                               editable: editable,
                               onChanged: onAttachmentChanged,
                             ),
                           ),
-                  child:
-                      _miniChip('${q.attachmentCount} file(s) ▾', AppColors.success),
                 )
               else if (_needsAttachment)
-                _miniChip('required', AppColors.danger),
+                ProPill.bad('Required'),
             ],
           ),
         ],
@@ -749,17 +1099,99 @@ class _QuestionCard extends StatelessWidget {
     );
   }
 
+  static String _riskLabel(String r) =>
+      r.isEmpty ? r : '${r[0]}${r.substring(1).toLowerCase()} risk';
+
   static Color _riskColor(String r) => switch (r) {
         'HIGH' => AppColors.danger,
         'MODERATE' => AppColors.warning,
         _ => AppColors.success,
       };
+}
 
-  static Widget _miniChip(String t, Color c) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-        decoration: BoxDecoration(color: c.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(6)),
-        child: Text(t, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: c)),
-      );
+/// One Yes / No / N/A segment.
+class _AnswerButton extends StatelessWidget {
+  const _AnswerButton({
+    required this.label,
+    required this.tone,
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final Color tone;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = auditInk(tone);
+    return Material(
+      color: selected ? auditTint(tone) : AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: selected ? tone.withValues(alpha: 0.55) : const Color(0xFFD9E2E4),
+          width: selected ? 1.4 : 1,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: 42,
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: selected
+                    ? ink
+                    : (onTap == null ? AppColors.faint : AppColors.inkSoft),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FilesChip extends StatelessWidget {
+  const _FilesChip({required this.count, required this.onTap});
+  final int count;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.successTint,
+      borderRadius: BorderRadius.circular(AppRadii.pill),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.attach_file_rounded, size: 14, color: AppColors.success),
+              const SizedBox(width: 4),
+              Text(
+                '$count file(s)',
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.success,
+                ),
+              ),
+              const Icon(Icons.expand_more_rounded, size: 16, color: AppColors.success),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // ── Uploaded question files (view + remove) ─────────────────────────────────
@@ -826,90 +1258,75 @@ class _QuestionAttachmentsSheetState
   @override
   Widget build(BuildContext context) {
     final items = _items;
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.muted.withValues(alpha: 0.3),
-                  borderRadius: BorderRadius.circular(2),
+    final Widget body;
+    if (items == null) {
+      body = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 20),
+        child: Center(
+            child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2))),
+      );
+    } else if (items.isEmpty) {
+      body = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Text('No files uploaded for this question.',
+            style: AppText.caption),
+      );
+    } else {
+      body = ListView(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        children: [
+          ProListGroup(
+            children: [
+              for (final a in items)
+                ProListRow(
+                  leading: const ProIconWell(icon: Icons.attach_file_rounded),
+                  title: a.fileName ?? 'File #${a.id}',
+                  subtitle: a.capturedAt,
+                  chevron: false,
+                  trailing: widget.editable
+                      ? IconButton(
+                          icon: _busyId == a.id
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2))
+                              : const Icon(Icons.delete_outline_rounded,
+                                  size: 20, color: AppColors.danger),
+                          onPressed:
+                              _busyId == null ? () => _delete(a) : null,
+                          tooltip: 'Remove',
+                        )
+                      : null,
                 ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text('Uploaded files',
-                style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 8),
-            if (items == null)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 20),
-                child: Center(
-                    child: SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2))),
-              )
-            else if (items.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Text('No files uploaded for this question.',
-                    style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
-              )
-            else
-              Flexible(
-                child: ListView(
-                  shrinkWrap: true,
-                  children: [
-                    for (final a in items)
-                      ListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.attach_file_rounded,
-                            size: 18, color: AppColors.muted),
-                        title: Text(
-                          a.fileName ?? 'File #${a.id}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12.5),
-                        ),
-                        subtitle: a.capturedAt != null
-                            ? Text(a.capturedAt!,
-                                style: const TextStyle(fontSize: 10.5))
-                            : null,
-                        trailing: widget.editable
-                            ? IconButton(
-                                icon: _busyId == a.id
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2))
-                                    : const Icon(Icons.delete_outline_rounded,
-                                        size: 20, color: AppColors.danger),
-                                onPressed:
-                                    _busyId == null ? () => _delete(a) : null,
-                                tooltip: 'Remove',
-                              )
-                            : null,
-                      ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
+            ],
+          ),
+        ],
+      );
+    }
+    return AuditSheet(title: 'Uploaded files', child: body);
   }
 }
 
 // ── Annexure tab (list + add + delete) ──────────────────────────────────────
+
+String _annexureLabel(String type) => switch (type) {
+      'center' => 'Center',
+      'client' => 'Client',
+      'od' => 'OD/NPA',
+      _ => 'Legal',
+    };
+
+IconData _annexureIcon(String type) => switch (type) {
+      'center' => Icons.groups_rounded,
+      'client' => Icons.person_rounded,
+      'od' => Icons.warning_amber_rounded,
+      _ => Icons.gavel_rounded,
+    };
 
 class _AnnexureTab extends ConsumerStatefulWidget {
   const _AnnexureTab({required this.executionId, required this.type, required this.editable});
@@ -972,51 +1389,79 @@ class _AnnexureTabState extends ConsumerState<_AnnexureTab> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       floatingActionButton: !widget.editable ? null : FloatingActionButton.extended(
-        onPressed: _add, backgroundColor: AppColors.primary,
+        onPressed: _add,
         icon: const Icon(Icons.add_rounded), label: const Text('Add'),
       ),
       body: FutureBuilder<List<Map<String, dynamic>>>(
         future: _future,
         builder: (context, snap) {
-          if (snap.connectionState == ConnectionState.waiting) return const AppLoadingBlock(height: 160);
-          if (snap.hasError) return AppErrorPanel(message: '${snap.error}', onRetry: _refresh);
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Padding(
+              padding: EdgeInsets.all(16),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: AppLoadingBlock(height: 160),
+              ),
+            );
+          }
+          if (snap.hasError) {
+            return Padding(
+              padding: const EdgeInsets.all(16),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: AppErrorPanel(message: '${snap.error}', onRetry: _refresh),
+              ),
+            );
+          }
           final rows = snap.data ?? const [];
           if (rows.isEmpty) {
-            return const AppEmptyState(icon: Icons.list_alt_rounded, message: 'No entries yet. Tap Add to record one.');
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.all(14),
-            itemCount: rows.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) {
-              final r = rows[i];
-              return GlassCard(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(r['title']?.toString() ?? '—',
-                              style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.ink)),
-                          if (r['subtitle'] != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: Text(r['subtitle'].toString(),
-                                  style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                            ),
-                        ],
-                      ),
-                    ),
-                    if (widget.editable && r['id'] != null)
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
-                        onPressed: () => _delete(r['id'] as int),
-                      ),
-                  ],
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
+              children: [
+                ProEmpty(
+                  icon: _annexureIcon(widget.type),
+                  title: 'No entries yet',
+                  message: 'Tap Add to record one.',
                 ),
-              );
-            },
+              ],
+            );
+          }
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 96),
+            children: [
+              ProSectionHeader(
+                title: '${_annexureLabel(widget.type)} · ${rows.length} '
+                    '${rows.length == 1 ? 'entry' : 'entries'}',
+                small: true,
+              ),
+              const SizedBox(height: 8),
+              ProListGroup(
+                children: [
+                  for (final r in rows)
+                    ProListRow(
+                      leading: ProIconWell(
+                        icon: _annexureIcon(widget.type),
+                        color: AppColors.primary,
+                      ),
+                      title: r['title']?.toString() ?? '—',
+                      titleMaxLines: 2,
+                      subtitle: (r['subtitle'] == null ||
+                              r['subtitle'].toString().isEmpty)
+                          ? null
+                          : r['subtitle'].toString(),
+                      chevron: false,
+                      trailing: (widget.editable && r['id'] != null)
+                          ? IconButton(
+                              tooltip: 'Delete entry',
+                              icon: const Icon(Icons.delete_outline_rounded,
+                                  color: AppColors.danger),
+                              onPressed: () => _delete(r['id'] as int),
+                            )
+                          : null,
+                    ),
+                ],
+              ),
+            ],
           );
         },
       ),
@@ -1062,49 +1507,53 @@ class _AnnexureFormState extends State<_AnnexureForm> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 16, right: 16, top: 16, bottom: MediaQuery.of(context).viewInsets.bottom + 16),
+    final type = _annexureLabel(widget.type);
+    return AuditSheet(
+      title: 'Add ${type == 'OD/NPA' ? type : type.toLowerCase()} entry',
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Add ${widget.type} entry',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 10),
             for (final f in _fields)
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: TextField(
-                  controller: _ctrl(f),
-                  keyboardType: _numField(f)
-                      ? const TextInputType.numberWithOptions(decimal: true)
-                      : TextInputType.text,
-                  textCapitalization: _titleCaseField(f)
-                      ? TextCapitalization.words
-                      : TextCapitalization.none,
-                  inputFormatters:
-                      _titleCaseField(f) ? const [TitleCaseTextFormatter()] : null,
-                  decoration: InputDecoration(labelText: _label(f), isDense: true, border: const OutlineInputBorder()),
+                padding: const EdgeInsets.only(bottom: 12),
+                child: ProField(
+                  label: _label(f),
+                  child: TextField(
+                    controller: _ctrl(f),
+                    keyboardType: _numField(f)
+                        ? const TextInputType.numberWithOptions(decimal: true)
+                        : TextInputType.text,
+                    textCapitalization: _titleCaseField(f)
+                        ? TextCapitalization.words
+                        : TextCapitalization.none,
+                    inputFormatters:
+                        _titleCaseField(f) ? const [TitleCaseTextFormatter()] : null,
+                  ),
                 ),
               ),
             if (widget.type == 'od')
-              DropdownButtonFormField<String>(
-                initialValue: _rootCause,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Root cause', isDense: true, border: OutlineInputBorder()),
-                items: [for (final rc in _odRootCauses) DropdownMenuItem(value: rc, child: Text(rc, overflow: TextOverflow.ellipsis))],
-                onChanged: (v) => setState(() => _rootCause = v),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: ProField(
+                  label: 'Root cause',
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _rootCause,
+                    isExpanded: true,
+                    hint: const Text('Select a root cause'),
+                    items: [for (final rc in _odRootCauses) DropdownMenuItem(value: rc, child: Text(rc, overflow: TextOverflow.ellipsis))],
+                    onChanged: (v) => setState(() => _rootCause = v),
+                  ),
+                ),
               ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 4),
             Row(
               children: [
                 Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))),
                 const SizedBox(width: 10),
                 Expanded(
                   child: FilledButton(
-                    style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
                     onPressed: () {
                       final body = <String, dynamic>{'sortOrder': 0};
                       for (final f in _fields) {
@@ -1144,9 +1593,17 @@ class _AnnexureFormState extends State<_AnnexureForm> {
   // Title-case free-text fields only — never numbers or loan/account codes.
   bool _titleCaseField(String f) =>
       !_numField(f) && f != 'customerLoanNumber' && f != 'loanAccountNumber' && f != 'dpdBucket';
-  String _label(String f) => f
-      .replaceAllMapped(RegExp('([A-Z])'), (m) => ' ${m[1]}')
-      .replaceFirstMapped(RegExp('^.'), (m) => m[0]!.toUpperCase());
+  String _label(String f) {
+    // "auditorRemarks" → "Auditor remarks" (sentence case for display only).
+    final words = f
+        .replaceAllMapped(RegExp('([A-Z])'), (m) => ' ${m[1]}')
+        .toLowerCase()
+        .replaceAll(' by bm', ' by BM')
+        .replaceAll('fo ', 'FO ')
+        .replaceAll('luc ', 'LUC ')
+        .replaceAll('dpd ', 'DPD ');
+    return words.replaceFirstMapped(RegExp('^.'), (m) => m[0]!.toUpperCase());
+  }
 }
 
 // ── Executive summary tab ───────────────────────────────────────────────────
@@ -1197,35 +1654,61 @@ class _SummaryTabState extends ConsumerState<_SummaryTab> {
   Widget build(BuildContext context) {
     final d = widget.detail;
     return ListView(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
       children: [
-        AuditScoreBar(
-          label: 'Overall Score',
-          score: d.finalScore,
-          sub: d.grade == null ? null : 'Grade ${d.grade}',
-          riskLevel: d.riskFlag,
+        GlassCard(
+          child: AuditScoreBar(
+            label: 'Overall score',
+            score: d.finalScore,
+            sub: d.grade == null ? null : 'Grade ${d.grade}',
+            riskLevel: d.riskFlag,
+          ),
         ),
-        const SizedBox(height: 12),
-        if ((d.executiveSummary ?? '').isNotEmpty)
-          AuditSectionCard(title: 'Auto Summary', icon: Icons.summarize_rounded, children: [
-            Text(d.executiveSummary!, style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
-          ]),
-        const SizedBox(height: 12),
-        AuditSectionCard(title: 'Auditor Inputs', icon: Icons.edit_note_rounded, children: [
-          TextField(controller: _remark, enabled: widget.editable, minLines: 2, maxLines: 5,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
-              decoration: const InputDecoration(labelText: 'Auditor final remark', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          TextField(controller: _action, enabled: widget.editable, minLines: 2, maxLines: 5,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
-              decoration: const InputDecoration(labelText: 'BM action requirement', border: OutlineInputBorder())),
-          if (widget.editable) ...[
-            const SizedBox(height: 10),
-            FilledButton(onPressed: _saving ? null : _save, child: Text(_saving ? 'Saving…' : 'Save summary')),
-          ],
-        ]),
+        if ((d.executiveSummary ?? '').isNotEmpty) ...[
+          const SizedBox(height: 14),
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const ProSectionHeader(title: 'Auto summary'),
+                const SizedBox(height: 8),
+                Text(d.executiveSummary!,
+                    style: const TextStyle(
+                        fontSize: 14, height: 1.5, color: AppColors.inkSoft)),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
+        GlassCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const ProSectionHeader(title: 'Auditor inputs'),
+              const SizedBox(height: 12),
+              ProField(
+                label: 'Auditor final remark',
+                child: TextField(controller: _remark, enabled: widget.editable, minLines: 2, maxLines: 5,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [TitleCaseTextFormatter()]),
+              ),
+              const SizedBox(height: 12),
+              ProField(
+                label: 'BM action requirement',
+                child: TextField(controller: _action, enabled: widget.editable, minLines: 2, maxLines: 5,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [TitleCaseTextFormatter()]),
+              ),
+              if (widget.editable) ...[
+                const SizedBox(height: 16),
+                OutlinedButton(
+                  onPressed: _saving ? null : _save,
+                  child: Text(_saving ? 'Saving…' : 'Save summary'),
+                ),
+              ],
+            ],
+          ),
+        ),
       ],
     );
   }

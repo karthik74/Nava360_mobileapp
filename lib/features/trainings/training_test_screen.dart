@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import 'trainings_models.dart';
 import 'trainings_repository.dart';
@@ -105,146 +106,435 @@ class _TrainingTestScreenState extends ConsumerState<TrainingTestScreen> {
     }
   }
 
+  /// Presentation only: whether a question already has an answer (drives the
+  /// progress bar; submit/validation are unchanged).
+  bool _answered(TQuestion q) {
+    final a = _answers[q.id];
+    if (a == null) return false;
+    if (a is List) return a.isNotEmpty;
+    if (a is String) return a.trim().isNotEmpty;
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final qs = _questions ?? const <TQuestion>[];
+    final answered = qs.where(_answered).length;
+    final kind = _isFeedback ? 'Feedback' : 'Training test';
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(title: Text(widget.titleLabel)),
+      appBar: proLightAppBar(
+        context,
+        title: widget.titleLabel,
+        subtitle: _loading || _result != null
+            ? kind
+            : '$kind · ${qs.length} ${qs.length == 1 ? 'question' : 'questions'}',
+      ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _result != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.check_circle_rounded,
-                            color: AppColors.success, size: 56),
-                        const SizedBox(height: 12),
-                        Text(_result!,
+              ? ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                  children: [
+                    GlassCard(
+                      padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
+                      child: Column(
+                        children: [
+                          const ProIconWell(
+                            icon: Icons.check_circle_rounded,
+                            color: AppColors.success,
+                            size: 64,
+                          ),
+                          const SizedBox(height: 14),
+                          ProPill.ok(_isFeedback ? 'Recorded' : 'Submitted'),
+                          const SizedBox(height: 12),
+                          Text(
+                            _result!,
                             textAlign: TextAlign.center,
                             style: const TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.ink)),
-                        const SizedBox(height: 20),
-                        FilledButton(
-                          onPressed: () => Navigator.pop(context, true),
-                          child: const Text('Done'),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              : ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    if (_error != null)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Text(_error!, style: const TextStyle(color: AppColors.danger)),
+                              fontSize: 17,
+                              height: 1.4,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.2,
+                              color: AppColors.ink,
+                            ),
+                          ),
+                        ],
                       ),
-                    ...(_questions ?? []).asMap().entries.map((e) => _questionCard(e.key + 1, e.value)),
-                    const SizedBox(height: 8),
-                    FilledButton(
-                      onPressed: _submitting ? null : _submit,
-                      child: Text(_submitting ? 'Submitting…' : 'Submit'),
                     ),
                   ],
+                )
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                  children: [
+                    if (qs.isNotEmpty) ...[
+                      Text(
+                        '$answered of ${qs.length} answered',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.inkSoft,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ProBar(value: qs.isEmpty ? 0 : answered / qs.length),
+                      const SizedBox(height: 14),
+                    ],
+                    if (_error != null) ...[
+                      ProNote(_error!, tone: ProNoteTone.bad),
+                      const SizedBox(height: 12),
+                    ],
+                    for (final e in qs.asMap().entries) ...[
+                      _questionCard(e.key + 1, qs.length, e.value),
+                      const SizedBox(height: 12),
+                    ],
+                  ],
                 ),
+      bottomNavigationBar: _loading
+          ? null
+          : ProBottomBar(
+              children: [
+                if (_result != null)
+                  FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('Done'),
+                  )
+                else
+                  FilledButton(
+                    onPressed: _submitting ? null : _submit,
+                    child: Text(_submitting ? 'Submitting…' : 'Submit'),
+                  ),
+              ],
+            ),
     );
   }
 
-  Widget _questionCard(int n, TQuestion q) {
+  Widget _questionCard(int n, int total, TQuestion q) {
     return GlassCard(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('$n. ${q.text}${q.required ? ' *' : ''}',
-              style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink)),
-          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Question $n of $total',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+              if (q.required) ProPill.neutral('Required'),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${q.text}${q.required ? ' *' : ''}',
+            style: const TextStyle(
+              fontSize: 17,
+              height: 1.4,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.25,
+              color: AppColors.ink,
+            ),
+          ),
+          const SizedBox(height: 12),
           _input(q),
         ],
       ),
     );
   }
 
+  static const _letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
   Widget _input(TQuestion q) {
     switch (q.questionType) {
       case 'MCQ_SINGLE':
       case 'DROPDOWN':
+        final current = _answers[q.id] is int ? _answers[q.id] as int : null;
         return Column(
-          children: q.options
-              .map((o) => RadioListTile<int>(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: Text(o.text),
-                    value: o.id,
-                    groupValue: _answers[q.id] is int ? _answers[q.id] as int : null,
-                    onChanged: (v) => setState(() => _answers[q.id] = v),
-                  ))
-              .toList(),
+          children: [
+            for (final (i, o) in q.options.indexed)
+              _OptionTile(
+                letter: i < _letters.length ? _letters[i] : '${i + 1}',
+                label: o.text,
+                selected: current == o.id,
+                multi: false,
+                onTap: () => setState(() => _answers[q.id] = o.id),
+              ),
+          ],
         );
       case 'MCQ_MULTI':
         final sel = (_answers[q.id] as List?)?.cast<int>() ?? <int>[];
         return Column(
-          children: q.options
-              .map((o) => CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    dense: true,
-                    title: Text(o.text),
-                    value: sel.contains(o.id),
-                    onChanged: (v) => setState(() {
-                      final next = [...sel];
-                      if (v == true) {
-                        next.add(o.id);
-                      } else {
-                        next.remove(o.id);
-                      }
-                      _answers[q.id] = next;
-                    }),
-                  ))
-              .toList(),
+          children: [
+            for (final (i, o) in q.options.indexed)
+              _OptionTile(
+                letter: i < _letters.length ? _letters[i] : '${i + 1}',
+                label: o.text,
+                selected: sel.contains(o.id),
+                multi: true,
+                onTap: () {
+                  final v = !sel.contains(o.id);
+                  setState(() {
+                    final next = [...sel];
+                    if (v) {
+                      next.add(o.id);
+                    } else {
+                      next.remove(o.id);
+                    }
+                    _answers[q.id] = next;
+                  });
+                },
+              ),
+          ],
         );
       case 'YES_NO':
+        final current = _answers[q.id] as String?;
         return Row(
-          children: ['YES', 'NO']
-              .map((v) => Expanded(
-                    child: RadioListTile<String>(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      title: Text(v == 'YES' ? 'Yes' : 'No'),
-                      value: v,
-                      groupValue: _answers[q.id] as String?,
-                      onChanged: (x) => setState(() => _answers[q.id] = x),
-                    ),
-                  ))
-              .toList(),
+          children: [
+            for (final v in const ['YES', 'NO']) ...[
+              if (v == 'NO') const SizedBox(width: 10),
+              Expanded(
+                child: _YesNoTile(
+                  label: v == 'YES' ? 'Yes' : 'No',
+                  selected: current == v,
+                  onTap: () => setState(() => _answers[q.id] = v),
+                ),
+              ),
+            ],
+          ],
         );
       case 'RATING':
         final max = q.maxRating ?? 5;
         final current = _answers[q.id] is int ? _answers[q.id] as int : 0;
         return Wrap(
-          spacing: 6,
-          children: List.generate(max, (i) => i + 1)
-              .map((v) => ChoiceChip(
-                    label: Text('$v'),
-                    selected: current >= v,
-                    onSelected: (_) => setState(() => _answers[q.id] = v),
-                  ))
-              .toList(),
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final v in List.generate(max, (i) => i + 1))
+              _RatingBox(
+                value: v,
+                selected: current >= v,
+                onTap: () => setState(() => _answers[q.id] = v),
+              ),
+          ],
         );
       case 'LONG_ANSWER':
         return TextField(
           maxLines: 3,
-          decoration: const InputDecoration(border: OutlineInputBorder()),
-          onChanged: (v) => _answers[q.id] = v,
+          decoration: const InputDecoration(hintText: 'Your answer'),
+          onChanged: (v) => setState(() => _answers[q.id] = v),
         );
       default: // SHORT_ANSWER
         return TextField(
-          decoration: const InputDecoration(border: OutlineInputBorder()),
-          onChanged: (v) => _answers[q.id] = v,
+          decoration: const InputDecoration(hintText: 'Your answer'),
+          onChanged: (v) => setState(() => _answers[q.id] = v),
         );
     }
+  }
+}
+
+/// Bordered answer option with a letter badge and a radio / check mark.
+class _OptionTile extends StatelessWidget {
+  const _OptionTile({
+    required this.letter,
+    required this.label,
+    required this.selected,
+    required this.multi,
+    required this.onTap,
+  });
+  final String letter;
+  final String label;
+  final bool selected;
+  final bool multi;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppColors.primary;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: selected ? const Color(0xFFF2F8F9) : AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(
+            color: selected ? primary : const Color(0xFFDBE3E5),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 56),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(11, 11, 14, 11),
+              child: Row(
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    width: 30,
+                    height: 30,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: selected ? primary : AppColors.neutralTint,
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                    child: Text(
+                      letter,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: selected ? Colors.white : const Color(0xFF43585D),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 15,
+                        height: 1.4,
+                        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  _Mark(selected: selected, multi: multi),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Mark extends StatelessWidget {
+  const _Mark({required this.selected, required this.multi});
+  final bool selected;
+  final bool multi;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppColors.primary;
+    if (multi) {
+      return AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          color: selected ? primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          border: selected ? null : Border.all(color: const Color(0xFFB9C7CA), width: 1.5),
+        ),
+        child: selected
+            ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
+            : null,
+      );
+    }
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: selected ? primary : const Color(0xFFB9C7CA),
+          width: selected ? 6.5 : 1.5,
+        ),
+      ),
+    );
+  }
+}
+
+class _YesNoTile extends StatelessWidget {
+  const _YesNoTile({required this.label, required this.selected, required this.onTap});
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppColors.primary;
+    return Material(
+      color: selected ? const Color(0xFFF2F8F9) : AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: selected ? primary : const Color(0xFFDBE3E5),
+          width: selected ? 1.5 : 1,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: 64,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _Mark(selected: selected, multi: false),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RatingBox extends StatelessWidget {
+  const _RatingBox({required this.value, required this.selected, required this.onTap});
+  final int value;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? AppColors.primary : AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: selected ? AppColors.primary : const Color(0xFFDBE3E5)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          width: 46,
+          height: 46,
+          child: Center(
+            child: Text(
+              '$value',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: selected ? Colors.white : AppColors.inkSoft,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

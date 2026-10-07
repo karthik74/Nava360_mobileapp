@@ -10,6 +10,8 @@ import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/branding.dart';
+import '../../core/navigation/mobile_menu_config.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../announcements/announcements_models.dart';
@@ -78,6 +80,18 @@ final _checkInPlaceProvider = FutureProvider.autoDispose
   } catch (_) {/* no geocoder / offline → fall back to coordinates */}
   return coords();
 });
+
+/// Hero quick actions: HRMS menu keys (in priority order) → short label. Only
+/// entries the user can see in the HRMS hub are shown (max 4).
+const Map<String, String> _kQuickActionKeys = {
+  'hrms.leaves': 'Leaves',
+  'hrms.tasks': 'Tasks',
+  'hrms.travelClaims': 'Claims',
+  'hrms.helpdesk': 'Helpdesk',
+  'hrms.announcements': 'Notices',
+  'hrms.policies': 'Policies',
+  'hrms.profile': 'Profile',
+};
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -491,137 +505,164 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     // mobile sections reuse the web's widget keys where they overlap.
     final hiddenWidgets = ref.watch(brandingProvider).hiddenDashboardWidgets;
 
+    // Quick actions: shortcuts to menu entries the user can already open from
+    // the HRMS hub (same visibility rules, same push navigation).
+    final menuItems = {for (final m in menuFor(MobileModule.hrms, user)) m.key: m};
+    final quickActions = <ProAction>[];
+    for (final k in _kQuickActionKeys.keys) {
+      final m = menuItems[k];
+      if (m == null) continue;
+      quickActions.add(ProAction(
+        icon: m.icon,
+        label: _kQuickActionKeys[k]!,
+        primary: quickActions.isEmpty,
+        onTap: () => context.push(m.route),
+      ));
+      if (quickActions.length == 4) break;
+    }
+
+    final firstName = user?.firstName?.trim() ?? '';
+    final greetName = firstName.isNotEmpty ? firstName : (user?.username ?? '');
+    final hour = _now.hour;
+    final greeting = hour < 12
+        ? 'Good morning'
+        : hour < 17
+            ? 'Good afternoon'
+            : 'Good evening';
+
     final mq = MediaQuery.of(context);
     return Stack(
       children: [
-        RefreshIndicator(
-      color: AppColors.primary,
-      backgroundColor: Colors.white.withOpacity(0.85),
-      onRefresh: () async {
-        ref.invalidate(_dashAttendanceProvider);
-        ref.invalidate(_dashLeavesProvider);
-        ref.invalidate(_dashTasksProvider);
-        ref.invalidate(_dashTeamLeavesProvider);
-      },
-      child: ListView(
-        physics: const BouncingScrollPhysics(
-          parent: AlwaysScrollableScrollPhysics(),
-        ),
-        padding: EdgeInsets.fromLTRB(
-          16,
-          mq.padding.top + 8,
-          16,
-          mq.padding.bottom + AppChrome.bottomNavHeight + 10,
-        ),
-        children: [
-          // Attendance hero
-          AttendanceHeroCard(
-            timerText: timerText,
-            hasCheckedIn: hasCheckedIn,
-            hasCheckedOut: hasCheckedOut,
-            checkInTime: _fmtTime(todayRec?.checkIn),
-            checkOutTime: _fmtTime(todayRec?.checkOut),
-            location: heroLocation,
-            busy: _attendanceActionBusy,
-            onTap: () => _runAttendanceAction(
+        ProPage(
+          topInset: mq.padding.top,
+          clearNav: true,
+          gap: 22,
+          onRefresh: () async {
+            ref.invalidate(_dashAttendanceProvider);
+            ref.invalidate(_dashLeavesProvider);
+            ref.invalidate(_dashTasksProvider);
+            ref.invalidate(_dashTeamLeavesProvider);
+          },
+          hero: ProHero(
+            title: greetName.isEmpty ? greeting : '$greeting, $greetName',
+            subtitle: DateFormat('EEEE, d MMM').format(_now),
+            children: [
+              if (quickActions.isNotEmpty) ProHeroActions(actions: quickActions),
+            ],
+          ),
+          children: [
+            // Attendance hero
+            AttendanceHeroCard(
+              timerText: timerText,
               hasCheckedIn: hasCheckedIn,
               hasCheckedOut: hasCheckedOut,
+              checkInTime: _fmtTime(todayRec?.checkIn),
+              checkOutTime: _fmtTime(todayRec?.checkOut),
+              location: heroLocation,
+              busy: _attendanceActionBusy,
+              onTap: () => _runAttendanceAction(
+                hasCheckedIn: hasCheckedIn,
+                hasCheckedOut: hasCheckedOut,
+              ),
             ),
-          ),
-          const SizedBox(height: 18),
 
-          // Stats grid (2×2, gap 10)
-          if (!hiddenWidgets.contains('stats')) ...[
-          Row(
-            children: [
-              Expanded(
-                child: StatTileV2(
-                  label: 'Present days',
-                  value: presentCount.toString(),
-                  icon: Icons.check_circle_rounded,
-                  color: AppColors.success,
-                  onTap: () => context.go('/attendance'),
-                ),
+            // This month — grouped list (Pro)
+            if (!hiddenWidgets.contains('stats'))
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const ProSectionHeader(title: 'This month'),
+                  const SizedBox(height: 10),
+                  ProListGroup(
+                    children: [
+                      ProListRow(
+                        leading: const ProIconWell(
+                            icon: Icons.check_circle_rounded,
+                            color: AppColors.success),
+                        title: 'Present days',
+                        value: presentCount.toString(),
+                        onTap: () => context.go('/attendance'),
+                      ),
+                      ProListRow(
+                        leading: const ProIconWell(
+                            icon: Icons.access_time_rounded,
+                            color: AppColors.info),
+                        title: 'Hours worked',
+                        value: _fmtDuration(totalHours),
+                        onTap: () => context.go('/attendance'),
+                      ),
+                      ProListRow(
+                        leading: const ProIconWell(
+                            icon: Icons.event_available_rounded,
+                            color: AppColors.warning),
+                        title: 'Pending leave requests',
+                        value: pendingLeaves.toString(),
+                        pill: pendingLeaves > 0 ? ProPill.warn('Waiting') : null,
+                        onTap: () => context.go('/leaves'),
+                      ),
+                      ProListRow(
+                        leading: ProIconWell(
+                            icon: Icons.task_alt_rounded,
+                            color: AppColors.primary),
+                        title: 'Active tasks',
+                        value: activeTasks.toString(),
+                        onTap: () => context.go('/tasks'),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: StatTileV2(
-                  label: 'Hours this month',
-                  value: _fmtDuration(totalHours),
-                  icon: Icons.access_time_rounded,
-                  color: AppColors.info,
-                  onTap: () => context.go('/attendance'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: StatTileV2(
-                  label: 'Pending leaves',
-                  value: pendingLeaves.toString(),
-                  icon: Icons.event_available_rounded,
-                  color: AppColors.warning,
-                  onTap: () => context.go('/leaves'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: StatTileV2(
-                  label: 'Active tasks',
-                  value: activeTasks.toString(),
-                  icon: Icons.task_alt_rounded,
-                  color: AppColors.accent,
-                  onTap: () => context.go('/tasks'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 22),
-          ],
 
-          // Today
-          if (!hiddenWidgets.contains('attendance')) ...[
-          AppSectionHeader(
-            title: 'Today',
-            trailing: Text(
-              DateFormat('EEEE, d MMM').format(_now),
-              style: const TextStyle(
-                fontSize: 11.5,
-                color: AppColors.muted,
-                fontWeight: FontWeight.w600,
+            // Today
+            if (!hiddenWidgets.contains('attendance'))
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ProSectionHeader(
+                    title: 'Today',
+                    trailing: Text(
+                      todayItems.isEmpty
+                          ? DateFormat('d MMM').format(_now)
+                          : '${todayItems.length} '
+                              '${todayItems.length == 1 ? 'item' : 'items'}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.muted,
+                        fontWeight: FontWeight.w600,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  attendance.when(
+                    data: (_) => TodayScheduleList(items: todayItems),
+                    loading: () => const AppLoadingBlock(height: 120),
+                    error: (e, _) => AppErrorPanel(
+                      message: e.toString(),
+                      onRetry: () => ref.invalidate(_dashAttendanceProvider),
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          attendance.when(
-            data: (_) => TodayScheduleList(items: todayItems),
-            loading: () => const AppLoadingBlock(height: 120),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(_dashAttendanceProvider),
-            ),
-          ),
-          ],
 
-          // Team on leave (manager-aware, hide if empty)
-          if (isManager && teamOnLeaveToday.isNotEmpty) ...[
-            const SizedBox(height: 22),
-            const AppSectionHeader(
-              title: 'Team on leave',
-              subtitle: 'Out of office today',
-            ),
-            const SizedBox(height: 10),
-            _TeamOnLeaveCard(
-              leaves: teamOnLeaveToday,
-              onTapItem: () => context.go('/team'),
-              humanLeaveType: _humanLeaveType,
-            ),
+            // Team on leave (manager-aware, hide if empty)
+            if (isManager && teamOnLeaveToday.isNotEmpty)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const ProSectionHeader(
+                    title: 'Team on leave',
+                    subtitle: 'Out of office today',
+                  ),
+                  const SizedBox(height: 10),
+                  _TeamOnLeaveCard(
+                    leaves: teamOnLeaveToday,
+                    onTapItem: () => context.go('/team'),
+                    humanLeaveType: _humanLeaveType,
+                  ),
+                ],
+              ),
           ],
-        ],
-      ),
         ),
         Positioned(
           right: 16,
@@ -765,74 +806,103 @@ class _TeamOnLeaveCard extends StatelessWidget {
     const maxAvatars = 5;
     final overflow = leaves.length - maxAvatars;
     final avatarsToShow = leaves.take(maxAvatars).toList();
+    const size = 30.0;
+    const step = 22.0;
+    final stackWidth =
+        size + step * (avatarsToShow.length - 1 + (overflow > 0 ? 1 : 0));
 
-    return GlassCard(
-      padding: const EdgeInsets.all(16),
-      shadow: AppShadows.card,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            height: 36,
-            child: Stack(
-              children: [
-                for (int i = 0; i < avatarsToShow.length; i++)
-                  Positioned(
-                    left: i * 24.0,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.7),
-                          width: 2,
+    return ProListGroup(
+      dividerIndent: 0,
+      children: [
+        // Summary: stacked avatars + count.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          child: Row(
+            children: [
+              SizedBox(
+                width: stackWidth,
+                height: size,
+                child: Stack(
+                  children: [
+                    for (int i = 0; i < avatarsToShow.length; i++)
+                      Positioned(
+                        left: i * step,
+                        child: _RingedAvatar(
+                          child: ProAvatar(
+                            name: avatarsToShow[i].employeeName ?? '?',
+                            size: size,
+                          ),
                         ),
                       ),
-                      child: UserAvatar(
-                        name: avatarsToShow[i].employeeName ?? '?',
-                        size: 36,
-                        radius: 18,
+                    if (overflow > 0)
+                      Positioned(
+                        left: avatarsToShow.length * step,
+                        child: _RingedAvatar(
+                          child: Container(
+                            width: size,
+                            height: size,
+                            decoration: BoxDecoration(
+                              color: AppColors.neutralTint,
+                              borderRadius: BorderRadius.circular(size * 0.31),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              '+$overflow',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.inkSoft,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  leaves.length == 1
+                      ? '1 teammate out today'
+                      : '${leaves.length} teammates out today',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.muted,
                   ),
-                if (overflow > 0)
-                  Positioned(
-                    left: avatarsToShow.length * 24.0,
-                    child: Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.55),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.7),
-                          width: 2,
-                        ),
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        '+$overflow',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.inkSoft,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 14),
-          for (int i = 0; i < leaves.length; i++) ...[
-            if (i > 0) const SizedBox(height: 8),
-            _TeamLeaveRow(
-              leave: leaves[i],
-              onTap: onTapItem,
-              humanLeaveType: humanLeaveType,
-            ),
-          ],
-        ],
+        ),
+        for (final leave in leaves)
+          _TeamLeaveRow(
+            leave: leave,
+            onTap: onTapItem,
+            humanLeaveType: humanLeaveType,
+          ),
+      ],
+    );
+  }
+}
+
+/// Thin white ring so overlapping avatars stay distinct.
+class _RingedAvatar extends StatelessWidget {
+  const _RingedAvatar({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(1.5),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(11),
       ),
+      child: child,
     );
   }
 }
@@ -851,60 +921,12 @@ class _TeamLeaveRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = leave.employeeName ?? 'Teammate';
-    return Material(
-      color: Colors.white.withOpacity(0.45),
-      borderRadius: BorderRadius.circular(AppRadii.md),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.white.withOpacity(0.55)),
-            borderRadius: BorderRadius.circular(AppRadii.md),
-          ),
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              UserAvatar(name: name, size: 32, radius: 16),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.ink,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${humanLeaveType(leave.leaveType)} · '
-                      '${leave.fromDate} → ${leave.toDate}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.muted,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                size: 18,
-                color: AppColors.muted,
-              ),
-            ],
-          ),
-        ),
-      ),
+    return ProListRow(
+      leading: ProAvatar(name: name, size: 36),
+      title: name,
+      subtitle: '${humanLeaveType(leave.leaveType)} · '
+          '${leave.fromDate} → ${leave.toDate}',
+      onTap: onTap,
     );
   }
 }

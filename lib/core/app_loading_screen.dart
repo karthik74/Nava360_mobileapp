@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'theme.dart';
+
 /// Premium app-opening / loading screen for Nava360.
 ///
 /// A clean white screen with the brand logo at the centre that:
@@ -150,9 +152,9 @@ class _AppLoadingScreenState extends State<AppLoadingScreen>
                   widget.title,
                   style: const TextStyle(
                     fontSize: 22,
-                    fontWeight: FontWeight.w900,
-                    color: AppLoadingScreen.teal,
-                    letterSpacing: 3.0,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.ink,
+                    letterSpacing: -0.4,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -160,11 +162,10 @@ class _AppLoadingScreenState extends State<AppLoadingScreen>
                 Text(
                   widget.message,
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.black.withOpacity(0.45),
-                    letterSpacing: 0.2,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w400,
+                    color: AppColors.muted,
                   ),
                 ),
               ],

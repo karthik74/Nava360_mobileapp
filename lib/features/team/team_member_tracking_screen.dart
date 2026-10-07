@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'team_tracking_repository.dart';
@@ -143,34 +144,46 @@ class _TeamMemberTrackingScreenState
 
   @override
   Widget build(BuildContext context) {
+    final pings = _pings ?? const <TrackPing>[];
+    final ready = !_loading && _error == null;
+    final last = pings.isNotEmpty ? pings.last : null;
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.name,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-            const Text('Today\'s tracking',
-                style: TextStyle(fontSize: 12, color: AppColors.muted)),
-          ],
-        ),
-      ),
-      body: RefreshIndicator(
+      appBar: AppBar(title: const Text('Tracking')),
+      body: ProPage(
         onRefresh: _load,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
+        hero: ProHero(
+          kicker: 'Today\'s tracking',
+          title: widget.name,
           children: [
-            _liveCard(),
-            const SizedBox(height: 14),
-            if (_loading)
-              const AppLoadingBlock()
-            else if (_error != null)
-              AppErrorPanel(message: _error!, onRetry: _load)
-            else
-              _summaryCard(),
+            ProHeroStats(stats: [
+              ProStat(
+                label: 'Pings',
+                value: ready ? '${pings.length}' : '—',
+                dot: AppColors.live,
+              ),
+              ProStat(
+                label: 'Distance',
+                value: ready ? '${_totalKm(pings).toStringAsFixed(2)} km' : '—',
+                dot: const Color(0xFF7FC8D8),
+              ),
+              ProStat(
+                label: 'Last seen',
+                value: ready && last != null ? _hhmm(last.recordedAt) : '—',
+                dot: Colors.white54,
+              ),
+            ]),
           ],
         ),
+        children: [
+          _liveCard(),
+          if (_loading)
+            const AppLoadingBlock()
+          else if (_error != null)
+            AppErrorPanel(message: _error!, onRetry: _load)
+          else
+            _summaryCard(),
+        ],
       ),
     );
   }
@@ -187,35 +200,42 @@ class _TeamMemberTrackingScreenState
                 ? AppColors.primary
                 : AppColors.warning;
     return GlassCard(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(Icons.my_location, size: 18, color: AppColors.primary),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text('Live location',
-                    style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.ink)),
-              ),
-              if (_liveLoading || (l?.pending ?? false))
-                const SizedBox(
-                  width: 16, height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-            ],
+          ProSectionHeader(
+            title: 'Live location',
+            trailing: (_liveLoading || (l?.pending ?? false))
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : null,
           ),
           if (l != null) ...[
             const SizedBox(height: 8),
-            Text(l.message, style: TextStyle(fontSize: 13, color: tone, fontWeight: FontWeight.w600)),
+            Text(
+              l.message,
+              style: TextStyle(
+                fontSize: 13.5,
+                height: 1.4,
+                color: tone,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
             if (hasFix) ...[
               const SizedBox(height: 4),
-              Text('${l.latitude!.toStringAsFixed(5)}, ${l.longitude!.toStringAsFixed(5)}',
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+              Text(
+                '${l.latitude!.toStringAsFixed(5)}, ${l.longitude!.toStringAsFixed(5)}',
+                style: AppText.caption.copyWith(
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
             ],
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
@@ -247,47 +267,28 @@ class _TeamMemberTrackingScreenState
     final last = pings.isNotEmpty ? pings.last : null;
     final km = _totalKm(pings);
     return GlassCard(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Today',
-              style: TextStyle(fontWeight: FontWeight.w800, color: AppColors.ink)),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 18,
-            runSpacing: 10,
-            children: [
-              _stat('Pings', '${pings.length}'),
-              _stat('Distance', '${km.toStringAsFixed(2)} km'),
-              _stat('First seen', first == null ? '—' : _hhmm(first.recordedAt)),
-              _stat('Last seen', last == null ? '—' : _hhmm(last.recordedAt)),
-            ],
-          ),
+          const ProSectionHeader(title: 'Today'),
+          const SizedBox(height: 6),
+          ProKeyValue(rows: [
+            MapEntry('Pings', '${pings.length}'),
+            MapEntry('Distance', '${km.toStringAsFixed(2)} km'),
+            MapEntry('First seen', first == null ? '—' : _hhmm(first.recordedAt)),
+            MapEntry('Last seen', last == null ? '—' : _hhmm(last.recordedAt)),
+          ]),
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: pings.length < 2 ? null : _openRouteOnMap,
-              icon: const Icon(Icons.route_outlined, size: 18),
-              label: Text(pings.length < 2
-                  ? 'No route to show today'
-                  : 'Open today\'s route in Google Maps'),
-            ),
+          OutlinedButton.icon(
+            onPressed: pings.length < 2 ? null : _openRouteOnMap,
+            icon: const Icon(Icons.route_outlined, size: 18),
+            label: Text(pings.length < 2
+                ? 'No route to show today'
+                : 'Open today\'s route in Google Maps'),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _stat(String label, String value) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(value,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink)),
-        Text(label, style: const TextStyle(fontSize: 11, color: AppColors.muted)),
-      ],
     );
   }
 

@@ -13,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -235,290 +236,331 @@ class _NpBgvScreenState extends ConsumerState<NpBgvScreen> {
     final checklistItems = config.bgvChecklist.isNotEmpty ? config.bgvChecklist : _checklist.keys.toList();
     final canDraft = d?.can('BGV_DRAFT') ?? false;
     final canSubmit = (d?.can('BGV_SUBMIT') ?? false) && _draftId != null && gps && hasResidence && hasCandidate && _recommendation != null;
+    final ready = [_draftId != null, gps, hasResidence, hasCandidate, _recommendation != null].where((x) => x).length;
+    final showForm = !_loading && d != null && canDraft;
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('BGV visit report'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : d == null
-                ? Padding(padding: const EdgeInsets.all(16), child: AppErrorPanel(message: _error ?? 'Not found', onRetry: _load))
-                : !canDraft
-                    ? Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: AppEmptyState(
-                          icon: Icons.lock_outline_rounded,
-                          message: 'The visit report cannot be edited at this stage (${d.statusLabel}).',
-                        ),
-                      )
-                    : ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                        children: [
-                          GlassCard(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(d.fullName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.ink)),
-                              Text('${d.candidateCode} · ${d.mobileNumber}', style: const TextStyle(fontSize: 12, color: AppColors.inkSoft)),
-                              if (d.permanentAddress.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text('Address on file: ${d.permanentAddress}', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-                              ],
-                            ]),
-                          ),
-                          const SizedBox(height: 10),
-                          if (d.status == 'SENT_BACK_FOR_CORRECTION' && d.correctionRemarks != null) ...[
-                            NpBanner(icon: Icons.undo_rounded, color: const Color(0xFFEA580C), title: 'Sent back — redo the visit', body: d.correctionRemarks),
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(context, title: 'BGV visit report', subtitle: 'Background verification · NP onboarding'),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : d == null
+              ? Padding(padding: const EdgeInsets.all(16), child: AppErrorPanel(message: _error ?? 'Not found', onRetry: _load))
+              : !canDraft
+                  ? Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: ProEmpty(
+                        icon: Icons.lock_outline_rounded,
+                        title: 'Not available',
+                        message: 'The visit report cannot be edited at this stage (${d.statusLabel}).',
+                      ),
+                    )
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                      children: [
+                        NpWhoCard(d: d, address: d.permanentAddress),
+                        const SizedBox(height: 14),
+                        if (d.status == 'SENT_BACK_FOR_CORRECTION' && d.correctionRemarks != null) ...[
+                          NpBanner(icon: Icons.undo_rounded, color: const Color(0xFFEA580C), title: 'Sent back — redo the visit', body: d.correctionRemarks),
+                          const SizedBox(height: 14),
+                        ],
+
+                        // ── Progress ──
+                        _card(
+                          'Before you can submit',
+                          trailing: ready == 5 ? ProPill.ok('$ready of 5') : ProPill.warn('$ready of 5'),
+                          [
                             const SizedBox(height: 10),
+                            ProBar(value: ready / 5, color: ready == 5 ? AppColors.success : AppColors.primary),
+                            const SizedBox(height: 8),
+                            NpCheckLine(ok: _draftId != null, label: 'Draft saved'),
+                            NpCheckLine(ok: gps, label: 'GPS captured at the residence'),
+                            NpCheckLine(ok: hasResidence, label: 'Residence photo'),
+                            NpCheckLine(ok: hasCandidate, label: 'Candidate photo at the residence'),
+                            NpCheckLine(ok: _recommendation != null, label: 'Recommendation picked'),
                           ],
+                        ),
 
-                          // ── Progress ──
-                          GlassCard(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              const Text('Before you can submit', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink)),
-                              const SizedBox(height: 4),
-                              NpCheckLine(ok: _draftId != null, label: 'Draft saved'),
-                              NpCheckLine(ok: gps, label: 'GPS captured at the residence'),
-                              NpCheckLine(ok: hasResidence, label: 'Residence photo'),
-                              NpCheckLine(ok: hasCandidate, label: 'Candidate photo at the residence'),
-                              NpCheckLine(ok: _recommendation != null, label: 'Recommendation picked'),
-                            ]),
+                        // ── Visit ──
+                        _card('Visit', [
+                          const NpFieldLabel('Visited at'),
+                          InkWell(
+                            onTap: _pickVisitAt,
+                            borderRadius: BorderRadius.circular(AppRadii.md),
+                            child: InputDecorator(
+                              decoration: const InputDecoration(suffixIcon: Icon(Icons.schedule_rounded, size: 18)),
+                              child: Text(npFmtDateTime(_visitAt),
+                                  style: const TextStyle(fontSize: 15, color: AppColors.ink, fontFeatures: [FontFeature.tabularFigures()])),
+                            ),
                           ),
-                          const SizedBox(height: 10),
-
-                          // ── Visit ──
-                          _card('Visit', [
-                            const NpFieldLabel('Visited at'),
-                            InkWell(
-                              onTap: _pickVisitAt,
-                              borderRadius: BorderRadius.circular(AppRadii.md),
-                              child: InputDecorator(
-                                decoration: const InputDecoration(suffixIcon: Icon(Icons.schedule_rounded, size: 18)),
-                                child: Text(npFmtDateTime(_visitAt), style: const TextStyle(fontSize: 14, color: AppColors.ink)),
-                              ),
+                          const NpFieldLabel('GPS location', required: true),
+                          Row(children: [
+                            OutlinedButton.icon(
+                              onPressed: (_locating || _busy) ? null : _captureGps,
+                              icon: _locating
+                                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : const Icon(Icons.my_location_rounded, size: 18),
+                              label: Text(_locating ? 'Locating…' : (gps ? 'Recapture' : 'Capture GPS')),
                             ),
-                            const NpFieldLabel('GPS location', required: true),
-                            Row(children: [
-                              OutlinedButton.icon(
-                                onPressed: (_locating || _busy) ? null : _captureGps,
-                                icon: _locating
-                                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                                    : const Icon(Icons.my_location_rounded, size: 18),
-                                label: Text(_locating ? 'Locating…' : (gps ? 'Recapture' : 'Capture GPS')),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: gps
-                                    ? InkWell(
-                                        onTap: () => npOpenMaps(_lat!, _lng!),
-                                        child: Text(
-                                          '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}${_accuracy != null ? ' (±${_accuracy!.round()} m)' : ''}',
-                                          style: TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w600),
-                                        ),
-                                      )
-                                    : const Text('Not captured', style: TextStyle(fontSize: 12, color: AppColors.muted)),
-                              ),
-                            ]),
-                            const NpFieldLabel('Residence type'),
-                            DropdownButtonFormField<String>(
-                              value: _residenceType,
-                              hint: const Text('—'),
-                              items: [for (final t in kNpResidenceTypes) DropdownMenuItem(value: t, child: Text(npTitle(t)))],
-                              onChanged: (v) => setState(() => _residenceType = v),
-                            ),
-                            const NpFieldLabel('Years at address'),
-                            TextField(
-                              controller: _years,
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(2)],
-                            ),
-                            const NpFieldLabel('Address as found'),
-                            TextField(controller: _addressAsFound, minLines: 1, maxLines: 3, textCapitalization: TextCapitalization.words),
-                            SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                              title: const Text('Address verified', style: TextStyle(fontSize: 13.5)),
-                              value: _addressVerified,
-                              onChanged: (v) => setState(() => _addressVerified = v),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: gps
+                                  ? InkWell(
+                                      onTap: () => npOpenMaps(_lat!, _lng!),
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 4),
+                                        child: Row(children: [
+                                          Icon(Icons.place_outlined, size: 16, color: AppColors.primary),
+                                          const SizedBox(width: 4),
+                                          Expanded(
+                                            child: Text(
+                                              '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}${_accuracy != null ? ' (±${_accuracy!.round()} m)' : ''}',
+                                              style: TextStyle(
+                                                fontSize: 12.5,
+                                                color: AppColors.primary,
+                                                fontWeight: FontWeight.w600,
+                                                fontFeatures: const [FontFeature.tabularFigures()],
+                                              ),
+                                            ),
+                                          ),
+                                        ]),
+                                      ),
+                                    )
+                                  : const Text('Not captured', style: AppText.caption),
                             ),
                           ]),
+                          const NpFieldLabel('Residence type'),
+                          Wrap(spacing: 8, runSpacing: 8, children: [
+                            for (final t in kNpResidenceTypes)
+                              ChoiceChip(
+                                label: Text(npTitle(t)),
+                                selected: _residenceType == t,
+                                showCheckmark: false,
+                                onSelected: (_) => setState(() => _residenceType = t),
+                              ),
+                          ]),
+                          const NpFieldLabel('Years at address'),
+                          TextField(
+                            controller: _years,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(2)],
+                          ),
+                          const NpFieldLabel('Address as found'),
+                          TextField(controller: _addressAsFound, minLines: 1, maxLines: 3, textCapitalization: TextCapitalization.words),
+                          const SizedBox(height: 6),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: const Text('Address verified', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w500)),
+                            value: _addressVerified,
+                            onChanged: (v) => setState(() => _addressVerified = v),
+                          ),
+                        ]),
 
-                          // ── Family ──
-                          _card('Family members', [
-                            if (_family.isEmpty)
-                              const Text('None recorded.', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
-                            for (var i = 0; i < _family.length; i++)
-                              Container(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: AppColors.surfaceAlt,
-                                  borderRadius: BorderRadius.circular(AppRadii.md),
-                                  border: Border.all(color: AppColors.hairline),
-                                ),
-                                child: Column(children: [
-                                  Row(children: [
-                                    Expanded(
-                                      child: TextField(
-                                        controller: _family[i].name,
-                                        textCapitalization: TextCapitalization.words,
-                                        inputFormatters: const [TitleCaseTextFormatter()],
-                                        decoration: const InputDecoration(hintText: 'Name'),
-                                      ),
+                        // ── Family ──
+                        _card('Family members', trailing: ProPill.neutral('${_family.length}'), [
+                          const SizedBox(height: 12),
+                          if (_family.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.only(bottom: 10),
+                              child: Text('None recorded.', style: AppText.caption),
+                            ),
+                          for (var i = 0; i < _family.length; i++)
+                            Container(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              padding: const EdgeInsets.fromLTRB(12, 10, 6, 12),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceAlt,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: AppColors.hairlineSoft),
+                              ),
+                              child: Column(children: [
+                                Row(children: [
+                                  Container(
+                                    width: 26,
+                                    height: 26,
+                                    alignment: Alignment.center,
+                                    decoration: BoxDecoration(color: AppColors.surface, shape: BoxShape.circle, border: Border.all(color: AppColors.hairline)),
+                                    child: Text('${i + 1}',
+                                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.inkSoft)),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: TextField(
+                                      controller: _family[i].name,
+                                      textCapitalization: TextCapitalization.words,
+                                      inputFormatters: const [TitleCaseTextFormatter()],
+                                      decoration: const InputDecoration(hintText: 'Name'),
                                     ),
-                                    IconButton(
-                                      onPressed: () => setState(() => _family.removeAt(i).dispose()),
-                                      icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
-                                    ),
-                                  ]),
-                                  const SizedBox(height: 6),
-                                  Row(children: [
-                                    Expanded(
-                                      flex: 3,
-                                      child: TextField(
-                                        controller: _family[i].relation,
-                                        textCapitalization: TextCapitalization.words,
-                                        decoration: const InputDecoration(hintText: 'Relation'),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                      flex: 2,
-                                      child: TextField(
-                                        controller: _family[i].age,
-                                        keyboardType: TextInputType.number,
-                                        inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(3)],
-                                        decoration: const InputDecoration(hintText: 'Age'),
-                                      ),
-                                    ),
-                                  ]),
-                                  const SizedBox(height: 6),
-                                  TextField(
-                                    controller: _family[i].occupation,
-                                    textCapitalization: TextCapitalization.words,
-                                    decoration: const InputDecoration(hintText: 'Occupation'),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Remove member',
+                                    onPressed: () => setState(() => _family.removeAt(i).dispose()),
+                                    icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
                                   ),
                                 ]),
-                              ),
-                            OutlinedButton.icon(
-                              onPressed: () => setState(() => _family.add(_Member())),
-                              icon: const Icon(Icons.person_add_alt_rounded, size: 18),
-                              label: const Text('Add member'),
+                                const SizedBox(height: 8),
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 36, right: 6),
+                                  child: Column(children: [
+                                    Row(children: [
+                                      Expanded(
+                                        flex: 3,
+                                        child: TextField(
+                                          controller: _family[i].relation,
+                                          textCapitalization: TextCapitalization.words,
+                                          decoration: const InputDecoration(hintText: 'Relation'),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        flex: 2,
+                                        child: TextField(
+                                          controller: _family[i].age,
+                                          keyboardType: TextInputType.number,
+                                          inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(3)],
+                                          decoration: const InputDecoration(hintText: 'Age'),
+                                        ),
+                                      ),
+                                    ]),
+                                    const SizedBox(height: 8),
+                                    TextField(
+                                      controller: _family[i].occupation,
+                                      textCapitalization: TextCapitalization.words,
+                                      decoration: const InputDecoration(hintText: 'Occupation'),
+                                    ),
+                                  ]),
+                                ),
+                              ]),
                             ),
-                          ]),
+                          OutlinedButton.icon(
+                            onPressed: () => setState(() => _family.add(_Member())),
+                            icon: const Icon(Icons.person_add_alt_rounded, size: 18),
+                            label: const Text('Add member'),
+                          ),
+                        ]),
 
-                          // ── Background ──
-                          _card('Background observations', [
-                            for (final e in kNpBgvBackgroundKeys) ...[
-                              NpFieldLabel(e.value),
-                              TextField(controller: _background[e.key], minLines: 1, maxLines: 3, textCapitalization: TextCapitalization.sentences),
-                            ],
-                          ]),
+                        // ── Background ──
+                        _card('Background observations', [
+                          for (final e in kNpBgvBackgroundKeys) ...[
+                            NpFieldLabel(e.value),
+                            TextField(controller: _background[e.key], minLines: 1, maxLines: 3, textCapitalization: TextCapitalization.sentences),
+                          ],
+                        ]),
 
-                          // ── Checklist ──
-                          _card('Checklist', [
-                            if (checklistItems.isEmpty)
-                              const Text('No checklist configured.', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
-                            for (final item in checklistItems)
-                              CheckboxListTile(
-                                contentPadding: EdgeInsets.zero,
-                                dense: true,
-                                controlAffinity: ListTileControlAffinity.leading,
-                                title: Text(item, style: const TextStyle(fontSize: 13.5)),
-                                value: _checklist[item] ?? false,
-                                onChanged: (v) => setState(() => _checklist[item] = v ?? false),
+                        // ── Checklist ──
+                        _card('Checklist', [
+                          const SizedBox(height: 6),
+                          if (checklistItems.isEmpty)
+                            const Text('No checklist configured.', style: AppText.caption),
+                          for (final item in checklistItems)
+                            CheckboxListTile(
+                              contentPadding: EdgeInsets.zero,
+                              dense: true,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              title: Text(item, style: const TextStyle(fontSize: 14.5)),
+                              value: _checklist[item] ?? false,
+                              onChanged: (v) => setState(() => _checklist[item] = v ?? false),
+                            ),
+                        ]),
+
+                        // ── Remarks + recommendation ──
+                        _card('Assessment', [
+                          const NpFieldLabel('AM remarks'),
+                          TextField(
+                            controller: _amRemarks,
+                            minLines: 2,
+                            maxLines: 5,
+                            textCapitalization: TextCapitalization.sentences,
+                            decoration: const InputDecoration(hintText: 'Your overall view of the visit'),
+                          ),
+                          const NpFieldLabel('Recommendation', required: true),
+                          Wrap(spacing: 8, runSpacing: 8, children: [
+                            for (final r in const [('RECOMMENDED', 'Recommended'), ('NOT_RECOMMENDED', 'Not recommended')])
+                              ChoiceChip(
+                                label: Text(r.$2),
+                                selected: _recommendation == r.$1,
+                                showCheckmark: false,
+                                onSelected: (_) => setState(() => _recommendation = r.$1),
                               ),
                           ]),
+                        ]),
 
-                          // ── Remarks + recommendation ──
-                          _card('Assessment', [
-                            const NpFieldLabel('AM remarks'),
-                            TextField(controller: _amRemarks, minLines: 2, maxLines: 5, textCapitalization: TextCapitalization.sentences),
-                            const NpFieldLabel('Recommendation', required: true),
-                            DropdownButtonFormField<String>(
-                              value: _recommendation,
-                              hint: const Text('—'),
-                              items: const [
-                                DropdownMenuItem(value: 'RECOMMENDED', child: Text('Recommended')),
-                                DropdownMenuItem(value: 'NOT_RECOMMENDED', child: Text('Not recommended')),
-                              ],
-                              onChanged: (v) => setState(() => _recommendation = v),
-                            ),
+                        // ── Photos ──
+                        _card(
+                          'Visit photos',
+                          help: _draftId == null
+                              ? 'Save the draft first — photos attach to the saved report.'
+                              : 'Each photo is geotagged with your current location.',
+                          [
                             const SizedBox(height: 12),
-                            OutlinedButton.icon(
-                              onPressed: _busy ? null : () => _saveDraft(checklistItems),
-                              icon: const Icon(Icons.save_outlined, size: 18),
-                              label: Text(_draftId == null ? 'Save draft' : 'Save draft changes'),
-                            ),
-                          ]),
-
-                          // ── Photos ──
-                          _card('Visit photos', [
-                            Text(
-                              _draftId == null
-                                  ? 'Save the draft first — photos attach to the saved report.'
-                                  : 'Each photo is geotagged with your current location.',
-                              style: const TextStyle(fontSize: 12, color: AppColors.muted),
-                            ),
-                            const SizedBox(height: 8),
                             Wrap(spacing: 8, runSpacing: 8, children: [
                               OutlinedButton.icon(
                                 onPressed: (_busy || _draftId == null) ? null : () => _addPhoto(config, type: _kResidencePhoto),
-                                icon: Icon(hasResidence ? Icons.check_circle_rounded : Icons.home_rounded, size: 18, color: hasResidence ? AppColors.success : null),
+                                icon: Icon(hasResidence ? Icons.check_circle_rounded : Icons.home_outlined,
+                                    size: 18, color: hasResidence ? AppColors.success : null),
                                 label: const Text('Residence photo'),
                               ),
                               OutlinedButton.icon(
                                 onPressed: (_busy || _draftId == null) ? null : () => _addPhoto(config, type: _kCandidatePhoto),
-                                icon: Icon(hasCandidate ? Icons.check_circle_rounded : Icons.person_pin_rounded, size: 18, color: hasCandidate ? AppColors.success : null),
+                                icon: Icon(hasCandidate ? Icons.check_circle_rounded : Icons.person_pin_outlined,
+                                    size: 18, color: hasCandidate ? AppColors.success : null),
                                 label: const Text('Candidate photo'),
                               ),
                               OutlinedButton.icon(
                                 onPressed: (_busy || _draftId == null) ? null : () => _addPhoto(config, type: 'BGV_SUPPORTING'),
-                                icon: const Icon(Icons.add_a_photo_rounded, size: 18),
+                                icon: const Icon(Icons.add_a_photo_outlined, size: 18),
                                 label: const Text('Supporting'),
                               ),
                             ]),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 12),
                             NpDocumentList(documents: photos, emptyText: 'No photos on this draft yet.'),
                             if (_draftId != null && (!hasResidence || !hasCandidate))
-                              Text(
-                                'Still needed: ${[if (!hasResidence) 'residence photo', if (!hasCandidate) 'candidate photo'].join(' and ')}.',
-                                style: const TextStyle(fontSize: 12, color: AppColors.warning, fontWeight: FontWeight.w600),
+                              Padding(
+                                padding: const EdgeInsets.only(top: 10),
+                                child: ProNote(
+                                  'Still needed: ${[if (!hasResidence) 'residence photo', if (!hasCandidate) 'candidate photo'].join(' and ')}.',
+                                  tone: ProNoteTone.warn,
+                                ),
                               ),
-                          ]),
-
-                          SizedBox(
-                            height: 50,
-                            child: FilledButton.icon(
-                              onPressed: (_busy || !canSubmit) ? null : () => _submit(checklistItems),
-                              icon: const Icon(Icons.send_rounded, size: 18),
-                              label: const Text('Submit BGV report'),
-                            ),
-                          ),
-                          if (!canSubmit)
-                            const Padding(
-                              padding: EdgeInsets.only(top: 6),
-                              child: Text('Save the draft, capture GPS, add both required photos and pick a recommendation first.',
-                                  textAlign: TextAlign.center, style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                            ),
-                        ],
-                      ),
-      ),
+                          ],
+                        ),
+                      ],
+                    ),
+      bottomNavigationBar: !showForm
+          ? null
+          : ProBottomBar(
+              top: canSubmit
+                  ? null
+                  : const Text('Save the draft, capture GPS, add both required photos and pick a recommendation first.',
+                      textAlign: TextAlign.center, style: AppText.caption),
+              children: [
+                OutlinedButton(
+                  onPressed: _busy ? null : () => _saveDraft(checklistItems),
+                  child: Text(_draftId == null ? 'Save draft' : 'Save changes', maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+                FilledButton(
+                  onPressed: (_busy || !canSubmit) ? null : () => _submit(checklistItems),
+                  child: const Text('Submit report', maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+              ],
+            ),
     );
   }
 
-  Widget _card(String title, List<Widget> children) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+  Widget _card(String title, List<Widget> children, {String? help, Widget? trailing}) => Padding(
+        padding: const EdgeInsets.only(bottom: 14),
         child: GlassCard(
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: AppColors.ink)),
-            const SizedBox(height: 4),
+            Row(children: [
+              Expanded(child: Text(title, style: AppText.section)),
+              if (trailing != null) trailing,
+            ]),
+            if (help != null) ...[
+              const SizedBox(height: 3),
+              Text(help, style: AppText.caption),
+            ],
             ...children,
           ]),
         ),

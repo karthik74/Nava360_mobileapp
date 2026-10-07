@@ -1,10 +1,10 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -27,6 +27,59 @@ String _stripHtml(String s) => s
     .replaceAll('&gt;', '>')
     .trim();
 
+/// "HR_NOTICE" → "HR notice", "URGENT" → "Urgent".
+String _label(String code) {
+  var t = code.replaceAll('_', ' ').toLowerCase();
+  t = t.replaceFirst(RegExp(r'^hr\b'), 'HR');
+  return t.isEmpty ? t : t[0].toUpperCase() + t.substring(1);
+}
+
+/// Icon + tint per category (icon wells in the list).
+(IconData, Color) _categoryLook(String category) {
+  switch (category) {
+    case 'HR_NOTICE':
+      return (Icons.groups_rounded, const Color(0xFF00748C));
+    case 'PAYROLL':
+      return (Icons.account_balance_wallet_rounded, AppColors.success);
+    case 'TRAINING':
+      return (Icons.school_rounded, const Color(0xFF6B46A8));
+    case 'COMPLIANCE':
+      return (Icons.shield_rounded, const Color(0xFF4253A8));
+    case 'POLICY_UPDATE':
+      return (Icons.description_rounded, const Color(0xFF4253A8));
+    case 'EMERGENCY':
+      return (Icons.warning_amber_rounded, AppColors.danger);
+    case 'HOLIDAY':
+      return (Icons.event_rounded, const Color(0xFF9A5B00));
+    case 'BRANCH_NOTICE':
+      return (Icons.storefront_rounded, AppColors.info);
+    default:
+      return (Icons.campaign_rounded, const Color(0xFF43585D));
+  }
+}
+
+/// Priority pill in the Pro tones.
+Widget _priorityPill(String p) {
+  switch (p) {
+    case 'URGENT':
+      return ProPill.bad(_label(p));
+    case 'HIGH':
+      return ProPill.warn(_label(p));
+    case 'LOW':
+      return ProPill.neutral(_label(p));
+    default:
+      return ProPill(
+        _label(p),
+        color: priorityColor(p),
+        background:
+            Color.alphaBlend(priorityColor(p).withOpacity(0.11), Colors.white),
+      );
+  }
+}
+
+/// Quick "show" filter behind the hero stat tiles (presentation-only).
+enum _Show { all, unread, ack }
+
 class AnnouncementsScreen extends ConsumerStatefulWidget {
   const AnnouncementsScreen({super.key});
 
@@ -35,9 +88,11 @@ class AnnouncementsScreen extends ConsumerStatefulWidget {
 }
 
 class _AnnouncementsScreenState extends ConsumerState<AnnouncementsScreen> {
+  final _searchCtrl = TextEditingController();
   String _query = '';
   String _category = '';
   String _priority = '';
+  _Show _show = _Show.all;
 
   static const _categories = [
     'GENERAL', 'HR_NOTICE', 'PAYROLL', 'TRAINING', 'COMPLIANCE',
@@ -45,9 +100,19 @@ class _AnnouncementsScreenState extends ConsumerState<AnnouncementsScreen> {
   ];
   static const _priorities = ['LOW', 'NORMAL', 'HIGH', 'URGENT'];
 
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   List<MyAnnouncement> _filter(List<MyAnnouncement> rows) {
     final q = _query.trim().toLowerCase();
     return rows.where((r) {
+      if (_show == _Show.unread && r.read) return false;
+      if (_show == _Show.ack && !(r.requiresAcknowledgement && !r.acknowledged)) {
+        return false;
+      }
       if (_category.isNotEmpty && r.category != _category) return false;
       if (_priority.isNotEmpty && r.priority != _priority) return false;
       if (q.isNotEmpty &&
@@ -58,158 +123,191 @@ class _AnnouncementsScreenState extends ConsumerState<AnnouncementsScreen> {
     }).toList();
   }
 
+  void _toggleShow(_Show s) =>
+      setState(() => _show = _show == s ? _Show.all : s);
+
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(myAnnouncementsProvider);
-    final mq = MediaQuery.of(context);
+    final all = async.valueOrNull;
+    final unread = all?.where((a) => !a.read).length ?? 0;
+    final ackDue = all
+            ?.where((a) => a.requiresAcknowledgement && !a.acknowledged)
+            .length ??
+        0;
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: PreferredSize(
-          preferredSize: Size.fromHeight(mq.padding.top + AppChrome.appBarHeight),
-          child: ClipRect(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: GlassBlur.chrome, sigmaY: GlassBlur.chrome),
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: AppColors.surface,
-                  border: Border(bottom: BorderSide(color: AppColors.hairline)),
-                ),
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                          onPressed: () => Navigator.pop(context),
-                          color: AppColors.inkSoft,
-                        ),
-                        const SizedBox(width: 4),
-                        const Expanded(
-                          child: Text('Announcements',
-                              style: TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppColors.ink,
-                                  letterSpacing: -0.2)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
+    return Scaffold(
+      appBar: AppBar(),
+      body: ProPage(
+        onRefresh: () async => ref.invalidate(myAnnouncementsProvider),
+        hero: ProHero(
+          title: 'Announcements',
+          subtitle: all == null ? 'Company info' : 'Company info · $unread unread',
+          overlap: _SearchField(
+            controller: _searchCtrl,
+            onChanged: (v) => setState(() => _query = v),
           ),
-        ),
-        body: RefreshIndicator(
-          color: AppColors.primary,
-          backgroundColor: Colors.white.withOpacity(0.92),
-          onRefresh: () async => ref.invalidate(myAnnouncementsProvider),
-          child: ListView(
-            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-            padding: EdgeInsets.fromLTRB(16, 12, 16, mq.padding.bottom + 20),
-            children: [
-              // Search
-              TextField(
-                onChanged: (v) => setState(() => _query = v),
-                textCapitalization: TextCapitalization.words,
-                inputFormatters: const [TitleCaseTextFormatter()],
-                decoration: InputDecoration(
-                  hintText: 'Search announcements…',
-                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                  filled: true,
-                  fillColor: AppColors.surface,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    borderSide: const BorderSide(color: AppColors.hairline),
+          children: [
+            if (all != null)
+              ProHeroStats(
+                stats: [
+                  ProStat(
+                    label: 'Unread',
+                    value: '$unread',
+                    sub: 'new for you',
+                    dot: const Color(0xFF4CC3DB),
+                    selected: _show == _Show.unread,
+                    onTap: () => _toggleShow(_Show.unread),
                   ),
-                ),
+                  ProStat(
+                    label: 'Ack required',
+                    value: '$ackDue',
+                    sub: 'to acknowledge',
+                    dot: const Color(0xFFF2B347),
+                    selected: _show == _Show.ack,
+                    onTap: () => _toggleShow(_Show.ack),
+                  ),
+                  ProStat(
+                    label: 'All',
+                    value: '${all.length}',
+                    sub: 'announcements',
+                    dot: const Color(0xFF9FB3B8),
+                    onTap: () => setState(() => _show = _Show.all),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              // Category chips
-              SizedBox(
-                height: 34,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    _chip('All', _category.isEmpty, () => setState(() => _category = '')),
-                    for (final c in _categories)
-                      _chip(c.replaceAll('_', ' '), _category == c,
-                          () => setState(() => _category = _category == c ? '' : c)),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              // Priority chips
-              SizedBox(
-                height: 34,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    _chip('Any priority', _priority.isEmpty, () => setState(() => _priority = '')),
-                    for (final p in _priorities)
-                      _chip(p, _priority == p,
-                          () => setState(() => _priority = _priority == p ? '' : p),
-                          color: priorityColor(p)),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              async.when(
-                data: (rows) {
-                  final list = _filter(rows);
-                  if (list.isEmpty) {
-                    return const AppEmptyState(
-                      icon: Icons.notifications_none_rounded,
-                      message: 'No announcements to show.',
-                    );
-                  }
-                  return Column(
+          ],
+        ),
+        children: [
+          // Category chips (tap a selected one again to clear it)
+          ProChipBar(
+            labels: ['All', for (final c in _categories) _label(c)],
+            selected: _category.isEmpty ? 0 : _categories.indexOf(_category) + 1,
+            onSelected: (i) => setState(() {
+              if (i == 0) {
+                _category = '';
+              } else {
+                final c = _categories[i - 1];
+                _category = _category == c ? '' : c;
+              }
+            }),
+            bleed: 0,
+          ),
+          // Priority chips
+          ProChipBar(
+            labels: ['Any priority', for (final p in _priorities) _label(p)],
+            selected: _priority.isEmpty ? 0 : _priorities.indexOf(_priority) + 1,
+            onSelected: (i) => setState(() {
+              if (i == 0) {
+                _priority = '';
+              } else {
+                final p = _priorities[i - 1];
+                _priority = _priority == p ? '' : p;
+              }
+            }),
+            bleed: 0,
+          ),
+          ...async.when(
+            data: (rows) {
+              final list = _filter(rows);
+              if (list.isEmpty) {
+                return [
+                  const ProEmpty(
+                    icon: Icons.notifications_none_rounded,
+                    title: 'No announcements to show.',
+                    message:
+                        'Try another category or priority, or clear the search.',
+                  ),
+                ];
+              }
+              final pinned = list.where((a) => a.pinned).toList();
+              final rest = list.where((a) => !a.pinned).toList();
+              return [
+                if (pinned.isNotEmpty) ...[
+                  ProSectionHeader(
+                    title: 'Pinned · ${pinned.length}',
+                    small: true,
+                  ),
+                  ProListGroup(
                     children: [
-                      for (final a in list)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _AnnouncementCard(a: a),
-                        ),
+                      for (final a in pinned) _AnnouncementRow(a: a),
                     ],
-                  );
-                },
-                loading: () => const AppLoadingBlock(height: 160),
-                error: (e, _) => AppErrorPanel(
-                  message: e.toString(),
-                  onRetry: () => ref.invalidate(myAnnouncementsProvider),
-                ),
+                  ),
+                ],
+                if (rest.isNotEmpty) ...[
+                  ProSectionHeader(
+                    title: 'Latest · ${rest.length}',
+                    small: true,
+                  ),
+                  ProListGroup(
+                    children: [
+                      for (final a in rest) _AnnouncementRow(a: a),
+                    ],
+                  ),
+                ],
+              ];
+            },
+            loading: () => const [AppLoadingBlock(height: 160)],
+            error: (e, _) => [
+              AppErrorPanel(
+                message: e.toString(),
+                onRetry: () => ref.invalidate(myAnnouncementsProvider),
               ),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
+}
 
-  Widget _chip(String label, bool selected, VoidCallback onTap, {Color? color}) {
-    final c = color ?? AppColors.primary;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          decoration: BoxDecoration(
-            color: selected ? c.withOpacity(0.14) : AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            border: Border.all(color: selected ? c.withOpacity(0.4) : AppColors.hairline),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: selected ? c : AppColors.muted,
+/// Raised search field over the hero (ProSearchField look, keeps the
+/// title-case formatter).
+class _SearchField extends StatelessWidget {
+  const _SearchField({required this.controller, required this.onChanged});
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(15),
+      borderSide: const BorderSide(color: AppColors.hairline),
+    );
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: AppShadows.lifted,
+      ),
+      child: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: controller,
+        builder: (_, v, __) => TextField(
+          controller: controller,
+          onChanged: onChanged,
+          textInputAction: TextInputAction.search,
+          textCapitalization: TextCapitalization.words,
+          inputFormatters: const <TextInputFormatter>[TitleCaseTextFormatter()],
+          style: const TextStyle(fontSize: 15, color: AppColors.ink),
+          decoration: InputDecoration(
+            hintText: 'Search announcements…',
+            prefixIcon: const Icon(Icons.search_rounded, size: 21),
+            suffixIcon: v.text.isNotEmpty
+                ? IconButton(
+                    tooltip: 'Clear search',
+                    icon: const Icon(Icons.close_rounded, size: 19),
+                    onPressed: () {
+                      controller.clear();
+                      onChanged('');
+                    },
+                  )
+                : null,
+            contentPadding: const EdgeInsets.symmetric(vertical: 15),
+            border: border,
+            enabledBorder: border,
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(15),
+              borderSide: BorderSide(color: AppColors.primary, width: 1.6),
             ),
           ),
         ),
@@ -218,76 +316,127 @@ class _AnnouncementsScreenState extends ConsumerState<AnnouncementsScreen> {
   }
 }
 
-class _AnnouncementCard extends StatelessWidget {
-  const _AnnouncementCard({required this.a});
+class _AnnouncementRow extends StatelessWidget {
+  const _AnnouncementRow({required this.a});
   final MyAnnouncement a;
 
   @override
   Widget build(BuildContext context) {
-    final pc = priorityColor(a.priority);
-    return GlassCard(
-      padding: const EdgeInsets.all(16),
-      shadow: AppShadows.soft,
+    final (icon, tint) = _categoryLook(a.category);
+    final desc = a.description == null ? '' : _stripHtml(a.description!);
+    final meta = [
+      _label(a.category),
+      if (a.publishedAt != null)
+        DateFormat('d MMM yyyy, h:mm a').format(a.publishedAt!),
+    ].join(' · ');
+    return Material(
+      color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.lg),
         onTap: () => context.push('/announcements/${a.id}'),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                if (!a.read)
-                  Container(
-                    width: 8,
-                    height: 8,
-                    margin: const EdgeInsets.only(right: 8),
-                    decoration: BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
-                  ),
-                if (a.pinned)
-                  const Padding(
-                    padding: EdgeInsets.only(right: 6),
-                    child: Icon(Icons.push_pin_rounded, size: 14, color: AppColors.pink),
-                  ),
-                Expanded(
-                  child: Text(
-                    a.title,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.ink),
-                  ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Icon well with the unread dot.
+              SizedBox(
+                width: 34,
+                height: 34,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    ProIconWell(icon: icon, color: tint),
+                    if (!a.read)
+                      Positioned(
+                        right: -3,
+                        top: -3,
+                        child: Container(
+                          width: 11,
+                          height: 11,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                StatusPill(label: a.priority, color: pc),
-              ],
-            ),
-            if (a.description != null && a.description!.trim().isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                _stripHtml(a.description!),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13, color: AppColors.inkSoft, height: 1.4),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (a.pinned)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 2, right: 5),
+                            child: Icon(Icons.push_pin_rounded,
+                                size: 14, color: AppColors.pink),
+                          ),
+                        Expanded(
+                          child: Text(
+                            a.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 15,
+                              height: 1.33,
+                              letterSpacing: -0.15,
+                              fontWeight:
+                                  a.read ? FontWeight.w500 : FontWeight.w600,
+                              color: AppColors.ink,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _priorityPill(a.priority),
+                      ],
+                    ),
+                    if (desc.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        desc,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.inkSoft,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 7),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            meta,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.muted,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ),
+                        if (a.requiresAcknowledgement) ...[
+                          const SizedBox(width: 8),
+                          a.acknowledged
+                              ? ProPill.ok('Acknowledged')
+                              : ProPill.warn('Ack required'),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                StatusPill(label: a.category.replaceAll('_', ' '), color: AppColors.muted),
-                const Spacer(),
-                if (a.requiresAcknowledgement)
-                  StatusPill(
-                    label: a.acknowledged ? 'Acknowledged' : 'Ack required',
-                    color: a.acknowledged ? AppColors.success : AppColors.warning,
-                    icon: a.acknowledged ? Icons.check_rounded : Icons.priority_high_rounded,
-                  ),
-              ],
-            ),
-            if (a.publishedAt != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                DateFormat('d MMM yyyy, h:mm a').format(a.publishedAt!),
-                style: const TextStyle(fontSize: 11, color: AppColors.muted),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );

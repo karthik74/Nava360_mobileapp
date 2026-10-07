@@ -1,10 +1,13 @@
 // Shared MIS presentation widgets — KPI cards, unit/metric cards, segmented
 // pills, drill breadcrumb, dropdowns and a generic table. Reuses the app theme
-// tokens so MIS matches nava360. Ports SnapshotCard / UnitCard /
-// MetricColumnsCard / DataTable / ScopeFilter / DateSelect.
+// tokens and the Pro component library so MIS matches nava360. Ports
+// SnapshotCard / UnitCard / MetricColumnsCard / DataTable / ScopeFilter /
+// DateSelect.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_format.dart';
@@ -26,7 +29,10 @@ Color misAccent(String accent) {
   }
 }
 
-/// KPI "snapshot" card — icon chip + big value + label (+ optional sub).
+/// Border of the light "pick" fields (dropdowns / date / month pickers).
+const Color _pickBorder = Color(0xFFDBE3E5);
+
+/// KPI "snapshot" card — icon well + big value + label (+ optional sub).
 class MisSnapshotCard extends StatelessWidget {
   const MisSnapshotCard({
     super.key,
@@ -47,21 +53,11 @@ class MisSnapshotCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = misAccent(accent);
     return GlassCard(
-      padding: const EdgeInsets.all(13),
-      shadow: AppShadows.soft,
+      padding: const EdgeInsets.all(14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.14),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: color.withOpacity(0.22)),
-            ),
-            child: Icon(icon, color: color, size: 16),
-          ),
+          ProIconWell(icon: icon, color: color, size: 32),
           const SizedBox(height: 10),
           FittedBox(
             alignment: Alignment.centerLeft,
@@ -69,26 +65,35 @@ class MisSnapshotCard extends StatelessWidget {
             child: Text(
               value,
               style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink,
-                  letterSpacing: -0.3),
+                fontSize: 19,
+                height: 1.25,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.4,
+                color: AppColors.ink,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
           ),
           const SizedBox(height: 2),
-          Text(label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  fontSize: 11,
-                  color: AppColors.muted,
-                  fontWeight: FontWeight.w600)),
+          Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                fontSize: 12, height: 1.3, color: AppColors.muted),
+          ),
           if (sub != null && sub!.isNotEmpty) ...[
             const SizedBox(height: 2),
-            Text(sub!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+            Text(
+              sub!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 11.5,
+                color: AppColors.faint,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
           ],
         ],
       ),
@@ -105,7 +110,7 @@ class MisSnapshotGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, c) {
-      const gap = 10.0;
+      const gap = 8.0;
       final w = (c.maxWidth - gap * (perRow - 1)) / perRow;
       return Wrap(
         spacing: gap,
@@ -162,51 +167,49 @@ class MisUnitCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text(title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.ink)),
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    height: 1.33,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.15,
+                    color: AppColors.ink,
+                  ),
+                ),
               ),
               if (onTap != null)
                 const Icon(Icons.chevron_right_rounded,
-                    size: 18, color: AppColors.muted),
+                    size: 20, color: Color(0xFFB3C0C3)),
             ],
           ),
           if ((subtitle != null && subtitle!.isNotEmpty) ||
-              (parent != null && parent!.isNotEmpty)) ...[
-            const SizedBox(height: 1),
+              (parent != null && parent!.isNotEmpty))
             Text(
-              [subtitle, parent].where((s) => s != null && s.isNotEmpty).join(' · '),
+              [subtitle, parent]
+                  .where((s) => s != null && s.isNotEmpty)
+                  .join(' · '),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: AppColors.muted),
+              style: AppText.caption,
             ),
-          ],
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(child: _kv('Demand', f(demand))),
               Expanded(child: _kv('Collection', f(collection), color: tone)),
-              _kv('Coll %', misPct(collection, demand), color: tone, right: true),
+              _kv('Coll %', misPct(collection, demand),
+                  color: tone, right: true),
             ],
           ),
-          const SizedBox(height: 8),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            child: LinearProgressIndicator(
-              value: (pct / 100).clamp(0.0, 1.0),
-              minHeight: 5,
-              backgroundColor: AppColors.hairline,
-              valueColor: AlwaysStoppedAnimation(tone),
-            ),
-          ),
+          const SizedBox(height: 10),
+          ProBar(value: (pct / 100).clamp(0.0, 1.0), color: tone, height: 4),
           if (footer != null) ...[
+            const SizedBox(height: 12),
+            const Divider(height: 1, color: AppColors.hairlineSoft),
             const SizedBox(height: 10),
-            const Divider(height: 1, color: AppColors.hairline),
-            const SizedBox(height: 8),
             footer!,
           ],
         ],
@@ -220,14 +223,17 @@ class MisUnitCard extends StatelessWidget {
           right ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         Text(label,
-            style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+            style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
         const SizedBox(height: 1),
-        Text(value,
-            style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: color ?? AppColors.ink,
-                fontFeatures: const [FontFeature.tabularFigures()])),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w600,
+            color: color ?? AppColors.ink,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
       ],
     );
   }
@@ -258,41 +264,51 @@ class MisMetricColumnsCard extends StatelessWidget {
     final color = misAccent(accent);
     return _MisTappableCard(
       onTap: onTap,
-      accentBar: color,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration:
+                    BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        height: 1.33,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.15,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    if (subtitle != null && subtitle!.isNotEmpty)
+                      Text(
+                        subtitle!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.ink)),
-                    if (subtitle != null && subtitle!.isNotEmpty) ...[
-                      const SizedBox(height: 1),
-                      Text(subtitle!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 11, color: AppColors.muted)),
-                    ],
+                        style: AppText.caption,
+                      ),
                   ],
                 ),
               ),
               if (badge != null) badge!,
               if (onTap != null && badge == null)
                 const Icon(Icons.chevron_right_rounded,
-                    size: 18, color: AppColors.muted),
+                    size: 20, color: Color(0xFFB3C0C3)),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Row(
             children: [
               for (var i = 0; i < columns.length; i++)
@@ -302,14 +318,19 @@ class MisMetricColumnsCard extends StatelessWidget {
                     children: [
                       Text(columns[i].$1,
                           style: const TextStyle(
-                              fontSize: 10.5, color: AppColors.muted)),
+                              fontSize: 11.5, color: AppColors.muted)),
                       const SizedBox(height: 1),
-                      Text(columns[i].$2,
-                          style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.ink,
-                              fontFeatures: [FontFeature.tabularFigures()])),
+                      Text(
+                        columns[i].$2,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.ink,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -322,32 +343,15 @@ class MisMetricColumnsCard extends StatelessWidget {
 }
 
 class _MisTappableCard extends StatelessWidget {
-  const _MisTappableCard({required this.child, this.onTap, this.accentBar});
+  const _MisTappableCard({required this.child, this.onTap});
   final Widget child;
   final VoidCallback? onTap;
-  final Color? accentBar;
 
   @override
   Widget build(BuildContext context) {
-    // IntrinsicHeight gives the Row a bounded height so CrossAxisAlignment.stretch
-    // can size the full-height accent bar. Without it, the card lives in a
-    // vertically-unbounded ListView/Column and `stretch` forces infinite height
-    // onto the children, throwing during layout so the card renders nothing.
     final content = GlassCard(
-      padding: EdgeInsets.zero,
-      shadow: AppShadows.soft,
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (accentBar != null)
-              Container(width: 4, decoration: BoxDecoration(color: accentBar)),
-            Expanded(
-              child: Padding(padding: const EdgeInsets.all(13), child: child),
-            ),
-          ],
-        ),
-      ),
+      padding: const EdgeInsets.all(14),
+      child: child,
     );
     if (onTap == null) return content;
     return Material(
@@ -359,7 +363,9 @@ class _MisTappableCard extends StatelessWidget {
   }
 }
 
-/// Segmented pill control (product / metric / tab toggles).
+/// Segmented control (product / metric / tab toggles) — a soft grey track with
+/// the selected option lifted onto a white pill. Sizes to its content, so it
+/// can sit inside a horizontal scroll view.
 class MisSegmented<T> extends StatelessWidget {
   const MisSegmented({
     super.key,
@@ -374,31 +380,49 @@ class MisSegmented<T> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      height: 40,
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: AppColors.hairline),
+        color: AppColors.neutralTint,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           for (final o in options)
             GestureDetector(
-              onTap: () => onChanged(o.$1),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 13, vertical: 6),
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                HapticFeedback.selectionClick();
+                onChanged(o.$1);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: o.$1 == value ? AppColors.primary : Colors.transparent,
-                  borderRadius: BorderRadius.circular(AppRadii.pill),
+                  color: o.$1 == value ? AppColors.surface : Colors.transparent,
+                  borderRadius: BorderRadius.circular(9),
+                  boxShadow: o.$1 == value
+                      ? const [
+                          BoxShadow(
+                            color: Color(0x240B1D21),
+                            blurRadius: 2,
+                            offset: Offset(0, 1),
+                          ),
+                        ]
+                      : null,
                 ),
-                child: Text(o.$2,
-                    style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color:
-                            o.$1 == value ? Colors.white : AppColors.muted)),
+                child: Text(
+                  o.$2,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: o.$1 == value ? AppColors.ink : AppColors.muted,
+                  ),
+                ),
               ),
             ),
         ],
@@ -415,38 +439,152 @@ class MisViewToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget btn(IconData icon, bool active, VoidCallback onTap) => GestureDetector(
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: active ? AppColors.primary : Colors.transparent,
-              borderRadius: BorderRadius.circular(AppRadii.sm),
+    Widget btn(IconData icon, bool active, String tip, VoidCallback onTap) =>
+        Tooltip(
+          message: tip,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onTap();
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 36,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: active ? AppColors.surface : Colors.transparent,
+                borderRadius: BorderRadius.circular(9),
+                boxShadow: active
+                    ? const [
+                        BoxShadow(
+                          color: Color(0x240B1D21),
+                          blurRadius: 2,
+                          offset: Offset(0, 1),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Icon(icon,
+                  size: 18, color: active ? AppColors.ink : AppColors.muted),
             ),
-            child: Icon(icon,
-                size: 16, color: active ? Colors.white : AppColors.muted),
           ),
         );
     return Container(
+      height: 40,
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: AppColors.hairline),
+        color: AppColors.neutralTint,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          btn(Icons.grid_view_rounded, !table, () => onChanged(false)),
+          btn(Icons.view_agenda_outlined, !table, 'One day at a time',
+              () => onChanged(false)),
           const SizedBox(width: 2),
-          btn(Icons.table_rows_rounded, table, () => onChanged(true)),
+          btn(Icons.table_rows_rounded, table, 'Whole month table',
+              () => onChanged(true)),
         ],
       ),
     );
   }
 }
 
-/// Labelled dropdown used for date / month / parameter pickers.
+/// The light "pick" field: a 54px white box with a small grey label above the
+/// value, an optional leading icon and a chevron. Opens whatever [onTap] does
+/// (a sheet, a calendar, a checklist). Disabled (greyed) when [onTap] is null.
+class MisPickField extends StatelessWidget {
+  const MisPickField({
+    super.key,
+    this.label,
+    required this.value,
+    this.icon,
+    this.onTap,
+  });
+
+  final String? label;
+  final String value;
+  final IconData? icon;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        side: const BorderSide(color: _pickBorder),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: label == null ? 48 : 54),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 7, 10, 7),
+            child: Row(
+              children: [
+                if (icon != null) ...[
+                  Icon(icon,
+                      size: 18,
+                      color: enabled ? AppColors.primary : AppColors.faint),
+                  const SizedBox(width: 10),
+                ],
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (label != null) _PickLabel(label!),
+                      Text(
+                        value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          height: 1.38,
+                          fontWeight: FontWeight.w600,
+                          color: enabled ? AppColors.ink : AppColors.faint,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
+                const Icon(Icons.keyboard_arrow_down_rounded,
+                    size: 20, color: AppColors.faint),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PickLabel extends StatelessWidget {
+  const _PickLabel(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 12,
+          height: 1.33,
+          fontWeight: FontWeight.w500,
+          color: AppColors.muted,
+        ),
+      );
+}
+
+/// Labelled dropdown used for date / month / parameter pickers. Same look as
+/// [MisPickField]: the label sits inside the box, above the selected value.
 class MisDropdown<T> extends StatelessWidget {
   const MisDropdown({
     super.key,
@@ -462,41 +600,59 @@ class MisDropdown<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (label != null) ...[
-          Text(label!,
-              style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.muted)),
-          const SizedBox(height: 4),
-        ],
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            border: Border.all(color: AppColors.hairline),
+    return Container(
+      constraints: BoxConstraints(minHeight: label == null ? 48 : 54),
+      padding: const EdgeInsets.fromLTRB(12, 7, 8, 7),
+      alignment: Alignment.centerLeft,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: _pickBorder),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<T>(
+          value: value,
+          isExpanded: true,
+          itemHeight: null,
+          focusColor: Colors.transparent,
+          dropdownColor: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          icon: const Icon(Icons.keyboard_arrow_down_rounded,
+              size: 20, color: AppColors.faint),
+          style: const TextStyle(
+            fontFamily: 'Geist',
+            fontSize: 14.5,
+            fontWeight: FontWeight.w500,
+            color: AppColors.ink,
           ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<T>(
-              value: value,
-              isExpanded: true,
-              isDense: true,
-              icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                  color: AppColors.muted),
-              style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink),
-              items: items,
-              onChanged: onChanged,
-            ),
-          ),
+          // The closed field shows the label above the chosen value; the open
+          // menu keeps the plain items.
+          selectedItemBuilder: (context) => [
+            for (final item in items)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (label != null) _PickLabel(label!),
+                  DefaultTextStyle.merge(
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14.5,
+                      height: 1.38,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                    child: item.child,
+                  ),
+                ],
+              ),
+          ],
+          items: items,
+          onChanged: onChanged,
         ),
-      ],
+      ),
     );
   }
 }
@@ -511,6 +667,35 @@ const List<String> _monthsFull = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
+
+/// White sheet chrome shared by the MIS pickers: radius 24 top + drag handle.
+const ShapeBorder _sheetShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+);
+
+class _SheetHandle extends StatelessWidget {
+  const _SheetHandle();
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Container(
+          width: 40,
+          height: 5,
+          decoration: BoxDecoration(
+            color: const Color(0xFFC6D3D6),
+            borderRadius: BorderRadius.circular(5),
+          ),
+        ),
+      );
+}
+
+const TextStyle _sheetTitle = TextStyle(
+  fontSize: 19,
+  height: 1.3,
+  fontWeight: FontWeight.w600,
+  letterSpacing: -0.4,
+  color: AppColors.ink,
+);
 
 /// A dropdown-styled field that opens a modern Material calendar, restricted to
 /// the [available] dates (only days that actually have data are selectable).
@@ -560,9 +745,7 @@ class MisDatePicker extends StatelessWidget {
       // (9/16 of screen), which clips the last row / overflows. Let the
       // sheet size to its content instead.
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: _sheetShape,
       builder: (ctx) => _MisCalendarSheet(
         byKey: byKey,
         first: dates.first,
@@ -576,9 +759,9 @@ class MisDatePicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _MisPickerField(
+    return MisPickField(
       label: label,
-      text: (value != null && value!.isNotEmpty)
+      value: (value != null && value!.isNotEmpty)
           ? misPrettyDate(value)
           : 'Select date',
       icon: Icons.event_rounded,
@@ -629,9 +812,7 @@ class MisMonthPicker extends StatelessWidget {
     final picked = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: _sheetShape,
       builder: (ctx) => _MonthGridSheet(
         years: years,
         byYear: byYear,
@@ -644,75 +825,13 @@ class MisMonthPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _MisPickerField(
+    return MisPickField(
       label: label,
-      text: (value != null && value!.isNotEmpty)
+      value: (value != null && value!.isNotEmpty)
           ? misMonthLabel(value!)
           : 'Select month',
-      icon: Icons.calendar_month_rounded,
+      icon: label == null ? Icons.calendar_month_rounded : null,
       onTap: available.isEmpty ? null : () => _open(context),
-    );
-  }
-}
-
-class _MisPickerField extends StatelessWidget {
-  const _MisPickerField({
-    this.label,
-    required this.text,
-    required this.icon,
-    required this.onTap,
-  });
-  final String? label;
-  final String text;
-  final IconData icon;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (label != null) ...[
-          Text(label!,
-              style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.muted)),
-          const SizedBox(height: 4),
-        ],
-        Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onTap,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                border: Border.all(color: AppColors.hairline),
-              ),
-              child: Row(
-                children: [
-                  Icon(icon, size: 18, color: AppColors.primary),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(text,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.ink)),
-                  ),
-                  const Icon(Icons.keyboard_arrow_down_rounded,
-                      color: AppColors.muted),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -738,23 +857,10 @@ class _MonthGridSheet extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.hairline,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text('Select month',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink)),
-            const SizedBox(height: 8),
+            const _SheetHandle(),
+            const SizedBox(height: 14),
+            const Text('Select month', style: _sheetTitle),
+            const SizedBox(height: 6),
             Flexible(
               child: SingleChildScrollView(
                 child: Column(
@@ -762,11 +868,11 @@ class _MonthGridSheet extends StatelessWidget {
                   children: [
                     for (final y in years) ...[
                       Padding(
-                        padding: const EdgeInsets.only(top: 10, bottom: 8),
+                        padding: const EdgeInsets.only(top: 12, bottom: 8),
                         child: Text('$y',
                             style: const TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
                                 color: AppColors.muted)),
                       ),
                       LayoutBuilder(builder: (context, c) {
@@ -805,8 +911,9 @@ class _MonthGridSheet extends StatelessWidget {
           onTap: enabled
               ? () => Navigator.pop(context, orig['$year-$month'])
               : null,
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 12),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            height: 44,
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: selected
@@ -820,19 +927,19 @@ class _MonthGridSheet extends StatelessWidget {
                     ? AppColors.primary
                     : enabled
                         ? AppColors.hairline
-                        : AppColors.hairline.withOpacity(0.4),
+                        : AppColors.hairlineSoft,
               ),
             ),
             child: Text(
               _monthsAbbr[month - 1],
               style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
+                fontSize: 13.5,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                 color: selected
                     ? Colors.white
                     : enabled
                         ? AppColors.ink
-                        : AppColors.muted.withOpacity(0.5),
+                        : AppColors.faint.withValues(alpha: 0.6),
               ),
             ),
           ),
@@ -909,26 +1016,15 @@ class _MisCalendarSheetState extends State<_MisCalendarSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.hairline,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
+            const _SheetHandle(),
             const SizedBox(height: 12),
             Row(
               children: [
-                Text('${_monthsFull[m - 1]} $y',
-                    style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.ink)),
-                const Spacer(),
+                Expanded(
+                  child: Text('${_monthsFull[m - 1]} $y', style: _sheetTitle),
+                ),
                 IconButton(
+                  tooltip: 'Previous month',
                   onPressed: _canPrev
                       ? () => setState(
                           () => _visible = DateTime(y, m - 1))
@@ -936,6 +1032,7 @@ class _MisCalendarSheetState extends State<_MisCalendarSheet> {
                   icon: const Icon(Icons.chevron_left_rounded),
                 ),
                 IconButton(
+                  tooltip: 'Next month',
                   onPressed: _canNext
                       ? () => setState(
                           () => _visible = DateTime(y, m + 1))
@@ -944,7 +1041,7 @@ class _MisCalendarSheetState extends State<_MisCalendarSheet> {
                 ),
               ],
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Row(
               children: [
                 for (final w in const ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'])
@@ -952,8 +1049,8 @@ class _MisCalendarSheetState extends State<_MisCalendarSheet> {
                     child: Center(
                       child: Text(w,
                           style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
                               color: AppColors.muted)),
                     ),
                   ),
@@ -977,8 +1074,7 @@ class _MisCalendarSheetState extends State<_MisCalendarSheet> {
                       color: AppColors.success, shape: BoxShape.circle),
                 ),
                 const SizedBox(width: 6),
-                const Text('Data available',
-                    style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
+                const Text('Data available', style: AppText.caption),
                 const Spacer(),
                 FilledButton.tonalIcon(
                   onPressed: () => _pop(_key(widget.last)),
@@ -1006,8 +1102,9 @@ class _MisCalendarSheetState extends State<_MisCalendarSheet> {
           child: Text('$d',
               style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800)),
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: [FontFeature.tabularFigures()])),
         ),
       );
     }
@@ -1015,7 +1112,7 @@ class _MisCalendarSheetState extends State<_MisCalendarSheet> {
       return Center(
         child: Text('$d',
             style: TextStyle(
-                fontSize: 13, color: AppColors.muted.withOpacity(0.35))),
+                fontSize: 13.5, color: AppColors.faint.withValues(alpha: 0.55))),
       );
     }
     return InkWell(
@@ -1026,9 +1123,10 @@ class _MisCalendarSheetState extends State<_MisCalendarSheet> {
         children: [
           Text('$d',
               style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink)),
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.ink,
+                  fontFeatures: [FontFeature.tabularFigures()])),
           const SizedBox(height: 2),
           Container(
             width: 5,
@@ -1059,21 +1157,25 @@ class MisBreadcrumb extends StatelessWidget {
     for (var i = 0; i < crumbs.length; i++) {
       if (i > 0) {
         children.add(const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 4),
+          padding: EdgeInsets.symmetric(horizontal: 3),
           child: Icon(Icons.chevron_right_rounded,
-              size: 15, color: AppColors.muted),
+              size: 16, color: AppColors.faint),
         ));
       }
       final c = crumbs[i];
       final last = i == crumbs.length - 1;
+      final tappable = c.onTap != null && !last;
       children.add(GestureDetector(
         onTap: c.onTap,
-        child: Text(
-          c.label,
-          style: TextStyle(
-            fontSize: 12.5,
-            fontWeight: last ? FontWeight.w800 : FontWeight.w600,
-            color: c.onTap != null && !last ? AppColors.primary : AppColors.ink,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Text(
+            c.label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: last ? FontWeight.w600 : FontWeight.w500,
+              color: tappable ? AppColors.primary : AppColors.ink,
+            ),
           ),
         ),
       ));
@@ -1092,12 +1194,8 @@ class MisSectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Text(text,
-          style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-              color: AppColors.ink)),
+      padding: const EdgeInsets.only(left: 2, bottom: 10),
+      child: Text(text, style: AppText.section),
     );
   }
 }
@@ -1128,11 +1226,13 @@ class MisTable<T> extends StatelessWidget {
           flex: c.right ? 3 : 4,
           child: Text(
             c.header,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             textAlign: c.right ? TextAlign.right : TextAlign.left,
             style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: Colors.white),
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.muted),
           ),
         );
 
@@ -1140,9 +1240,9 @@ class MisTable<T> extends StatelessWidget {
           flex: c.right ? 3 : 4,
           child: Align(
             alignment: c.right ? Alignment.centerRight : Alignment.centerLeft,
-            child: DefaultTextStyle(
+            child: DefaultTextStyle.merge(
               style: const TextStyle(
-                  fontSize: 12.5,
+                  fontSize: 13,
                   color: AppColors.inkSoft,
                   fontWeight: FontWeight.w500,
                   fontFeatures: [FontFeature.tabularFigures()]),
@@ -1153,26 +1253,32 @@ class MisTable<T> extends StatelessWidget {
 
     return GlassCard(
       padding: EdgeInsets.zero,
-      shadow: AppShadows.soft,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppRadii.lg),
         child: Column(
           children: [
             Container(
-              color: AppColors.primary,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              color: AppColors.surfaceAlt,
+              constraints: const BoxConstraints(minHeight: 38),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               child: Row(children: [for (final c in columns) headerCell(c)]),
             ),
             for (var i = 0; i < rows.length; i++)
-              InkWell(
-                onTap: onRowTap == null ? null : () => onRowTap!(rows[i]),
-                child: Container(
-                  color: i.isOdd ? AppColors.surfaceAlt : AppColors.surface,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-                  child: Row(
-                    children: [for (final c in columns) bodyCell(c, rows[i])],
+              Material(
+                color: AppColors.surface,
+                child: InkWell(
+                  onTap: onRowTap == null ? null : () => onRowTap!(rows[i]),
+                  child: Container(
+                    constraints: const BoxConstraints(minHeight: 44),
+                    decoration: const BoxDecoration(
+                      border: Border(
+                          top: BorderSide(color: AppColors.hairlineSoft)),
+                    ),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                    child: Row(
+                      children: [for (final c in columns) bodyCell(c, rows[i])],
+                    ),
                   ),
                 ),
               ),

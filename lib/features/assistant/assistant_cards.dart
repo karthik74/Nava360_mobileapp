@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import 'assistant_models.dart';
 import 'assistant_repository.dart';
@@ -40,12 +41,12 @@ class AssistantCardView extends StatelessWidget {
     };
     if (body == null) return const SizedBox.shrink();
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: AppColors.surfaceAlt,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.hairline),
+        border: Border.all(color: AppColors.hairlineSoft),
       ),
       child: body,
     );
@@ -83,8 +84,16 @@ class AssistantCardView extends StatelessWidget {
         Row(
           children: [
             _Stat(label: 'Present', value: '$present', color: AppColors.success),
-            _Stat(label: 'Absent', value: '$absent', color: AppColors.danger),
-            _Stat(label: 'On leave', value: '$leave', color: AppColors.info),
+            _Stat(
+                label: 'Absent',
+                value: '$absent',
+                color: AppColors.danger,
+                divider: true),
+            _Stat(
+                label: 'On leave',
+                value: '$leave',
+                color: AppColors.info,
+                divider: true),
           ],
         ),
       ],
@@ -114,7 +123,7 @@ class AssistantCardView extends StatelessWidget {
       children: [
         if (leaves.isEmpty && regs.isEmpty)
           const Text('Nothing pending — all clear!',
-              style: TextStyle(fontSize: 12, color: AppColors.muted)),
+              style: TextStyle(fontSize: 13, color: AppColors.muted)),
         for (final l in leaves.take(3))
           _kv('${l['employee'] ?? ''}',
               '${l['type'] ?? 'Leave'} · ${l['from'] ?? ''} → ${l['to'] ?? ''}'),
@@ -204,55 +213,50 @@ class AssistantCardView extends StatelessWidget {
     required String title,
     required List<Widget> children,
   }) {
+    // The first key/value row sits right under the header without a rule.
+    final rows = <Widget>[];
+    var firstKv = true;
+    for (final c in children) {
+      if (c is _KvRow && firstKv) {
+        firstKv = false;
+        rows.add(_KvRow(c.k, c.v, divider: false));
+      } else {
+        rows.add(c);
+      }
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Icon(icon, size: 15, color: AppColors.primary),
-            const SizedBox(width: 6),
+            Icon(icon, size: 16, color: AppColors.primary),
+            const SizedBox(width: 8),
             Expanded(
               child: Text(title,
                   style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.ink)),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                      fontFeatures: [FontFeature.tabularFigures()])),
             ),
           ],
         ),
-        const SizedBox(height: 8),
-        ...children,
+        const SizedBox(height: 9),
+        ...rows,
       ],
     );
   }
 
-  static Widget _kv(String k, String v) => Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Text(k,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.inkSoft)),
-            ),
-            const SizedBox(width: 8),
-            Text(v,
-                style:
-                    const TextStyle(fontSize: 12, color: AppColors.muted)),
-          ],
-        ),
-      );
+  static Widget _kv(String k, String v) => _KvRow(k, v);
 
   static Widget _more(int total, int shown) => total > shown
       ? Padding(
-          padding: const EdgeInsets.only(top: 2),
+          padding: const EdgeInsets.only(top: 6),
           child: Text('+${total - shown} more',
-              style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.muted)),
         )
       : const SizedBox.shrink();
 
@@ -299,8 +303,11 @@ class _ApprovalConfirmCardState extends ConsumerState<ApprovalConfirmCard> {
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(
-                backgroundColor: approve ? AppColors.success : AppColors.danger),
+            style: approve
+                ? null
+                : FilledButton.styleFrom(
+                    backgroundColor: AppColors.dangerTint,
+                    foregroundColor: AppColors.danger),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(label),
           ),
@@ -334,53 +341,72 @@ class _ApprovalConfirmCardState extends ConsumerState<ApprovalConfirmCard> {
     final a = widget.action;
     final reason = a['reason'] as String?;
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.06),
+        color: AppColors.primary.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(Icons.verified_user_rounded, size: 15, color: AppColors.primary),
-              const SizedBox(width: 6),
+              Icon(Icons.verified_user_rounded,
+                  size: 16, color: AppColors.primary),
+              const SizedBox(width: 8),
               const Text('Confirm action',
                   style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                       color: AppColors.ink)),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text('${a['employee'] ?? ''}',
               style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
                   color: AppColors.ink)),
+          const SizedBox(height: 2),
           Text('${a['summary'] ?? ''}',
-              style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+              style: const TextStyle(
+                  fontSize: 13,
+                  height: 1.4,
+                  color: Color(0xFF43585D),
+                  fontFeatures: [FontFeature.tabularFigures()])),
           if (reason != null && reason.isNotEmpty)
-            Text('“$reason”',
-                style: const TextStyle(
-                    fontSize: 11.5,
-                    fontStyle: FontStyle.italic,
-                    color: AppColors.inkSoft)),
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('“$reason”',
+                  style: const TextStyle(
+                      fontSize: 13,
+                      height: 1.4,
+                      fontStyle: FontStyle.italic,
+                      color: AppColors.inkSoft)),
+            ),
           const SizedBox(height: 10),
           if (_outcome != null)
             Row(
               children: [
-                const Icon(Icons.check_circle_rounded,
-                    size: 15, color: AppColors.success),
-                const SizedBox(width: 6),
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: const BoxDecoration(
+                    color: AppColors.successTint,
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.check_rounded,
+                      size: 14, color: AppColors.success),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text(_outcome!,
                       style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
                           color: AppColors.success)),
                 ),
               ],
@@ -390,23 +416,83 @@ class _ApprovalConfirmCardState extends ConsumerState<ApprovalConfirmCard> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.danger,
+                      side: const BorderSide(color: Color(0xFFF2C4C1)),
+                      minimumSize: const Size(0, 40),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      textStyle: const TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
                     onPressed: _busy ? null : () => _act(false),
-                    icon: const Icon(Icons.close_rounded,
-                        size: 15, color: AppColors.danger),
-                    label: const Text('Reject',
-                        style: TextStyle(color: AppColors.danger, fontSize: 12.5)),
+                    icon: const Icon(Icons.close_rounded, size: 16),
+                    label: const Text('Reject'),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 40),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      textStyle: const TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
                     onPressed: _busy ? null : () => _act(true),
-                    icon: const Icon(Icons.check_rounded, size: 15),
-                    label: const Text('Approve', style: TextStyle(fontSize: 12.5)),
+                    icon: const Icon(Icons.check_rounded, size: 16),
+                    label: const Text('Approve'),
                   ),
                 ),
               ],
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One key / value line inside a card (hairline rule above, except first).
+class _KvRow extends StatelessWidget {
+  const _KvRow(this.k, this.v, {this.divider = true});
+
+  final String k;
+  final String v;
+  final bool divider;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(top: divider ? 8 : 0, bottom: 8),
+      decoration: BoxDecoration(
+        border: divider
+            ? const Border(top: BorderSide(color: Color(0xFFE9EEEF)))
+            : null,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(k,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.inkSoft)),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(v,
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.muted,
+                    fontFeatures: [FontFeature.tabularFigures()])),
+          ),
         ],
       ),
     );
@@ -432,7 +518,7 @@ class _BalanceRow extends StatelessWidget {
     final fraction =
         total == null || total <= 0 ? null : (used / total).clamp(0.0, 1.0);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(bottom: 9),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -443,8 +529,8 @@ class _BalanceRow extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
                         color: AppColors.inkSoft)),
               ),
               Text(
@@ -452,23 +538,16 @@ class _BalanceRow extends StatelessWidget {
                     ? '$remaining left'
                     : '$used used',
                 style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.primary),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primary,
+                    fontFeatures: const [FontFeature.tabularFigures()]),
               ),
             ],
           ),
           if (fraction != null) ...[
-            const SizedBox(height: 3),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: 1 - fraction,
-                minHeight: 5,
-                backgroundColor: AppColors.hairline,
-                valueColor: AlwaysStoppedAnimation(AppColors.primary),
-              ),
-            ),
+            const SizedBox(height: 5),
+            ProBar(value: 1 - fraction, height: 6, track: AppColors.hairline),
           ],
         ],
       ),
@@ -477,23 +556,48 @@ class _BalanceRow extends StatelessWidget {
 }
 
 class _Stat extends StatelessWidget {
-  const _Stat({required this.label, required this.value, required this.color});
+  const _Stat({
+    required this.label,
+    required this.value,
+    required this.color,
+    this.divider = false,
+  });
 
   final String label;
   final String value;
   final Color color;
 
+  /// Hairline on the left (every cell but the first).
+  final bool divider;
+
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: Column(
-        children: [
-          Text(value,
-              style: TextStyle(
-                  fontSize: 16, fontWeight: FontWeight.w800, color: color)),
-          Text(label,
-              style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
-        ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        decoration: BoxDecoration(
+          border: divider
+              ? const Border(left: BorderSide(color: AppColors.hairline))
+              : null,
+        ),
+        child: Column(
+          children: [
+            Text(value,
+                style: TextStyle(
+                    fontSize: 24,
+                    height: 1.17,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.5,
+                    color: color,
+                    fontFeatures: const [FontFeature.tabularFigures()])),
+            const SizedBox(height: 2),
+            Text(label,
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.muted)),
+          ],
+        ),
       ),
     );
   }

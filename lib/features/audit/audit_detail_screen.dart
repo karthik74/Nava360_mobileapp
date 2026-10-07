@@ -15,6 +15,7 @@ import '../../core/employee_lookup.dart';
 import '../../core/report_download.dart';
 import '../../core/text_formatters.dart';
 import '../../core/branding.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -128,44 +129,45 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
     }
   }
 
+  Future<void> _reload() async {
+    ref.invalidate(auditPlanProvider(widget.planId));
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(auditPlanProvider(widget.planId));
     final user = ref.watch(authUserProvider);
+    final loaded = async.valueOrNull;
+    final primary = loaded == null ? null : _actionSet(loaded, user).primary;
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: const Text('Audit Detail'),
-        backgroundColor: AppColors.surface,
-        foregroundColor: AppColors.ink,
-        elevation: 0,
-      ),
-      body: SafeArea(
-        child: RefreshIndicator(
-          color: AppColors.primary,
-          onRefresh: () async {
-            ref.invalidate(auditPlanProvider(widget.planId));
-            await Future<void>.delayed(const Duration(milliseconds: 250));
-          },
-          child: async.when(
-            loading: () => ListView(
-              padding: const EdgeInsets.all(16),
-              children: const [AppLoadingBlock(height: 280)],
-            ),
-            error: (e, __) => ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                AppErrorPanel(
-                  message: 'Could not load this audit.\n$e',
-                  onRetry: () => ref.invalidate(auditPlanProvider(widget.planId)),
-                ),
-              ],
-            ),
-            data: (plan) => _body(plan, user),
-          ),
+      appBar: AppBar(title: const Text('Audit detail')),
+      body: async.when(
+        loading: () => ProPage(
+          onRefresh: _reload,
+          children: const [AppLoadingBlock(height: 280)],
         ),
+        error: (e, __) => ProPage(
+          onRefresh: _reload,
+          children: [
+            AppErrorPanel(
+              message: 'Could not load this audit.\n$e',
+              onRetry: () => ref.invalidate(auditPlanProvider(widget.planId)),
+            ),
+          ],
+        ),
+        data: (plan) => _body(plan, user),
       ),
+      bottomNavigationBar: (loaded == null || primary == null)
+          ? null
+          : ProBottomBar(children: [
+              FilledButton.icon(
+                onPressed: _busy ? null : () => _startOrContinue(loaded),
+                icon: const Icon(Icons.play_circle_fill_rounded, size: 18),
+                label: Text(primary),
+              ),
+            ]),
     );
   }
 
@@ -204,20 +206,26 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
     }
   }
 
-  Widget _reportsCard(AuthUser? user) {
+  ({bool excel, bool pdf}) _reportPerms(AuthUser? user) {
     bool has(List<String> p) => p.any((x) => user?.hasPermission(x) ?? false);
-    final canExcel =
-        has(const ['AUDIT_REPORT_DOWNLOAD', 'AUDIT_EXPORT_EXCEL', 'AUDIT_ADMIN']);
-    final canPdf =
-        has(const ['AUDIT_REPORT_DOWNLOAD', 'AUDIT_EXPORT_PDF', 'AUDIT_ADMIN']);
-    if (!canExcel && !canPdf) return const SizedBox.shrink();
+    return (
+      excel: has(const ['AUDIT_REPORT_DOWNLOAD', 'AUDIT_EXPORT_EXCEL', 'AUDIT_ADMIN']),
+      pdf: has(const ['AUDIT_REPORT_DOWNLOAD', 'AUDIT_EXPORT_PDF', 'AUDIT_ADMIN']),
+    );
+  }
+
+  Widget? _reportsCard(AuthUser? user) {
+    final perms = _reportPerms(user);
+    final canExcel = perms.excel;
+    final canPdf = perms.pdf;
+    if (!canExcel && !canPdf) return null;
     final history = ref.watch(_reportHistoryProvider(widget.planId));
-    return Padding(
-      padding: const EdgeInsets.only(top: 14),
-      child: AuditSectionCard(
-        title: 'Reports',
-        icon: Icons.download_rounded,
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const ProSectionHeader(title: 'Reports'),
+          const SizedBox(height: 12),
           Row(children: [
             if (canExcel)
               Expanded(
@@ -237,21 +245,20 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
                 ),
               ),
           ]),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           history.when(
             loading: () => const SizedBox.shrink(),
             error: (_, __) => const SizedBox.shrink(),
             data: (rows) => rows.isEmpty
-                ? const Text('No reports generated yet.',
-                    style: TextStyle(fontSize: 12, color: AppColors.muted))
+                ? const Text('No reports generated yet.', style: AppText.caption)
                 : Column(children: [
                     for (final r in rows)
                       Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        padding: const EdgeInsets.symmetric(vertical: 5),
                         child: Row(children: [
-                          const Icon(Icons.insert_drive_file_outlined,
-                              size: 15, color: AppColors.muted),
-                          const SizedBox(width: 6),
+                          const ProIconWell(
+                              icon: Icons.insert_drive_file_outlined, size: 30),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               (r['fileName'] ??
@@ -260,12 +267,14 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                  fontSize: 12, color: AppColors.ink),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: AppColors.ink),
                             ),
                           ),
+                          const SizedBox(width: 8),
                           Text(_fmt(r['generatedAt']?.toString()) ?? '',
-                              style: const TextStyle(
-                                  fontSize: 11, color: AppColors.muted)),
+                              style: AppText.caption),
                         ]),
                       ),
                   ]),
@@ -290,95 +299,211 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
     );
   }
 
+  void _openFindings(AuditPlan plan) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => FindingsListScreen(executionId: plan.executionId!),
+    ));
+  }
+
+  // ── Hero helpers ───────────────────────────────────────────────────────────
+
+  String _liveText(AuditPlan p) {
+    final a = p.assignedAuditorName;
+    final s = _fmt(p.plannedStartDate);
+    final e = _fmt(p.plannedEndDate);
+    final window = (s == null && e == null) ? null : '${s ?? '—'} → ${e ?? '—'}';
+    if (a == null || a.isEmpty) {
+      return window == null
+          ? 'No auditor assigned yet'
+          : 'No auditor assigned · planned $window';
+    }
+    return window == null ? 'Auditor $a' : '$a · planned $window';
+  }
+
+  Color _liveColor(AuditPlan p) {
+    final c = auditStatusTone(p.status).color;
+    if (c == AppColors.danger) return const Color(0xFFE5484D);
+    if (c == AppColors.warning || c == AppColors.pink) {
+      return const Color(0xFFF2B347);
+    }
+    if (c == AppColors.muted) return Colors.white54;
+    return AppColors.live;
+  }
+
+  /// "Day 3/7" through the planned window (derived from the plan dates).
+  ProKpi _windowKpi(AuditPlan p) {
+    DateTime? parse(String? v) =>
+        (v == null || v.isEmpty) ? null : DateTime.tryParse(v);
+    final s = parse(p.plannedStartDate);
+    final e = parse(p.plannedEndDate);
+    if (s == null || e == null) {
+      return const ProKpi(value: '—', label: 'Planned window');
+    }
+    final today = DateUtils.dateOnly(DateTime.now());
+    final start = DateUtils.dateOnly(s);
+    final end = DateUtils.dateOnly(e);
+    final total = end.difference(start).inDays + 1;
+    if (total <= 0) return const ProKpi(value: '—', label: 'Planned window');
+    if (today.isBefore(start)) {
+      return ProKpi(
+        value: '${start.difference(today).inDays}d',
+        label: 'Until planned start',
+        progress: 0,
+      );
+    }
+    if (today.isAfter(end)) {
+      return ProKpi(
+        value: '$total ${total == 1 ? 'day' : 'days'}',
+        label: 'Planned window · ended',
+        progress: 1,
+      );
+    }
+    final n = today.difference(start).inDays + 1;
+    return ProKpi(
+      value: 'Day $n/$total',
+      label: 'Planned window',
+      progress: n / total,
+    );
+  }
+
   Widget _body(AuditPlan plan, AuthUser? user) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+    final st = auditStatusTone(plan.status);
+    final tone = auditScoreTone(plan.finalScore);
+    final set = _actionSet(plan, user);
+    final perms = _reportPerms(user);
+    final reports = _reportsCard(user);
+    final reportCount = (perms.excel || perms.pdf)
+        ? ref.watch(_reportHistoryProvider(widget.planId)).valueOrNull?.length
+        : null;
+    final idLine = [
+      if ((plan.code ?? '').isNotEmpty) plan.code!,
+      if ((plan.branchName ?? '').isNotEmpty) plan.branchName!,
+    ].join(' · ');
+
+    return ProPage(
+      onRefresh: _reload,
+      hero: ProHero(
+        overlap: ProKpiStrip(cells: [
+          ProKpi(
+            value: auditPct(plan.finalScore),
+            label: plan.finalScore == null
+                ? 'Score · not yet scored'
+                : ((plan.grade ?? '').isNotEmpty
+                    ? 'Score · grade ${plan.grade}'
+                    : 'Score'),
+            progress: ((plan.finalScore ?? 0) / 100).clamp(0.0, 1.0).toDouble(),
+            color: tone,
+            valueColor: plan.finalScore == null ? null : auditInk(tone),
+          ),
+          _windowKpi(plan),
+          if (perms.excel || perms.pdf)
+            ProKpi(
+              value: reportCount == null ? '—' : '$reportCount',
+              label: 'Reports generated',
+            )
+          else
+            ProKpi(value: plan.riskFlag ?? '—', label: 'Risk flag'),
+        ]),
+        children: [
+          ProHeroIdentity(
+            name: plan.title ?? plan.code ?? 'Audit',
+            role: idLine.isEmpty ? null : idLine,
+            icon: Icons.fact_check_rounded,
+            tags: [
+              ProHeroTag(st.label, tone: auditTagTone(st.color)),
+              if ((plan.grade ?? '').isNotEmpty)
+                ProHeroTag('Grade ${plan.grade}', tone: auditTagTone(tone)),
+            ],
+          ),
+          ProLiveLine(text: _liveText(plan), color: _liveColor(plan)),
+          ProHeroActions(actions: [
+            if (set.primary != null)
+              ProAction(
+                icon: Icons.play_arrow_rounded,
+                label: plan.status == 'ASSIGNED' ? 'Start' : 'Continue',
+                primary: true,
+                onTap: _busy ? null : () => _startOrContinue(plan),
+              ),
+            ProAction(
+              icon: Icons.report_problem_outlined,
+              label: 'Findings',
+              onTap: plan.executionId == null ? null : () => _openFindings(plan),
+            ),
+            if (perms.excel)
+              ProAction(
+                icon: Icons.table_chart_outlined,
+                label: 'Excel',
+                onTap: _busy ? null : _downloadExcel,
+              ),
+            if (perms.pdf)
+              ProAction(
+                icon: Icons.picture_as_pdf_outlined,
+                label: 'PDF',
+                onTap: _busy ? null : _downloadPdf,
+              ),
+          ]),
+        ],
+      ),
       children: [
-        _Header(plan: plan),
-        const SizedBox(height: 14),
-        AuditSectionCard(
-          title: 'Plan details',
-          icon: Icons.assignment_rounded,
-          children: [
-            AuditKeyValueRow(label: 'Code', value: plan.code ?? '—'),
-            AuditKeyValueRow(
-                label: Branding.current.term('branch'),
-                value: plan.branchName ?? '—'),
-            AuditKeyValueRow(
-                label: 'Template', value: plan.templateName ?? '—'),
-            AuditKeyValueRow(
-                label: 'Auditor', value: plan.assignedAuditorName ?? '—'),
-            AuditKeyValueRow(
-              label: 'Planned',
-              value:
+        GlassCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const ProSectionHeader(title: 'Plan details'),
+              const SizedBox(height: 4),
+              ProKeyValue(rows: [
+                MapEntry('Code', plan.code ?? '—'),
+                MapEntry(Branding.current.term('branch'), plan.branchName ?? '—'),
+                MapEntry('Template', plan.templateName ?? '—'),
+                MapEntry('Auditor', plan.assignedAuditorName ?? '—'),
+                MapEntry(
+                  'Planned',
                   '${_fmt(plan.plannedStartDate) ?? '—'} → ${_fmt(plan.plannedEndDate) ?? '—'}',
-            ),
-            AuditKeyValueRow(
-              label: 'Period',
-              value:
+                ),
+                MapEntry(
+                  'Period',
                   '${_fmt(plan.periodFrom) ?? '—'} → ${_fmt(plan.periodTo) ?? '—'}',
-            ),
-            if ((plan.riskFlag ?? '').isNotEmpty)
-              AuditKeyValueRow(label: 'Risk flag', value: plan.riskFlag!),
-          ],
-        ),
-        const SizedBox(height: 14),
-        // Findings link.
-        InkWell(
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-          onTap: plan.executionId == null
-              ? null
-              : () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) =>
-                        FindingsListScreen(executionId: plan.executionId!),
-                  )),
-          child: GlassCard(
-            padding: const EdgeInsets.all(14),
-            shadow: AppShadows.soft,
-            child: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: AppColors.warning.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                        color: AppColors.warning.withValues(alpha: 0.24)),
-                  ),
-                  child: const Icon(Icons.report_problem_rounded,
-                      size: 19, color: AppColors.warning),
                 ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    'Findings',
-                    style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.ink,
-                    ),
-                  ),
-                ),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: plan.executionId == null
-                      ? AppColors.muted.withValues(alpha: 0.4)
-                      : AppColors.muted,
-                ),
-              ],
-            ),
+                if ((plan.riskFlag ?? '').isNotEmpty)
+                  MapEntry('Risk flag', plan.riskFlag!),
+              ]),
+            ],
           ),
         ),
-        _reportsCard(user),
-        const SizedBox(height: 18),
-        ..._actions(plan, user),
+        // Findings link.
+        ProListGroup(children: [
+          ProListRow(
+            leading: const ProIconWell(
+              icon: Icons.report_problem_rounded,
+              color: AppColors.warning,
+            ),
+            title: 'Findings',
+            subtitle: 'Raised for every “No” when the audit is submitted',
+            onTap: plan.executionId == null ? null : () => _openFindings(plan),
+          ),
+        ]),
+        if (reports != null) reports,
+        if (set.others.isNotEmpty)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const ProSectionHeader(title: 'Actions', small: true),
+              const SizedBox(height: 10),
+              for (var i = 0; i < set.others.length; i++) ...[
+                if (i > 0) const SizedBox(height: 10),
+                set.others[i],
+              ],
+            ],
+          ),
       ],
     );
   }
 
-  List<Widget> _actions(AuditPlan plan, AuthUser? user) {
+  /// Workflow actions for the signed-in user. [primary] is the Start /
+  /// Continue label (shown in the hero and the bottom bar); `others` are the
+  /// remaining buttons, in the same order as before.
+  ({String? primary, List<Widget> others}) _actionSet(
+      AuditPlan plan, AuthUser? user) {
     final status = plan.status;
     // Same gates as the web plan-detail page (AuditPlanDetailPage.tsx).
     bool has(List<String> p) => p.any((x) => user?.hasPermission(x) ?? false);
@@ -393,18 +518,14 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
     final canSupervisorApprove =
         has(const ['AUDIT_SUPERVISOR_APPROVE', 'AUDIT_ADMIN']);
 
+    String? primary;
     final btns = <Widget>[];
 
     // Web shows Start/Continue only for ASSIGNED, IN_PROGRESS and REOPENED.
     final isFillable = status == 'IN_PROGRESS' || status == 'REOPENED';
 
     if (canPerform && (isFillable || status == 'ASSIGNED')) {
-      btns.add(_PrimaryAction(
-        label: status == 'ASSIGNED' ? 'Start audit' : 'Continue audit',
-        icon: Icons.play_circle_fill_rounded,
-        busy: _busy,
-        onTap: () => _startOrContinue(plan),
-      ));
+      primary = status == 'ASSIGNED' ? 'Start audit' : 'Continue audit';
     }
 
     if (canAssign &&
@@ -521,12 +642,7 @@ class _AuditDetailScreenState extends ConsumerState<AuditDetailScreen> {
       ));
     }
 
-    if (btns.isEmpty) return const [];
-    return [
-      const AppSectionHeader(title: 'Actions'),
-      const SizedBox(height: 10),
-      for (final b in btns) ...[b, const SizedBox(height: 10)],
-    ];
+    return (primary: primary, others: btns);
   }
 }
 
@@ -564,17 +680,12 @@ class _AuditorPickerSheetState extends ConsumerState<_AuditorPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-          16, 16, 16, MediaQuery.of(context).viewInsets.bottom + 16),
+    return AuditSheet(
+      title: 'Select auditor',
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Select auditor',
-              style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.ink)),
-          const SizedBox(height: 10),
           TextField(
             controller: _ctrl,
             autofocus: true,
@@ -584,7 +695,7 @@ class _AuditorPickerSheetState extends ConsumerState<_AuditorPickerSheet> {
             ),
             onChanged: _search,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           if (_future != null)
             FutureBuilder<List<EmployeeLookup>>(
               future: _future,
@@ -599,113 +710,35 @@ class _AuditorPickerSheetState extends ConsumerState<_AuditorPickerSheet> {
                       padding: const EdgeInsets.all(8),
                       child: Text('${snap.error}',
                           style: const TextStyle(
-                              fontSize: 12, color: AppColors.danger)));
+                              fontSize: 13, color: AppColors.danger)));
                 }
                 final list = snap.data ?? const [];
                 if (list.isEmpty) {
                   return const Padding(
                       padding: EdgeInsets.all(8),
-                      child: Text('No matching auditors',
-                          style:
-                              TextStyle(fontSize: 12, color: AppColors.muted)));
+                      child: Text('No matching auditors', style: AppText.caption));
                 }
                 return ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 260),
-                  child: ListView(shrinkWrap: true, children: [
-                    for (final e in list)
-                      ListTile(
-                        dense: true,
-                        title: Text(e.label, style: const TextStyle(fontSize: 13)),
-                        onTap: () => Navigator.pop(context, e),
-                      ),
-                  ]),
+                  constraints: const BoxConstraints(maxHeight: 300),
+                  child: SingleChildScrollView(
+                    child: ProListGroup(
+                      children: [
+                        for (final e in list)
+                          ProListRow(
+                            leading: ProAvatar(name: e.name, size: 36),
+                            title: e.name,
+                            subtitle: (e.code ?? '').isEmpty ? null : e.code,
+                            chevron: false,
+                            dense: true,
+                            onTap: () => Navigator.pop(context, e),
+                          ),
+                      ],
+                    ),
+                  ),
                 );
               },
             ),
         ],
-      ),
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  const _Header({required this.plan});
-  final AuditPlan plan;
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassCard(
-      shadow: AppShadows.card,
-      child: Row(
-        children: [
-          AuditScoreRing(score: plan.finalScore, size: 68, label: 'Score'),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  plan.title ?? plan.code ?? 'Audit',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  [
-                    if ((plan.code ?? '').isNotEmpty) plan.code!,
-                    if ((plan.branchName ?? '').isNotEmpty) plan.branchName!,
-                  ].join(' · '),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.muted,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    AuditStatusChip(status: plan.status),
-                    if ((plan.grade ?? '').isNotEmpty) ...[
-                      const SizedBox(width: 6),
-                      StatusPill(
-                        label: 'Grade ${plan.grade}',
-                        color: AppColors.primary,
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PrimaryAction extends StatelessWidget {
-  const _PrimaryAction({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-    this.busy = false,
-  });
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-  final bool busy;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: FilledButton.icon(
-        onPressed: busy ? null : onTap,
-        icon: Icon(icon, size: 18),
-        label: Text(label),
       ),
     );
   }
@@ -752,13 +785,13 @@ class _DangerAction extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
-      child: OutlinedButton.icon(
+      child: FilledButton.icon(
         onPressed: busy ? null : onTap,
-        icon: Icon(icon, size: 18, color: AppColors.danger),
-        style: OutlinedButton.styleFrom(
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.dangerTint,
           foregroundColor: AppColors.danger,
-          side: BorderSide(color: AppColors.danger.withValues(alpha: 0.5)),
         ),
+        icon: Icon(icon, size: 18),
         label: Text(label),
       ),
     );

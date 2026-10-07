@@ -13,6 +13,9 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/pro_ui.dart';
+import '../../core/theme.dart';
+
 /// A finished recording: the file on disk and how long it ran.
 class NpVideoTake {
   const NpVideoTake({required this.path, required this.durationSec});
@@ -182,7 +185,11 @@ class _NpVerificationVideoScreenState extends State<NpVerificationVideoScreen> {
         content: const Text('This video will be discarded.'),
         actions: [
           TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Keep recording')),
-          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Discard')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.dangerTint, foregroundColor: AppColors.danger),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Discard'),
+          ),
         ],
       ),
     );
@@ -219,15 +226,20 @@ class _NpVerificationVideoScreenState extends State<NpVerificationVideoScreen> {
         if (!didPop) _confirmLeave();
       },
       child: Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor: AppColors.deep,
         appBar: AppBar(
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          title: const Text('Verification video', style: TextStyle(fontSize: 16)),
-          leading: IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: _recording ? _confirmLeave : () => Navigator.of(context).pop(),
+          title: const Text('Verification video'),
+          automaticallyImplyLeading: false,
+          leadingWidth: 64,
+          leading: Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: Center(
+              child: ProHeroIconButton(
+                icon: Icons.close_rounded,
+                tooltip: 'Close',
+                onTap: _recording ? _confirmLeave : () => Navigator.of(context).pop(),
+              ),
+            ),
           ),
         ),
         body: SafeArea(child: _body()),
@@ -240,14 +252,25 @@ class _NpVerificationVideoScreenState extends State<NpVerificationVideoScreen> {
     if (_initError != null) {
       return Padding(
         padding: const EdgeInsets.all(24),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          const Icon(Icons.videocam_off_outlined, color: Colors.white54, size: 48),
-          const SizedBox(height: 12),
-          Text(_initError!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Center(
+            child: Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+              ),
+              child: const Icon(Icons.videocam_off_outlined, color: Colors.white70, size: 30),
+            ),
+          ),
           const SizedBox(height: 16),
-          OutlinedButton(
+          Text(_initError!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 14.5, height: 1.45, color: Colors.white70)),
+          const SizedBox(height: 20),
+          FilledButton(
             onPressed: openAppSettings,
-            style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+            style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: AppColors.deep),
             child: const Text('Open settings'),
           ),
         ]),
@@ -275,37 +298,51 @@ class _NpVerificationVideoScreenState extends State<NpVerificationVideoScreen> {
             right: 12,
             top: 12,
             child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.deep.withValues(alpha: 0.78),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+              ),
               child: Text(
                 _recording
                     ? 'Ask ${widget.candidateName} to state their name, confirm they have read and signed the '
                         'agreement, and that they have handed over two post-dated cheques.'
                     : 'Keep ${widget.candidateName}\'s face in frame and record in a quiet place. '
                         'Tap the red button to start.',
-                style: const TextStyle(color: Colors.white, fontSize: 13.5, height: 1.35),
+                style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.45),
               ),
             ),
           ),
         ]),
       ),
       Container(
-        color: Colors.black,
-        padding: const EdgeInsets.fromLTRB(24, 14, 24, 20),
+        color: AppColors.deep,
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
         child: Row(children: [
           Expanded(
             child: _recording
                 ? Row(children: [
-                    const Icon(Icons.fiber_manual_record, color: Colors.redAccent, size: 14),
-                    const SizedBox(width: 6),
-                    Text(_clock(seconds), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+                    const ProPulseDot(color: Color(0xFFE5484D)),
+                    const SizedBox(width: 4),
+                    Text(_clock(seconds),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        )),
                     if (remaining <= 30) ...[
                       const SizedBox(width: 8),
-                      Text('${remaining}s left', style: const TextStyle(color: Colors.orangeAccent, fontSize: 12)),
+                      Flexible(
+                        child: Text('${remaining}s left',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Color(0xFFFFD690), fontSize: 12.5, fontWeight: FontWeight.w600)),
+                      ),
                     ],
                   ])
                 : const Text('Up to ${NpVerificationVideoScreen.kMaxSeconds ~/ 60} min',
-                    style: TextStyle(color: Colors.white54, fontSize: 12.5)),
+                    style: TextStyle(color: Colors.white60, fontSize: 13)),
           ),
           GestureDetector(
             onTap: _recording ? _stop : _start,
@@ -319,8 +356,8 @@ class _NpVerificationVideoScreenState extends State<NpVerificationVideoScreen> {
                 width: _recording ? 28 : 56,
                 height: _recording ? 28 : 56,
                 decoration: BoxDecoration(
-                  color: Colors.redAccent,
-                  borderRadius: BorderRadius.circular(_recording ? 6 : 28),
+                  color: const Color(0xFFE5484D),
+                  borderRadius: BorderRadius.circular(_recording ? 7 : 28),
                 ),
               ),
             ),
@@ -328,12 +365,13 @@ class _NpVerificationVideoScreenState extends State<NpVerificationVideoScreen> {
           Expanded(
             child: Align(
               alignment: Alignment.centerRight,
-              child: IconButton(
-                onPressed: _recording || _cameras.length < 2 ? null : _flip,
-                icon: const Icon(Icons.cameraswitch_rounded),
-                color: Colors.white,
-                disabledColor: Colors.white24,
-                tooltip: 'Switch camera',
+              child: Opacity(
+                opacity: _recording || _cameras.length < 2 ? 0.35 : 1,
+                child: ProHeroIconButton(
+                  icon: Icons.cameraswitch_rounded,
+                  tooltip: 'Switch camera',
+                  onTap: _recording || _cameras.length < 2 ? null : _flip,
+                ),
               ),
             ),
           ),

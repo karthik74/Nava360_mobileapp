@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
+import '../../core/pro_ui.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import 'mail_models.dart';
@@ -125,154 +126,178 @@ class _MailComplaintScreenState extends ConsumerState<MailComplaintScreen> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) Navigator.of(context).pop(_changed);
       },
-      child: GlassBackdrop(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(
-            title: Text(c?.subject ?? 'Complaint'),
-            backgroundColor: AppColors.surface,
-            foregroundColor: AppColors.ink,
-            elevation: 0.5,
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded),
-              onPressed: () => Navigator.of(context).pop(_changed),
-            ),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Complaint'),
+          leading: IconButton(
+            tooltip: 'Back',
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => Navigator.of(context).pop(_changed),
           ),
-          body: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : c == null
-                  ? Center(child: AppErrorPanel(message: _error ?? 'Complaint not found.', onRetry: _load))
-                  : ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        GlassCard(
-                          padding: const EdgeInsets.all(16),
-                          shadow: AppShadows.soft,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(c.subject,
-                                        style: const TextStyle(
-                                            fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink)),
-                                  ),
-                                  StatusPill(
-                                    label: mailComplaintStatusTone(c.status).label,
-                                    color: mailComplaintStatusTone(c.status).color,
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Text('${c.branchLabel} · ${c.department ?? 'No department'}',
-                                  style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
-                              const Divider(height: 22),
-                              _kv('Date', c.date == null ? '—' : df.format(c.date!)),
-                              if (c.content != null && c.content!.isNotEmpty) _kv('Details', c.content!),
-                              if (c.raisedByName != null) _kv('Raised by', c.raisedByName!),
-                              if (c.raisedByCode != null) _kv('Employee code', c.raisedByCode!),
-                              _kv('Branch', c.branchLabel),
-                              if (c.areaName != null) _kv('Area', c.areaName!),
-                              if (c.divisionName != null) _kv('Division', c.divisionName!),
-                              if (c.regionName != null) _kv('Region', c.regionName!),
-                              if (c.stateName != null) _kv('State', c.stateName!),
-                              if (c.phone != null && c.phone!.isNotEmpty) _kv('Phone', c.phone!),
-                              if (c.resolutionNote != null && c.resolutionNote!.isNotEmpty)
-                                _kv(c.status == MailComplaintStatus.rejected ? 'Rejected' : 'Resolution', '${c.resolutionNote!}${c.resolvedBy == null ? '' : ' — ${c.resolvedBy}'}'),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        if (_canResolve) ...[
-                          const AppSectionHeader(title: 'Update status'),
-                          const SizedBox(height: 10),
-                          if (c.allowedNext.isEmpty)
-                            const Text('This complaint is closed.',
-                                style: TextStyle(fontSize: 12.5, color: AppColors.muted))
-                          else
-                            Wrap(
-                              spacing: 10,
-                              runSpacing: 10,
-                              children: [
-                                for (final s in c.allowedNext) _statusButton(s, () => _changeStatus(s)),
-                              ],
-                            ),
-                        ] else
-                          const Text('Only an admin can update the status. You will be notified when it changes.',
-                              style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
-                        const SizedBox(height: 24),
-                        const AppSectionHeader(title: 'History'),
-                        const SizedBox(height: 10),
-                        if (_history == null || _history!.isEmpty)
-                          const AppEmptyState(icon: Icons.history_rounded, message: 'No status changes recorded.')
-                        else
-                          GlassCard(
-                            padding: EdgeInsets.zero,
-                            shadow: AppShadows.soft,
-                            child: Column(
-                              children: [
-                                for (int i = 0; i < _history!.length; i++) ...[
-                                  if (i > 0) const Divider(height: 1),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          _history![i].fromStatus == null
-                                              ? _history![i].action
-                                              : '${_history![i].fromStatus} → ${_history![i].toStatus}',
-                                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-                                        ),
-                                        if (_history![i].note != null && _history![i].note!.isNotEmpty) ...[
-                                          const SizedBox(height: 2),
-                                          Text(_history![i].note!,
-                                              style: const TextStyle(fontSize: 12, color: AppColors.inkSoft)),
-                                        ],
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          '${_history![i].byUser ?? 'system'} · ${_history![i].createdAt == null ? '—' : dfTime.format(_history![i].createdAt!)}',
-                                          style: const TextStyle(fontSize: 11, color: AppColors.muted),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        const SizedBox(height: 24),
-                      ],
-                    ),
         ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : c == null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: AppErrorPanel(message: _error ?? 'Complaint not found.', onRetry: _load),
+                    ),
+                  )
+                : _content(c, df, dfTime),
       ),
     );
   }
 
-  Widget _kv(String k, String v) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(width: 110, child: Text(k, style: const TextStyle(fontSize: 12, color: AppColors.muted))),
-            Expanded(
-                child: Text(v,
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.ink))),
-          ],
+  Widget _content(MailComplaint c, DateFormat df, DateFormat dfTime) {
+    final tone = mailComplaintStatusTone(c.status);
+    final tagTone = switch (c.status) {
+      MailComplaintStatus.resolved => ProTagTone.ok,
+      MailComplaintStatus.rejected => ProTagTone.bad,
+      MailComplaintStatus.inProgress => ProTagTone.neutral,
+      _ => ProTagTone.warn,
+    };
+    final hasNote = c.resolutionNote != null && c.resolutionNote!.isNotEmpty;
+    final line = hasNote
+        ? '${c.status == MailComplaintStatus.rejected ? 'Rejected' : 'Resolution'}: ${c.resolutionNote!}${c.resolvedBy == null ? '' : ' — ${c.resolvedBy}'}'
+        : 'Raised${c.date == null ? '' : ' on ${df.format(c.date!)}'}${c.raisedByName == null ? '' : ' by ${c.raisedByName}'}';
+    final lineColor = switch (c.status) {
+      MailComplaintStatus.resolved => AppColors.live,
+      MailComplaintStatus.rejected => const Color(0xFFE5484D),
+      MailComplaintStatus.inProgress => const Color(0xFF9FCBD5),
+      _ => const Color(0xFFF2B347),
+    };
+    final history = _history ?? const <MailComplaintLog>[];
+
+    return ProPage(
+      onRefresh: _load,
+      hero: ProHero(
+        children: [
+          ProHeroIdentity(
+            name: c.subject,
+            role: '${c.branchLabel} · ${c.department ?? 'No department'}',
+            icon: mailComplaintIcon,
+            tags: [
+              ProHeroTag(tone.label, tone: tagTone),
+              if (c.date != null) ProHeroTag(df.format(c.date!), icon: Icons.event_rounded),
+            ],
+          ),
+          ProLiveLine(text: line, color: lineColor),
+        ],
+      ),
+      children: [
+        GlassCard(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const ProSectionHeader(title: 'Complaint'),
+              const SizedBox(height: 4),
+              ProKeyValue(rows: [
+                MapEntry('Date', c.date == null ? '—' : df.format(c.date!)),
+                if (c.raisedByName != null) MapEntry('Raised by', c.raisedByName!),
+                if (c.raisedByCode != null) MapEntry('Employee code', c.raisedByCode!),
+                MapEntry('Branch', c.branchLabel),
+                if (c.areaName != null) MapEntry('Area', c.areaName!),
+                if (c.divisionName != null) MapEntry('Division', c.divisionName!),
+                if (c.regionName != null) MapEntry('Region', c.regionName!),
+                if (c.stateName != null) MapEntry('State', c.stateName!),
+                if (c.phone != null && c.phone!.isNotEmpty) MapEntry('Phone', c.phone!),
+                if (hasNote)
+                  MapEntry(c.status == MailComplaintStatus.rejected ? 'Rejected' : 'Resolution',
+                      '${c.resolutionNote!}${c.resolvedBy == null ? '' : ' — ${c.resolvedBy}'}'),
+              ]),
+              if (c.content != null && c.content!.isNotEmpty) ...[
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Details',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: AppColors.muted)),
+                      const SizedBox(height: 4),
+                      Text(c.content!, style: const TextStyle(fontSize: 14.5, height: 1.45, color: AppColors.ink)),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
-      );
+        GlassCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const ProSectionHeader(title: 'Update status'),
+              const SizedBox(height: 12),
+              if (!_canResolve)
+                const ProNote('Only an admin can update the status. You will be notified when it changes.',
+                    tone: ProNoteTone.info)
+              else if (c.allowedNext.isEmpty)
+                const ProNote('This complaint is closed.')
+              else
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    for (final s in c.allowedNext) _statusButton(s, () => _changeStatus(s)),
+                  ],
+                ),
+            ],
+          ),
+        ),
+        ProSectionHeader(title: 'History', subtitle: history.isEmpty ? null : '${history.length} changes'),
+        if (history.isEmpty)
+          const ProEmpty(icon: Icons.history_rounded, title: 'No status changes recorded.')
+        else
+          ProListGroup(
+            children: [
+              for (final h in history)
+                ProListRow(
+                  chevron: false,
+                  leading: ProIconWell(
+                    icon: h.fromStatus == null ? Icons.flag_outlined : Icons.swap_horiz_rounded,
+                    color: h.toStatus == null
+                        ? AppColors.primary
+                        : mailComplaintStatusTone(h.toStatus!).color,
+                  ),
+                  title: h.fromStatus == null
+                      ? h.action
+                      : '${mailComplaintStatusLabel(h.fromStatus!)} → ${h.toStatus == null ? '—' : mailComplaintStatusLabel(h.toStatus!)}',
+                  subtitle: h.note != null && h.note!.isNotEmpty ? h.note : null,
+                  meta: '${h.byUser ?? 'system'} · ${h.createdAt == null ? '—' : dfTime.format(h.createdAt!)}',
+                ),
+            ],
+          ),
+      ],
+    );
+  }
 
   Widget _statusButton(String status, VoidCallback onTap) {
     final tone = mailComplaintStatusTone(status);
-    return FilledButton.icon(
+    final destructive = status == MailComplaintStatus.rejected;
+    if (destructive) {
+      return FilledButton.icon(
+        onPressed: _busy ? null : onTap,
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.dangerTint,
+          foregroundColor: AppColors.danger,
+        ),
+        icon: const Icon(Icons.close_rounded, size: 17),
+        label: Text(tone.label),
+      );
+    }
+    if (status == MailComplaintStatus.resolved) {
+      return FilledButton.icon(
+        onPressed: _busy ? null : onTap,
+        icon: const Icon(Icons.check_rounded, size: 17),
+        label: Text(tone.label),
+      );
+    }
+    return OutlinedButton.icon(
       onPressed: _busy ? null : onTap,
-      style: FilledButton.styleFrom(
-        backgroundColor: AppColors.surface,
-        foregroundColor: tone.color,
-        side: BorderSide(color: tone.color.withOpacity(0.4)),
-      ),
-      icon: Icon(Icons.arrow_forward_rounded, size: 16, color: tone.color),
+      icon: const Icon(Icons.arrow_forward_rounded, size: 17),
       label: Text(tone.label),
     );
   }

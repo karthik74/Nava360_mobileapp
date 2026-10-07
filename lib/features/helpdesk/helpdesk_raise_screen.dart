@@ -4,12 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
-import '../../core/widgets.dart';
 import 'helpdesk_dynamic_form.dart';
 import 'helpdesk_models.dart';
 import 'helpdesk_repository.dart';
+import 'helpdesk_tickets_screen.dart' show helpdeskStatusLabel;
 
 /// Raise a helpdesk ticket. Org context is attached server-side from the raiser.
 class HelpdeskRaiseScreen extends ConsumerStatefulWidget {
@@ -130,140 +131,305 @@ class _HelpdeskRaiseScreenState extends ConsumerState<HelpdeskRaiseScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-          title: const Text('Raise a Ticket'),
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _label('Title *'),
-            TextField(
-              controller: _title,
-              maxLength: 200,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
-              onChanged: _onTitleChanged,
-            ),
-            if (_suggestions.isNotEmpty)
-              Container(
-                margin: const EdgeInsets.only(top: 4),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+    final typeName = _ticketTypeId == null
+        ? null
+        : _types.where((t) => t.id == _ticketTypeId).map((t) => t.name).firstOrNull;
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: 'Raise a ticket',
+        subtitle: 'Helpdesk',
+        actions: [
+          IconButton(
+            tooltip: 'Knowledge base',
+            icon: const Icon(Icons.menu_book_outlined, size: 21),
+            onPressed: () => context.push('/helpdesk/kb'),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const ProSectionHeader(title: 'Ticket'),
+                const SizedBox(height: 12),
+                ProField(
+                  label: 'Title',
+                  required: true,
+                  child: TextField(
+                    controller: _title,
+                    maxLength: 200,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [TitleCaseTextFormatter()],
+                    onChanged: _onTitleChanged,
+                    decoration: const InputDecoration(
+                        hintText: 'e.g. Laptop battery drains within an hour'),
+                  ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('These articles might help:',
-                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: AppColors.primary)),
-                    const SizedBox(height: 4),
-                    for (final s in _suggestions)
-                      InkWell(
-                        onTap: () => context.push('/helpdesk/kb/${s.id}'),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 3),
-                          child: Text('• ${s.title}',
-                              style: TextStyle(fontSize: 12.5, color: AppColors.primary)),
-                        ),
-                      ),
-                  ],
+                if (_suggestions.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 2, bottom: 4),
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(AppRadii.md),
+                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.2)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('These articles might help',
+                            style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.primary)),
+                        const SizedBox(height: 4),
+                        for (final s in _suggestions)
+                          InkWell(
+                            onTap: () => context.push('/helpdesk/kb/${s.id}'),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.article_outlined,
+                                      size: 16, color: AppColors.primary),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(s.title,
+                                        style: TextStyle(
+                                            fontSize: 13.5,
+                                            fontWeight: FontWeight.w500,
+                                            color: AppColors.primary)),
+                                  ),
+                                  Icon(Icons.chevron_right_rounded,
+                                      size: 18, color: AppColors.primary),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 10),
+                ProField(
+                  label: 'Category',
+                  child: _categories.isNotEmpty
+                      ? DropdownButtonFormField<int>(
+                          value: _categoryId,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                              prefixIcon: Icon(Icons.category_outlined, size: 20)),
+                          hint: const Text('Select category'),
+                          items: [
+                            for (final c in _categories)
+                              DropdownMenuItem(
+                                  value: c.id,
+                                  child: Text(
+                                      c.departmentName != null
+                                          ? '${c.departmentName} · ${c.name}'
+                                          : c.name,
+                                      overflow: TextOverflow.ellipsis)),
+                          ],
+                          onChanged: (v) {
+                            setState(() => _categoryId = v);
+                            _loadTypes(v);
+                          },
+                        )
+                      : TextField(
+                          controller: _category,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: const [TitleCaseTextFormatter()],
+                          decoration: const InputDecoration(
+                              hintText: 'e.g. IT, Payroll, Attendance')),
                 ),
-              ),
-            _label('Category'),
-            if (_categories.isNotEmpty)
-              DropdownButtonFormField<int>(
-                value: _categoryId,
-                isExpanded: true,
-                decoration: const InputDecoration(prefixIcon: Icon(Icons.category_outlined, size: 20)),
-                hint: const Text('Select category'),
-                items: [
-                  for (final c in _categories)
-                    DropdownMenuItem(value: c.id,
-                        child: Text(c.departmentName != null ? '${c.departmentName} · ${c.name}' : c.name,
-                            overflow: TextOverflow.ellipsis)),
+                if (_types.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  ProField(
+                    label: 'Ticket type',
+                    child: DropdownButtonFormField<int>(
+                      value: _ticketTypeId,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.label_outline, size: 20)),
+                      hint: const Text('Select type'),
+                      items: [
+                        for (final t in _types)
+                          DropdownMenuItem(value: t.id, child: Text(t.name)),
+                      ],
+                      onChanged: (v) {
+                        setState(() => _ticketTypeId = v);
+                        _loadForm(v);
+                      },
+                    ),
+                  ),
                 ],
-                onChanged: (v) { setState(() => _categoryId = v); _loadTypes(v); },
-              )
-            else
-              TextField(controller: _category,
-                  textCapitalization: TextCapitalization.words,
-                  inputFormatters: const [TitleCaseTextFormatter()],
-                  decoration: const InputDecoration(hintText: 'e.g. IT, Payroll, Attendance')),
-            if (_types.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              _label('Ticket type'),
-              DropdownButtonFormField<int>(
-                value: _ticketTypeId,
-                isExpanded: true,
-                decoration: const InputDecoration(prefixIcon: Icon(Icons.label_outline, size: 20)),
-                hint: const Text('Select type'),
-                items: [for (final t in _types) DropdownMenuItem(value: t.id, child: Text(t.name))],
-                onChanged: (v) { setState(() => _ticketTypeId = v); _loadForm(v); },
-              ),
-            ],
-            if (_form != null && _form!.fields.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              _label('Additional details'),
-              HelpdeskDynamicForm(
-                fields: _form!.fields,
-                values: _formValues,
-                errors: _formErrors,
-                onChanged: (k, v) => setState(() => _formValues[k] = v),
-              ),
-            ],
-            const SizedBox(height: 12),
-            _label('Priority'),
-            DropdownButtonFormField<String>(
-              value: _priority,
-              isExpanded: true,
-              decoration: const InputDecoration(prefixIcon: Icon(Icons.flag_outlined, size: 20)),
-              items: [
-                for (final p in kHelpdeskPriorities) DropdownMenuItem(value: p, child: Text(p)),
               ],
-              onChanged: (v) => setState(() => _priority = v ?? 'MEDIUM'),
             ),
-            const SizedBox(height: 12),
-            _label('Description'),
-            TextField(
-              controller: _description,
-              minLines: 4,
-              maxLines: 8,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
-            ),
-            const SizedBox(height: 8),
-            const Text('Your branch, department, region and reporting manager are attached automatically.',
-                style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              AppErrorPanel(message: _error!),
-            ],
-            const SizedBox(height: 18),
-            SizedBox(
-              height: 50,
-              child: FilledButton(
-                onPressed: _saving ? null : _submit,
-                child: Text(_saving ? 'Submitting…' : 'Submit Ticket'),
+          ),
+          if (_form != null && _form!.fields.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            GlassCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ProSectionHeader(
+                    title: 'Additional details',
+                    trailing: typeName == null
+                        ? null
+                        : Flexible(
+                            child: Text(typeName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.right,
+                                style: AppText.caption),
+                          ),
+                  ),
+                  const SizedBox(height: 12),
+                  HelpdeskDynamicForm(
+                    fields: _form!.fields,
+                    values: _formValues,
+                    errors: _formErrors,
+                    onChanged: (k, v) => setState(() => _formValues[k] = v),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 24),
           ],
-        ),
+          const SizedBox(height: 14),
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const ProSectionHeader(title: 'Priority and description'),
+                const SizedBox(height: 12),
+                ProField(
+                  label: 'Priority',
+                  child: _PrioritySegmented(
+                    value: _priority,
+                    onChanged: (v) => setState(() => _priority = v),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                ProField(
+                  label: 'Description',
+                  child: TextField(
+                    controller: _description,
+                    minLines: 4,
+                    maxLines: 8,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [TitleCaseTextFormatter()],
+                    decoration: const InputDecoration(
+                        hintText: 'What happened, since when, and what you have already tried'),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const ProNote(
+                  'Your branch, department, region and reporting manager are attached automatically.',
+                  tone: ProNoteTone.info,
+                ),
+              ],
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 14),
+            ProNote(_error!, tone: ProNoteTone.bad),
+          ],
+        ],
+      ),
+      bottomNavigationBar: ProBottomBar(
+        children: [
+          OutlinedButton(
+            onPressed: _saving ? null : () => Navigator.of(context).maybePop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: _saving ? null : _submit,
+            child: Text(_saving ? 'Submitting…' : 'Submit ticket'),
+          ),
+        ],
       ),
     );
   }
+}
 
-  Widget _label(String t) => Padding(
-        padding: const EdgeInsets.only(bottom: 4, top: 4),
-        child: Text(t,
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
-      );
+/// Light segmented priority picker with tone dots (Low → Critical).
+class _PrioritySegmented extends StatelessWidget {
+  const _PrioritySegmented({required this.value, required this.onChanged});
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  static Color _dot(String p) => switch (p) {
+        'CRITICAL' => const Color(0xFFE5484D),
+        'HIGH' => const Color(0xFFF2B347),
+        'MEDIUM' => const Color(0xFF5AA9F0),
+        _ => const Color(0xFFB3C0C3),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 46,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFDBE3E5)),
+      ),
+      child: Row(
+        children: [
+          for (final p in kHelpdeskPriorities)
+            Expanded(
+              child: Semantics(
+                selected: p == value,
+                button: true,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => onChanged(p),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
+                    decoration: BoxDecoration(
+                      color: p == value ? AppColors.surface : Colors.transparent,
+                      borderRadius: BorderRadius.circular(9),
+                      boxShadow: p == value ? AppShadows.card : null,
+                      border: p == value ? Border.all(color: AppColors.hairline) : null,
+                    ),
+                    alignment: Alignment.center,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(color: _dot(p), shape: BoxShape.circle),
+                        ),
+                        const SizedBox(width: 5),
+                        Flexible(
+                          child: Text(
+                            helpdeskStatusLabel(p),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: p == value ? FontWeight.w600 : FontWeight.w500,
+                              color: p == value ? AppColors.ink : AppColors.muted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }

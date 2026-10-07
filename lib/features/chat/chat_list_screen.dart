@@ -1,10 +1,10 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/env.dart';
+import '../../core/pro_ui.dart';
 import '../../core/secure_screen.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
@@ -13,6 +13,10 @@ import 'chat_controller.dart';
 import 'chat_models.dart';
 import 'chat_thread_screen.dart';
 import 'new_chat_screen.dart';
+
+/// Quick filters behind the hero stat tiles (presentation-only, applied to
+/// the conversation list already in memory).
+enum _ChatFilter { all, unread, direct, group }
 
 class ChatListScreen extends ConsumerStatefulWidget {
   const ChatListScreen({super.key});
@@ -24,6 +28,7 @@ class ChatListScreen extends ConsumerStatefulWidget {
 class _ChatListScreenState extends ConsumerState<ChatListScreen> {
   final _searchCtrl = TextEditingController();
   String _query = '';
+  _ChatFilter _filter = _ChatFilter.all;
 
   @override
   void initState() {
@@ -39,137 +44,166 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
     super.dispose();
   }
 
+  void _toggleFilter(_ChatFilter f) =>
+      setState(() => _filter = _filter == f ? _ChatFilter.all : f);
+
+  bool _inFilter(Conversation c) {
+    switch (_filter) {
+      case _ChatFilter.unread:
+        return c.unreadCount > 0;
+      case _ChatFilter.direct:
+        return !c.isGroup;
+      case _ChatFilter.group:
+        return c.isGroup;
+      case _ChatFilter.all:
+        return true;
+    }
+  }
+
+  String get _filterName {
+    switch (_filter) {
+      case _ChatFilter.unread:
+        return 'Unread';
+      case _ChatFilter.direct:
+        return 'Direct messages';
+      case _ChatFilter.group:
+        return 'Groups';
+      case _ChatFilter.all:
+        return 'All conversations';
+    }
+  }
+
+  void _openNewChat() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const NewChatScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final convs = ref.watch(conversationsProvider);
     final mq = MediaQuery.of(context);
+    final all = convs.valueOrNull;
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        // Chats is now a bottom-nav tab, so HomeShell supplies the header
-        // (title/hamburger/avatar) and the persistent bottom nav bar — this
-        // screen no longer needs its own app bar / back button.
-        body: Column(
-          children: [
-            // Search bar. Same top gap the Tasks screen uses so it sits just
-            // below the shell's translucent app bar.
-            Padding(
-              padding: EdgeInsets.fromLTRB(16, mq.padding.top + 1, 16, 4),
-              child: _ChatSearchBar(
-                controller: _searchCtrl,
-                onChanged: (v) => setState(() => _query = v),
-              ),
+    // Hero numbers, built from the list the screen already loads.
+    String? subtitle;
+    List<ProStat>? stats;
+    if (all != null) {
+      final unreadChats = all.where((c) => c.unreadCount > 0).length;
+      final unreadMsgs = all.fold<int>(0, (a, c) => a + c.unreadCount);
+      final directs = all.where((c) => !c.isGroup).toList();
+      final onlineNow = directs.where((c) => c.otherOnline).length;
+      subtitle = '${all.length} conversation${all.length == 1 ? '' : 's'}'
+          ' · $unreadChats unread';
+      stats = [
+        ProStat(
+          label: 'Unread',
+          value: '$unreadChats',
+          sub: '$unreadMsgs new message${unreadMsgs == 1 ? '' : 's'}',
+          dot: AppColors.live,
+          selected: _filter == _ChatFilter.unread,
+          onTap: () => _toggleFilter(_ChatFilter.unread),
+        ),
+        ProStat(
+          label: 'Direct',
+          value: '${directs.length}',
+          sub: '$onlineNow online now',
+          dot: const Color(0xFF7FD3E3),
+          selected: _filter == _ChatFilter.direct,
+          onTap: () => _toggleFilter(_ChatFilter.direct),
+        ),
+        ProStat(
+          label: 'Groups',
+          value: '${all.length - directs.length}',
+          sub: 'of ${all.length} chats',
+          dot: const Color(0xFFF2B347),
+          selected: _filter == _ChatFilter.group,
+          onTap: () => _toggleFilter(_ChatFilter.group),
+        ),
+      ];
+    }
+
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      // Chats is a bottom-nav tab, so HomeShell supplies the deep header
+      // (title/hamburger/avatar) and the floating tab bar — the hero below
+      // continues that header.
+      body: ProPage(
+        topInset: mq.padding.top,
+        clearNav: true,
+        onRefresh: () async {
+          ref.read(conversationsProvider.notifier).refresh();
+        },
+        hero: ProHero(
+          title: 'Chats',
+          subtitle: subtitle,
+          actions: [
+            ProHeroIconButton(
+              icon: Icons.edit_square,
+              tooltip: 'New chat',
+              onTap: _openNewChat,
             ),
-            // Conversation list
-            Expanded(
-              child: RefreshIndicator(
-                color: AppColors.primary,
-                backgroundColor: Colors.white.withOpacity(0.85),
-                onRefresh: () async {
-                  ref.read(conversationsProvider.notifier).refresh();
-                },
-                child: convs.when(
-                  data: (list) {
-                    final filtered = _query.isEmpty
-                        ? list
-                        : list
-                            .where((c) => c.title
-                                .toLowerCase()
-                                .contains(_query.toLowerCase()))
-                            .toList();
-                    if (filtered.isEmpty) {
-                      return ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.all(16),
-                        children: [
-                          const SizedBox(height: 40),
-                          AppEmptyState(
-                            icon: Icons.chat_bubble_outline_rounded,
-                            message: _query.isEmpty
-                                ? 'No conversations yet.\nTap + to start chatting!'
-                                : 'No conversations match "$_query"',
-                          ),
-                        ],
-                      );
-                    }
-                    return ListView.builder(
-                      physics: const BouncingScrollPhysics(
-                        parent: AlwaysScrollableScrollPhysics(),
-                      ),
-                      padding: const EdgeInsets.fromLTRB(
-                        12, 4, 12, 20,
-                      ),
-                      itemCount: filtered.length,
-                      itemBuilder: (_, i) => _ConversationTile(
-                        conversation: filtered[i],
-                        onTap: () => _openThread(filtered[i]),
-                      ),
-                    );
-                  },
-                  loading: () => const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(40),
-                      child: AppLoadingBlock(height: 120),
-                    ),
-                  ),
-                  error: (err, _) => ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      const SizedBox(height: 40),
-                      AppErrorPanel(
-                        message: err.toString(),
-                        onRetry: () =>
-                            ref.read(conversationsProvider.notifier).refresh(),
-                      ),
-                    ],
-                  ),
+          ],
+          overlap: _ChatSearchField(
+            controller: _searchCtrl,
+            hint: 'Search conversations',
+            onChanged: (v) => setState(() => _query = v),
+          ),
+          children: [
+            if (stats != null) ProHeroStats(stats: stats),
+          ],
+        ),
+        children: convs.when(
+          data: (list) {
+            final q = _query.toLowerCase();
+            final filtered = list
+                .where(_inFilter)
+                .where((c) => _query.isEmpty || c.title.toLowerCase().contains(q))
+                .toList();
+            if (filtered.isEmpty) {
+              return [
+                ProEmpty(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  title: _query.isNotEmpty
+                      ? 'No conversations match "$_query"'
+                      : (_filter == _ChatFilter.all
+                          ? 'No conversations yet.'
+                          : 'Nothing in ${_filterName.toLowerCase()} right now.'),
+                  message: _query.isEmpty
+                      ? 'Tap the new-chat button above to start one.'
+                      : null,
                 ),
+              ];
+            }
+            return [
+              ProSectionHeader(
+                title: '$_filterName · ${filtered.length}',
+                small: true,
               ),
+              ProListGroup(
+                dividerIndent: 70,
+                children: [
+                  for (final c in filtered)
+                    _ConversationRow(
+                      conversation: c,
+                      onTap: () => _openThread(c),
+                    ),
+                ],
+              ),
+            ];
+          },
+          loading: () => const [AppLoadingBlock(height: 120)],
+          error: (err, _) => [
+            AppErrorPanel(
+              message: err.toString(),
+              onRetry: () =>
+                  ref.read(conversationsProvider.notifier).refresh(),
             ),
           ],
         ),
-        // Lift the FAB above the shell's bottom nav bar (this Scaffold extends
-        // behind it because the shell uses extendBody: true).
-        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-        floatingActionButton: Padding(
-          padding: EdgeInsets.only(bottom: mq.padding.bottom + 60),
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: AppColors.heroGradient,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: AppShadows.lifted,
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const NewChatScreen()),
-                ),
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.edit_rounded, color: Colors.white, size: 16),
-                      SizedBox(width: 6),
-                      Text(
-                        'New Chat',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
       ),
+      // New chat lives in the hero (pencil button) — no duplicate FAB
+      // floating over the list and the tab bar.
     );
   }
 
@@ -183,73 +217,60 @@ class _ChatListScreenState extends ConsumerState<ChatListScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Search bar
+// Search field (ProSearchField look, keeps the title-case formatter)
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _ChatSearchBar extends StatelessWidget {
-  const _ChatSearchBar({required this.controller, required this.onChanged});
+class _ChatSearchField extends StatelessWidget {
+  const _ChatSearchField({
+    required this.controller,
+    required this.onChanged,
+    required this.hint,
+  });
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
+  final String hint;
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppRadii.md),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          height: 44,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.50),
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            border: Border.all(color: Colors.white.withOpacity(0.6)),
-          ),
-          child: Row(
-            children: [
-              const SizedBox(width: 12),
-              const Icon(Icons.search_rounded, size: 18, color: AppColors.muted),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: controller,
-                  onChanged: onChanged,
-                  textCapitalization: TextCapitalization.words,
-                  inputFormatters: const [TitleCaseTextFormatter()],
-                  cursorColor: AppColors.primary,
-                  cursorWidth: 1.5,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    color: AppColors.ink,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  decoration: const InputDecoration(
-                    isCollapsed: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 13),
-                    border: InputBorder.none,
-                    hintText: 'Search conversations…',
-                    hintStyle: TextStyle(
-                      color: AppColors.muted,
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
-              if (controller.text.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: IconButton(
-                    icon: const Icon(Icons.close_rounded, size: 16,
-                        color: AppColors.muted),
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(15),
+      borderSide: const BorderSide(color: AppColors.hairline),
+    );
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: AppShadows.lifted,
+      ),
+      child: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: controller,
+        builder: (_, v, __) => TextField(
+          controller: controller,
+          onChanged: onChanged,
+          textInputAction: TextInputAction.search,
+          textCapitalization: TextCapitalization.words,
+          inputFormatters: const <TextInputFormatter>[TitleCaseTextFormatter()],
+          style: const TextStyle(fontSize: 15, color: AppColors.ink),
+          decoration: InputDecoration(
+            hintText: hint,
+            prefixIcon: const Icon(Icons.search_rounded, size: 21),
+            suffixIcon: v.text.isNotEmpty
+                ? IconButton(
+                    tooltip: 'Clear search',
+                    icon: const Icon(Icons.close_rounded, size: 19),
                     onPressed: () {
                       controller.clear();
                       onChanged('');
                     },
-                  ),
-                )
-              else
-                const SizedBox(width: 8),
-            ],
+                  )
+                : null,
+            contentPadding: const EdgeInsets.symmetric(vertical: 15),
+            border: border,
+            enabledBorder: border,
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(15),
+              borderSide: BorderSide(color: AppColors.primary, width: 1.6),
+            ),
           ),
         ),
       ),
@@ -258,11 +279,11 @@ class _ChatSearchBar extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Conversation tile
+// Conversation row
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _ConversationTile extends StatelessWidget {
-  const _ConversationTile({required this.conversation, required this.onTap});
+class _ConversationRow extends StatelessWidget {
+  const _ConversationRow({required this.conversation, required this.onTap});
   final Conversation conversation;
   final VoidCallback onTap;
 
@@ -280,113 +301,66 @@ class _ConversationTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasUnread = conversation.unreadCount > 0;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: GlassCard(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        shadow: AppShadows.soft,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-          child: Row(
-            children: [
-              // Avatar with online dot
-              _ChatAvatar(
-                name: conversation.title,
-                isGroup: conversation.isGroup,
-                online: conversation.isDirect && conversation.otherOnline,
-                imageUrl: Env.fileUrl(conversation.otherAvatarUrl),
+    final time = _formatTime(conversation.lastMessageAt);
+    final preview = conversation.lastMessagePreview ?? '';
+    return ProListRow(
+      leading: _ChatAvatar(
+        name: conversation.title,
+        isGroup: conversation.isGroup,
+        online: conversation.isDirect && conversation.otherOnline,
+        imageUrl: Env.fileUrl(conversation.otherAvatarUrl),
+      ),
+      title: conversation.title,
+      subtitle: preview.isEmpty ? null : preview,
+      chevron: false,
+      onTap: onTap,
+      trailing: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (time.isNotEmpty)
+            Text(
+              time,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: hasUnread ? FontWeight.w600 : FontWeight.w500,
+                color: hasUnread ? AppColors.primary : AppColors.faint,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
-              const SizedBox(width: 12),
-              // Title + preview
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            conversation.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight:
-                                  hasUnread ? FontWeight.w800 : FontWeight.w600,
-                              color: AppColors.ink,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _formatTime(conversation.lastMessageAt),
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight:
-                                hasUnread ? FontWeight.w700 : FontWeight.w500,
-                            color:
-                                hasUnread ? AppColors.primary : AppColors.muted,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            conversation.lastMessagePreview ?? '',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: hasUnread
-                                  ? AppColors.inkSoft
-                                  : AppColors.muted,
-                              fontWeight: hasUnread
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                            ),
-                          ),
-                        ),
-                        if (hasUnread) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 7, vertical: 3),
-                            decoration: BoxDecoration(
-                              gradient: AppColors.heroGradient,
-                              borderRadius:
-                                  BorderRadius.circular(AppRadii.pill),
-                            ),
-                            child: Text(
-                              conversation.unreadCount > 99
-                                  ? '99+'
-                                  : '${conversation.unreadCount}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
+            ),
+          if (hasUnread) ...[
+            const SizedBox(height: 5),
+            Container(
+              constraints: const BoxConstraints(minWidth: 20),
+              height: 20,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                conversation.unreadCount > 99
+                    ? '99+'
+                    : '${conversation.unreadCount}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: [FontFeature.tabularFigures()],
                 ),
               ),
-            ],
-          ),
-        ),
+            ),
+          ],
+        ],
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Chat avatar (with online dot)
+// Chat avatar — ProAvatar squircle, photo on top when there is one, lime
+// online dot, small group badge.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _ChatAvatar extends StatelessWidget {
@@ -394,60 +368,74 @@ class _ChatAvatar extends StatelessWidget {
     required this.name,
     this.isGroup = false,
     this.online = false,
-    this.size = 44,
     this.imageUrl,
   });
   final String name;
   final bool isGroup;
   final bool online;
-  final double size;
   final String? imageUrl;
+
+  static const double _size = 46;
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        UserAvatar(
-          name: name,
-          size: size,
-          radius: isGroup ? 14 : 22,
-          imageUrl: isGroup ? null : imageUrl,
-        ),
-        if (online)
-          Positioned(
-            bottom: 0,
-            right: 0,
-            child: Container(
-              width: 12,
-              height: 12,
-              decoration: BoxDecoration(
-                color: AppColors.success,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
+    final url = isGroup ? null : imageUrl;
+    return SizedBox(
+      width: _size,
+      height: _size,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ProAvatar(name: name, size: _size),
+          if (url != null && url.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(_size * 0.31),
+              child: Image.network(
+                url,
+                width: _size,
+                height: _size,
+                fit: BoxFit.cover,
+                // Initials underneath stay visible while loading / on error.
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                loadingBuilder: (_, child, progress) =>
+                    progress == null ? child : const SizedBox.shrink(),
               ),
             ),
-          ),
-        if (isGroup)
-          Positioned(
-            bottom: -2,
-            right: -2,
-            child: Container(
-              width: 18,
-              height: 18,
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 2),
-              ),
-              child: const Icon(
-                Icons.group_rounded,
-                size: 10,
-                color: Colors.white,
+          if (online && !isGroup)
+            Positioned(
+              right: -3,
+              bottom: -3,
+              child: Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: AppColors.live,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2.5),
+                ),
               ),
             ),
-          ),
-      ],
+          if (isGroup)
+            Positioned(
+              right: -4,
+              bottom: -4,
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2),
+                ),
+                child: const Icon(
+                  Icons.group_rounded,
+                  size: 11,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

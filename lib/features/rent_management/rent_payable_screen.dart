@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
+import '../../core/pro_ui.dart';
 import '../../core/widgets.dart';
 import 'rent_gst_dialog.dart';
 import 'rent_models.dart';
@@ -125,133 +126,180 @@ class _RentPayableScreenState extends ConsumerState<RentPayableScreen> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) Navigator.of(context).pop(_changed);
       },
-      child: GlassBackdrop(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(
-            title: Text(row?.branchName ?? 'Rent Payable'),
-            backgroundColor: AppColors.surface,
-            foregroundColor: AppColors.ink,
-            elevation: 0.5,
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded),
-              onPressed: () => Navigator.of(context).pop(_changed),
-            ),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Rent payable'),
+          leading: IconButton(
+            tooltip: 'Back',
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => Navigator.of(context).pop(_changed),
           ),
-          body: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : row == null
-                  ? Center(
+        ),
+        bottomNavigationBar: row == null || _loading ? null : _actionBar(row),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : row == null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
                       child: AppErrorPanel(
                         message: _error ?? 'Rent payable row not found.',
                         onRetry: _load,
                       ),
-                    )
-                  : ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        GlassCard(
-                          padding: const EdgeInsets.all(16),
-                          shadow: AppShadows.soft,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(row.branchName,
-                                        style: const TextStyle(
-                                            fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink)),
-                                  ),
-                                  StatusPill(
-                                    label: rentPayableStatusTone(row.status).label,
-                                    color: rentPayableStatusTone(row.status).color,
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Text('Period: ${row.period}',
-                                  style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
-                              const Divider(height: 22),
-                              _kv('Rent amount', rentMoney(row.rentAmount)),
-                              if (row.gstAmount != null) _kv('GST', rentMoney(row.gstAmount)),
-                              if (row.tdsAmount != null) _kv('TDS', rentMoney(row.tdsAmount)),
-                              if (row.netAmount != null) _kv('Net payable', rentMoney(row.netAmount)),
-                              if (row.submittedAt != null)
-                                _kv('Submitted', '${df.format(row.submittedAt!)} · ${row.submittedBy ?? '—'}'),
-                              if (row.approvedAt != null)
-                                _kv('Approved', '${df.format(row.approvedAt!)} · ${row.approvedBy ?? '—'}'),
-                              if (row.paidAt != null)
-                                _kv('Paid', '${df.format(row.paidAt!)} · ${row.paidBy ?? '—'}'),
-                              if (row.paidUtr != null && row.paidUtr!.isNotEmpty) _kv('UTR', row.paidUtr!),
-                              if (row.status == RentPayableStatus.held && row.holdReason != null)
-                                _kv('Hold reason', row.holdReason!),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        const AppSectionHeader(title: 'Actions'),
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: [
-                            if (row.status == RentPayableStatus.pending)
-                              _actionButton('Submit', Icons.send_rounded,
-                                  () async {
-                                final repo = ref.read(rentRepositoryProvider);
-                                if (!await confirmGstBeforeSubmit(context, repo, row.branchId)) return;
-                                await _act(() => repo.submitPayable(row.id));
-                              }),
-                            if (row.status == RentPayableStatus.submitted)
-                              _actionButton('Approve', Icons.check_circle_outline_rounded,
-                                  () => _act(() => ref.read(rentRepositoryProvider).approvePayable(row.id))),
-                            if (row.status == RentPayableStatus.approved)
-                              _actionButton('Mark paid', Icons.payments_rounded, _markPaid, primary: true),
-                            if (row.status == RentPayableStatus.held)
-                              _actionButton(
-                                  'Release hold',
-                                  Icons.lock_open_rounded,
-                                  () => _act(
-                                      () => ref.read(rentRepositoryProvider).releasePayableHold(row.id))),
-                            if (row.status != RentPayableStatus.held && row.status != RentPayableStatus.paid)
-                              _actionButton('Hold', Icons.pause_circle_outline_rounded, _hold, danger: true),
-                          ],
-                        ),
-                        const SizedBox(height: 24),
-                      ],
                     ),
-        ),
+                  )
+                : _content(row, df),
       ),
     );
   }
 
-  Widget _kv(String k, String v) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-                width: 110,
-                child: Text(k, style: const TextStyle(fontSize: 12, color: AppColors.muted))),
-            Expanded(
-                child: Text(v,
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.ink))),
-          ],
+  Widget _content(RentPayable row, DateFormat df) {
+    final tone = rentPayableStatusTone(row.status);
+    final tagTone = tone.color == AppColors.success
+        ? ProTagTone.ok
+        : tone.color == AppColors.danger
+            ? ProTagTone.bad
+            : tone.color == AppColors.warning
+                ? ProTagTone.warn
+                : ProTagTone.neutral;
+    final stage = switch (row.status) {
+      RentPayableStatus.pending => 'Waiting to be submitted',
+      RentPayableStatus.submitted => 'Submitted · waiting for approval',
+      RentPayableStatus.approved => 'Approved · ready to pay',
+      RentPayableStatus.paid => row.paidAt != null ? 'Paid on ${df.format(row.paidAt!)}' : 'Paid',
+      RentPayableStatus.held => 'On hold${row.holdReason != null ? ' · ${row.holdReason}' : ''}',
+      _ => tone.label,
+    };
+    final stageColor = switch (row.status) {
+      RentPayableStatus.held => const Color(0xFFE5484D),
+      RentPayableStatus.paid => AppColors.live,
+      _ => const Color(0xFFF2B347),
+    };
+    final kpis = <ProKpi>[
+      ProKpi(value: rentMoney(row.rentAmount), label: 'Rent amount'),
+      if (row.gstAmount != null) ProKpi(value: rentMoney(row.gstAmount), label: 'GST'),
+      if (row.tdsAmount != null) ProKpi(value: rentMoney(row.tdsAmount), label: 'TDS'),
+      if (row.netAmount != null)
+        ProKpi(value: rentMoney(row.netAmount), label: 'Net payable', valueColor: AppColors.primary),
+    ];
+
+    return ProPage(
+      onRefresh: _load,
+      hero: ProHero(
+        overlap: ProKpiStrip(cells: kpis),
+        children: [
+          ProHeroIdentity(
+            name: row.branchName,
+            role: 'Period ${row.period}',
+            icon: Icons.receipt_long_rounded,
+            tags: [ProHeroTag(tone.label, tone: tagTone)],
+          ),
+          ProLiveLine(text: stage, color: stageColor),
+        ],
+      ),
+      children: [
+        GlassCard(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const ProSectionHeader(title: 'Details'),
+              const SizedBox(height: 4),
+              ProKeyValue(rows: [
+                MapEntry('Period', row.period),
+                MapEntry('Rent amount', rentMoney(row.rentAmount)),
+                if (row.gstAmount != null) MapEntry('GST', rentMoney(row.gstAmount)),
+                if (row.tdsAmount != null) MapEntry('TDS', rentMoney(row.tdsAmount)),
+                if (row.netAmount != null) MapEntry('Net payable', rentMoney(row.netAmount)),
+                if (row.paidUtr != null && row.paidUtr!.isNotEmpty) MapEntry('UTR', row.paidUtr!),
+                if (row.status == RentPayableStatus.held && row.holdReason != null)
+                  MapEntry('Hold reason', row.holdReason!),
+              ]),
+            ],
+          ),
         ),
-      );
+        if (row.submittedAt != null || row.approvedAt != null || row.paidAt != null)
+          GlassCard(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const ProSectionHeader(title: 'Workflow'),
+                const SizedBox(height: 4),
+                ProKeyValue(rows: [
+                  if (row.submittedAt != null)
+                    MapEntry('Submitted', '${df.format(row.submittedAt!)} · ${row.submittedBy ?? '—'}'),
+                  if (row.approvedAt != null)
+                    MapEntry('Approved', '${df.format(row.approvedAt!)} · ${row.approvedBy ?? '—'}'),
+                  if (row.paidAt != null) MapEntry('Paid', '${df.format(row.paidAt!)} · ${row.paidBy ?? '—'}'),
+                ]),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Workflow actions for the row's current status (same handlers and gates
+  /// as before), in a sticky bottom bar.
+  Widget? _actionBar(RentPayable row) {
+    final actions = <Widget>[
+      if (row.status == RentPayableStatus.pending)
+        _actionButton('Submit', Icons.send_rounded, () async {
+          final repo = ref.read(rentRepositoryProvider);
+          if (!await confirmGstBeforeSubmit(context, repo, row.branchId)) return;
+          await _act(() => repo.submitPayable(row.id));
+        }, primary: true),
+      if (row.status == RentPayableStatus.submitted)
+        _actionButton('Approve', Icons.check_circle_outline_rounded,
+            () => _act(() => ref.read(rentRepositoryProvider).approvePayable(row.id)),
+            primary: true),
+      if (row.status == RentPayableStatus.approved)
+        _actionButton('Mark paid', Icons.payments_rounded, _markPaid, primary: true),
+      if (row.status == RentPayableStatus.held)
+        _actionButton('Release hold', Icons.lock_open_rounded,
+            () => _act(() => ref.read(rentRepositoryProvider).releasePayableHold(row.id)),
+            primary: true),
+      if (row.status != RentPayableStatus.held && row.status != RentPayableStatus.paid)
+        _actionButton('Hold', Icons.pause_circle_outline_rounded, _hold, danger: true),
+    ];
+    if (actions.isEmpty) return null;
+    // Destructive action first, primary on the right.
+    return ProBottomBar(children: actions.reversed.toList());
+  }
 
   Widget _actionButton(String label, IconData icon, VoidCallback onTap,
       {bool primary = false, bool danger = false}) {
-    final color = danger ? AppColors.danger : (primary ? AppColors.primary : AppColors.ink);
-    return FilledButton.icon(
+    if (danger) {
+      return FilledButton.icon(
+        onPressed: _busy ? null : onTap,
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.dangerTint,
+          foregroundColor: AppColors.danger,
+        ),
+        icon: Icon(icon, size: 18),
+        label: Text(label),
+      );
+    }
+    if (primary) {
+      return FilledButton.icon(
+        onPressed: _busy ? null : onTap,
+        icon: _busy
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation(Colors.white),
+                ),
+              )
+            : Icon(icon, size: 18),
+        label: Text(label),
+      );
+    }
+    return OutlinedButton.icon(
       onPressed: _busy ? null : onTap,
-      style: FilledButton.styleFrom(
-        backgroundColor: danger ? AppColors.danger : (primary ? AppColors.primary : AppColors.surface),
-        foregroundColor: danger || primary ? Colors.white : AppColors.ink,
-        side: danger || primary ? null : const BorderSide(color: AppColors.hairline),
-      ),
-      icon: Icon(icon, size: 17, color: danger || primary ? Colors.white : color),
+      icon: Icon(icon, size: 18),
       label: Text(label),
     );
   }

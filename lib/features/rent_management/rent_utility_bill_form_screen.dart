@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
+import '../../core/pro_ui.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import '../files/file_repository.dart';
@@ -252,251 +253,329 @@ class _RentUtilityBillFormScreenState extends ConsumerState<RentUtilityBillFormS
     final canReview = isFullAccess && bill != null && bill.status == 'PENDING';
     final canDelete = bill != null && (isFullAccess || bill.status == 'PENDING');
     final isInternet = _kind == RentUtilityKind.internet;
+    final branches = branchesAsync.valueOrNull;
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Text(bill == null ? 'Utility Bill' : 'Utility Bill · ${bill.branchName}'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        body: branchesAsync.when(
-          data: (branches) {
-            // A branch user's list only holds their own branch(es), so the first is theirs; an admin picks.
-            _branchId ??= branches.isNotEmpty ? branches.first.id : null;
-            final lockBranch = bill != null || !isFullAccess;
-            return ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (bill != null) ...[
-                  Row(
-                    children: [
-                      StatusPill(
-                        label: bill.status == 'APPROVED' ? 'Approved' : (bill.status == 'REJECTED' ? 'Rejected' : 'Pending review'),
-                        color: bill.status == 'REJECTED'
-                            ? AppColors.danger
-                            : bill.status == 'APPROVED'
-                                ? AppColors.success
-                                : AppColors.muted,
+    Widget? bottomBar;
+    // canReview implies editable (both need full access / a pending bill).
+    if (branches != null && editable) {
+      bottomBar = ProBottomBar(
+        top: canReview && editable
+            ? Row(
+                children: [
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _saving ? null : () => _review(approve: false),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.dangerTint,
+                        foregroundColor: AppColors.danger,
                       ),
-                      if (bill.paidAt != null) ...[
-                        const SizedBox(width: 8),
-                        StatusPill(label: 'Paid${bill.paidUtr == null ? '' : ' · ${bill.paidUtr}'}', color: AppColors.success),
-                      ],
-                    ],
-                  ),
-                  if (bill.status == 'REJECTED' && (bill.rejectionReason ?? '').isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text('Rejected: ${bill.rejectionReason}', style: const TextStyle(fontSize: 12, color: AppColors.danger)),
-                  ],
-                  if (bill.uploadedBy != null) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      'Filed by ${bill.uploadedBy}${bill.status != 'PENDING' && bill.approvedBy != null ? ' · reviewed by ${bill.approvedBy}' : ''}',
-                      style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
-                    ),
-                  ],
-                  if (!editable) ...[
-                    const SizedBox(height: 6),
-                    const Text('This bill has been reviewed — only a full-access admin can change it.',
-                        style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                  ],
-                  const SizedBox(height: 12),
-                ] else
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      'Saving again for the same branch/kind/period updates the existing bill. It goes to an admin for approval.',
-                      style: TextStyle(fontSize: 12, color: AppColors.muted),
+                      child: const Text('Reject'),
                     ),
                   ),
-                _label('Branch *'),
-                DropdownButtonFormField<int>(
-                  isExpanded: true,
-                  value: branches.any((b) => b.id == _branchId) ? _branchId : null,
-                  items: [
-                    for (final b in branches) DropdownMenuItem(value: b.id, child: Text(b.branchName, overflow: TextOverflow.ellipsis)),
-                  ],
-                  onChanged: lockBranch || !editable ? null : (v) => setState(() => _branchId = v),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _saving ? null : () => _review(approve: true),
+                      child: const Text('Approve'),
+                    ),
+                  ),
+                ],
+              )
+            : null,
+        children: [
+          FilledButton(
+            onPressed: _saving || _uploading || branches.isEmpty ? null : _save,
+            child: Text(_saving ? 'Saving…' : 'Save bill'),
+          ),
+        ],
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: bill == null ? 'Utility bill' : 'Utility bill · ${bill.branchName}',
+        subtitle: bill == null ? 'Rent management · file a bill' : 'Rent management · ${rentUtilityKindLabel(bill.kind)}',
+      ),
+      bottomNavigationBar: bottomBar,
+      body: branchesAsync.when(
+        data: (branches) {
+          // A branch user's list only holds their own branch(es), so the first is theirs; an admin picks.
+          _branchId ??= branches.isNotEmpty ? branches.first.id : null;
+          final lockBranch = bill != null || !isFullAccess;
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            children: [
+              if (bill != null) ...[
+                GlassCard(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
                         children: [
-                          _label('Kind *'),
-                          DropdownButtonFormField<String>(
-                            value: _kind,
-                            items: [
-                              for (final k in RentUtilityKind.values)
-                                DropdownMenuItem(value: k, child: Text(rentUtilityKindLabel(k))),
-                            ],
-                            onChanged: bill != null || !editable ? null : (v) => setState(() => _kind = v ?? _kind),
+                          ProIconWell(
+                            icon: rentUtilityKindIcon(bill.kind),
+                            color: bill.kind == RentUtilityKind.internet ? AppColors.info : const Color(0xFF9A5B00),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                bill.status == 'APPROVED'
+                                    ? ProPill.ok('Approved')
+                                    : bill.status == 'REJECTED'
+                                        ? ProPill.bad('Rejected')
+                                        : ProPill.neutral('Pending review'),
+                                if (bill.paidAt != null)
+                                  ProPill.ok('Paid${bill.paidUtr == null ? '' : ' · ${bill.paidUtr}'}'),
+                              ],
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(child: _dateBox(isInternet ? 'From month *' : 'Period *', dfMonth.format(_period), bill != null || !editable ? null : _pickPeriod)),
-                  ],
-                ),
-                if (isInternet) ...[
-                  const SizedBox(height: 10),
-                  _dateBox('Bill covers up to (last month) *', dfMonth.format(_periodEnd), editable ? _pickPeriodEnd : null),
-                  const Padding(
-                    padding: EdgeInsets.only(top: 4),
-                    child: Text('Internet bills can cover 3 or 6 months — pick the last month this bill covers.',
-                        style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                  ),
-                ],
-                const SizedBox(height: 10),
-                _label('Amount'),
-                TextField(
-                  controller: _amount,
-                  enabled: editable,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(prefixText: '₹ '),
-                ),
-                const SizedBox(height: 10),
-                _label('Bill number'),
-                TextField(controller: _billNumber, enabled: editable),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _dateBox('Bill date', _billDate == null ? 'Not set' : dfDay.format(_billDate!), !editable
-                          ? null
-                          : () async {
-                              final d = await _pickDate(_billDate);
-                              if (d != null) setState(() => _billDate = d);
-                            }),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _dateBox('Due date', _dueDate == null ? 'Not set' : dfDay.format(_dueDate!), !editable
-                          ? null
-                          : () async {
-                              final d = await _pickDate(_dueDate);
-                              if (d != null) setState(() => _dueDate = d);
-                            }),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                _label('Bill copy'),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _uploading ? 'Uploading…' : (_documentName ?? 'No file attached'),
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(fontSize: 12.5, color: _documentName == null ? AppColors.muted : AppColors.ink),
-                      ),
-                    ),
-                    if (editable) ...[
-                      IconButton(
-                        tooltip: 'Take a photo',
-                        onPressed: _uploading ? null : () => _attach(camera: true),
-                        icon: const Icon(Icons.photo_camera_outlined),
-                      ),
-                      IconButton(
-                        tooltip: 'Choose a file',
-                        onPressed: _uploading ? null : () => _attach(camera: false),
-                        icon: const Icon(Icons.attach_file_rounded),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 10),
-                _label('Notes'),
-                TextField(controller: _notes, enabled: editable, minLines: 2, maxLines: 4),
-                if (_error != null) ...[
-                  const SizedBox(height: 14),
-                  AppErrorPanel(message: _error!),
-                ],
-                const SizedBox(height: 20),
-                if (editable)
-                  SizedBox(
-                    height: 50,
-                    child: FilledButton(
-                      onPressed: _saving || _uploading || branches.isEmpty ? null : _save,
-                      child: Text(_saving ? 'Saving…' : 'Save bill'),
-                    ),
-                  ),
-                if (canReview) ...[
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _saving ? null : () => _review(approve: false),
-                          child: const Text('Reject'),
+                      if (bill.uploadedBy != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          'Filed by ${bill.uploadedBy}${bill.status != 'PENDING' && bill.approvedBy != null ? ' · reviewed by ${bill.approvedBy}' : ''}',
+                          style: AppText.caption,
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: FilledButton.tonal(
-                          onPressed: _saving ? null : () => _review(approve: true),
-                          child: const Text('Approve'),
-                        ),
-                      ),
+                      ],
+                      if (bill.status == 'REJECTED' && (bill.rejectionReason ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        ProNote('Rejected: ${bill.rejectionReason}', tone: ProNoteTone.bad),
+                      ],
+                      if (!editable) ...[
+                        const SizedBox(height: 10),
+                        const ProNote('This bill has been reviewed — only a full-access admin can change it.'),
+                      ],
                     ],
                   ),
-                ],
-                if (canDelete) ...[
-                  const SizedBox(height: 10),
-                  TextButton(
-                    onPressed: _saving ? null : _delete,
-                    style: TextButton.styleFrom(foregroundColor: AppColors.danger),
-                    child: const Text('Delete bill'),
-                  ),
-                ],
-                if (branches.isEmpty) ...[
-                  const SizedBox(height: 10),
-                  const Text('No rent branches configured yet — add one in the Branches tab first.',
-                      style: TextStyle(fontSize: 12, color: AppColors.muted)),
-                ],
-                const SizedBox(height: 24),
+                ),
+                const SizedBox(height: 14),
+              ] else ...[
+                const ProNote(
+                  'Saving again for the same branch/kind/period updates the existing bill. It goes to an admin for approval.',
+                  tone: ProNoteTone.info,
+                ),
+                const SizedBox(height: 14),
               ],
-            );
-          },
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(child: AppErrorPanel(message: '$e')),
+              GlassCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const ProSectionHeader(title: 'Bill'),
+                    const SizedBox(height: 12),
+                    ProField(
+                      label: 'Branch',
+                      required: true,
+                      child: DropdownButtonFormField<int>(
+                        isExpanded: true,
+                        value: branches.any((b) => b.id == _branchId) ? _branchId : null,
+                        items: [
+                          for (final b in branches)
+                            DropdownMenuItem(value: b.id, child: Text(b.branchName, overflow: TextOverflow.ellipsis)),
+                        ],
+                        onChanged: lockBranch || !editable ? null : (v) => setState(() => _branchId = v),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: ProField(
+                            label: 'Kind',
+                            required: true,
+                            child: DropdownButtonFormField<String>(
+                              value: _kind,
+                              isExpanded: true,
+                              items: [
+                                for (final k in RentUtilityKind.values)
+                                  DropdownMenuItem(value: k, child: Text(rentUtilityKindLabel(k))),
+                              ],
+                              onChanged: bill != null || !editable ? null : (v) => setState(() => _kind = v ?? _kind),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _dateBox(isInternet ? 'From month' : 'Period', dfMonth.format(_period),
+                              bill != null || !editable ? null : _pickPeriod,
+                              required: true, icon: Icons.calendar_month_rounded),
+                        ),
+                      ],
+                    ),
+                    if (isInternet) ...[
+                      const SizedBox(height: 14),
+                      _dateBox('Bill covers up to (last month)', dfMonth.format(_periodEnd),
+                          editable ? _pickPeriodEnd : null,
+                          required: true,
+                          icon: Icons.date_range_rounded,
+                          helper: 'Internet bills can cover 3 or 6 months — pick the last month this bill covers.'),
+                    ],
+                    const SizedBox(height: 14),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: ProField(
+                            label: 'Amount',
+                            child: TextField(
+                              controller: _amount,
+                              enabled: editable,
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              style: AppText.number.copyWith(fontSize: 15, color: AppColors.ink),
+                              decoration: const InputDecoration(prefixText: '₹ '),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ProField(
+                            label: 'Bill number',
+                            child: TextField(controller: _billNumber, enabled: editable),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: _dateBox('Bill date', _billDate == null ? 'Not set' : dfDay.format(_billDate!), !editable
+                              ? null
+                              : () async {
+                                  final d = await _pickDate(_billDate);
+                                  if (d != null) setState(() => _billDate = d);
+                                }),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _dateBox('Due date', _dueDate == null ? 'Not set' : dfDay.format(_dueDate!), !editable
+                              ? null
+                              : () async {
+                                  final d = await _pickDate(_dueDate);
+                                  if (d != null) setState(() => _dueDate = d);
+                                }),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              GlassCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const ProSectionHeader(title: 'Bill copy and notes'),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceAlt,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.hairlineSoft),
+                      ),
+                      child: Row(
+                        children: [
+                          ProIconWell(
+                            icon: _documentName == null ? Icons.attach_file_rounded : Icons.description_outlined,
+                            color: _documentName == null ? null : AppColors.primary,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              _uploading ? 'Uploading…' : (_documentName ?? 'No file attached'),
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: _documentName == null ? AppColors.muted : AppColors.ink),
+                            ),
+                          ),
+                          if (editable) ...[
+                            IconButton(
+                              tooltip: 'Take a photo',
+                              onPressed: _uploading ? null : () => _attach(camera: true),
+                              icon: const Icon(Icons.photo_camera_outlined),
+                            ),
+                            IconButton(
+                              tooltip: 'Choose a file',
+                              onPressed: _uploading ? null : () => _attach(camera: false),
+                              icon: const Icon(Icons.attach_file_rounded),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    ProField(
+                      label: 'Notes',
+                      child: TextField(controller: _notes, enabled: editable, minLines: 2, maxLines: 4),
+                    ),
+                  ],
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 14),
+                ProNote(_error!, tone: ProNoteTone.bad),
+              ],
+              if (canDelete) ...[
+                const SizedBox(height: 10),
+                TextButton.icon(
+                  onPressed: _saving ? null : _delete,
+                  style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: const Text('Delete bill'),
+                ),
+              ],
+              if (branches.isEmpty) ...[
+                const SizedBox(height: 10),
+                const ProNote('No rent branches configured yet — add one in the Branches tab first.',
+                    tone: ProNoteTone.warn),
+              ],
+            ],
+          );
+        },
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: AppErrorPanel(message: '$e'),
+          ),
         ),
       ),
     );
   }
 
-  Widget _dateBox(String label, String value, VoidCallback? onTap) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _label(label),
-        InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              border: Border.all(color: AppColors.hairline),
-            ),
-            child: Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: onTap == null ? AppColors.muted : AppColors.ink)),
+  Widget _dateBox(String label, String value, VoidCallback? onTap,
+      {bool required = false, IconData icon = Icons.calendar_today_rounded, String? helper}) {
+    return ProField(
+      label: label,
+      required: required,
+      helper: helper,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: InputDecorator(
+          decoration: InputDecoration(
+            enabled: onTap != null,
+            prefixIcon: Icon(icon, size: 17, color: onTap == null ? AppColors.faint : AppColors.primary),
+          ),
+          child: Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 15, color: onTap == null ? AppColors.muted : AppColors.ink),
           ),
         ),
-      ],
+      ),
     );
   }
-
-  Widget _label(String t) => Padding(
-        padding: const EdgeInsets.only(bottom: 4, top: 4),
-        child: Text(t,
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
-      );
 }

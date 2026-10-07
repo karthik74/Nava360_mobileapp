@@ -1,9 +1,8 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -43,6 +42,35 @@ String _humanStatus(String raw) {
   return s.isEmpty ? raw : s[0].toUpperCase() + s.substring(1);
 }
 
+/// Calm status pill (neutral for closed requests).
+ProPill _statusPill(String status) {
+  final label = _humanStatus(status);
+  switch (status) {
+    case 'APPROVED':
+      return ProPill.ok(label);
+    case 'PENDING':
+      return ProPill.warn(label);
+    case 'IN_APPROVAL':
+      return ProPill.info(label);
+    case 'REJECTED':
+      return ProPill.bad(label);
+    default:
+      return ProPill.neutral(label);
+  }
+}
+
+/// Dot colour for the hero live line.
+Color _liveDot(String status) {
+  switch (status) {
+    case 'APPROVED':
+      return AppColors.live;
+    case 'IN_APPROVAL':
+      return const Color(0xFF4CC3DB);
+    default:
+      return const Color(0xFFF2B347);
+  }
+}
+
 class ResignationScreen extends ConsumerStatefulWidget {
   const ResignationScreen({super.key});
 
@@ -63,10 +91,6 @@ class _ResignationScreenState extends ConsumerState<ResignationScreen> {
     final result = await showModalBottomSheet<_ApplyResult>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
       builder: (_) => _ApplySheet(noticePeriodDays: notice?.noticePeriodDays),
     );
     if (result == null || !mounted) return;
@@ -108,7 +132,10 @@ class _ResignationScreenState extends ConsumerState<ResignationScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.dangerTint,
+              foregroundColor: AppColors.danger,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Withdraw'),
           ),
@@ -138,186 +165,96 @@ class _ResignationScreenState extends ConsumerState<ResignationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final mq = MediaQuery.of(context);
     final resignations = ref.watch(myResignationsProvider);
     final notice = ref.watch(myNoticePeriodProvider);
 
     final active = resignations.valueOrNull?.where((r) => r.isActive).toList();
     final past = resignations.valueOrNull?.where((r) => r.isClosed).toList();
     final hasActive = active != null && active.isNotEmpty;
+    final current = hasActive ? active.first : null;
+    final info = notice.valueOrNull;
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: PreferredSize(
-          preferredSize: Size.fromHeight(mq.padding.top + AppChrome.appBarHeight),
-          child: ClipRect(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: GlassBlur.chrome,
-                sigmaY: GlassBlur.chrome,
-              ),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.62),
-                  border: Border(
-                    bottom: BorderSide(color: Colors.white.withOpacity(0.5)),
-                  ),
-                ),
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                          onPressed: () => Navigator.pop(context),
-                          color: AppColors.inkSoft,
-                        ),
-                        const SizedBox(width: 4),
-                        const Expanded(
-                          child: Text(
-                            'My Resignation',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.ink,
-                              letterSpacing: -0.2,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        body: RefreshIndicator(
-          color: AppColors.primary,
-          backgroundColor: Colors.white.withOpacity(0.92),
-          onRefresh: () async => _refresh(),
-          child: ListView(
-            physics: const BouncingScrollPhysics(
-              parent: AlwaysScrollableScrollPhysics(),
-            ),
-            padding: EdgeInsets.fromLTRB(16, 12, 16, mq.padding.bottom + 24),
-            children: [
-              _NoticePeriodCard(async: notice),
-              const SizedBox(height: 20),
-              resignations.when(
-                loading: () => const AppLoadingBlock(height: 150),
-                error: (e, _) => AppErrorPanel(
-                  message: e.toString(),
-                  onRetry: _refresh,
-                ),
-                data: (_) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (hasActive) ...[
-                        const AppSectionHeader(
-                          title: 'Current resignation',
-                          subtitle: 'Your active request',
-                        ),
-                        const SizedBox(height: 12),
-                        for (final r in active)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: _ResignationCard(
-                              resignation: r,
-                              onWithdraw: _busy ? null : () => _withdraw(r),
-                            ),
-                          ),
-                      ] else ...[
-                        _ApplyPrompt(
-                          busy: _busy,
-                          onApply: _busy ? null : _apply,
-                        ),
-                      ],
-                      if (past != null && past.isNotEmpty) ...[
-                        const SizedBox(height: 14),
-                        const AppSectionHeader(
-                          title: 'History',
-                          subtitle: 'Past resignation requests',
-                        ),
-                        const SizedBox(height: 12),
-                        for (final r in past)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: _ResignationCard(resignation: r),
-                          ),
-                      ],
-                    ],
-                  );
-                },
-              ),
-            ],
-          ),
+    String fmtShort(DateTime? d) => d == null ? '—' : DateFormat('d MMM').format(d);
+    String fmt(DateTime? d) => d == null ? '—' : DateFormat('d MMM y').format(d);
+
+    final children = <Widget>[
+      // Notice period — a calm explanation rather than a big card.
+      notice.when(
+        loading: () => const AppLoadingBlock(height: 70),
+        error: (_, __) => const SizedBox.shrink(),
+        data: (info) => ProNote(
+          'Your notice period is ${info.noticePeriodDays} days — '
+          '${info.tenureMonths != null ? '${info.tenureMonths} months of service${info.resolved ? '' : ' · org default'}' : (info.resolved ? 'based on your tenure' : 'organisation default')}. '
+          'Your last working day defaults to the notice period.',
+          tone: ProNoteTone.neutral,
+          icon: Icons.event_note_rounded,
         ),
       ),
-    );
-  }
-}
+      ...resignations.when<List<Widget>>(
+        loading: () => const [AppLoadingBlock(height: 150)],
+        error: (e, _) => [
+          AppErrorPanel(
+            message: e.toString(),
+            onRetry: _refresh,
+          ),
+        ],
+        data: (_) => [
+          if (hasActive) ...[
+            const ProSectionHeader(
+              title: 'Current resignation',
+              subtitle: 'Your active request',
+            ),
+            for (final r in active)
+              _ResignationCard(
+                resignation: r,
+                onWithdraw: _busy ? null : () => _withdraw(r),
+              ),
+          ] else
+            _ApplyPrompt(
+              busy: _busy,
+              onApply: _busy ? null : _apply,
+            ),
+          if (past != null && past.isNotEmpty) ...[
+            ProSectionHeader(
+              title: 'History · ${past.length}',
+              subtitle: 'Past resignation requests',
+            ),
+            for (final r in past) _ResignationCard(resignation: r),
+          ],
+        ],
+      ),
+    ];
 
-// ───────────────────────────── Notice period ──────────────────────────────
-
-class _NoticePeriodCard extends StatelessWidget {
-  const _NoticePeriodCard({required this.async});
-  final AsyncValue<NoticePeriodInfo> async;
-
-  @override
-  Widget build(BuildContext context) {
-    return async.when(
-      loading: () => const AppLoadingBlock(height: 90),
-      error: (_, __) => const SizedBox.shrink(),
-      data: (info) => GlassCard(
-        padding: const EdgeInsets.all(16),
-        shadow: AppShadows.soft,
-        child: Row(
+    return Scaffold(
+      appBar: AppBar(title: const Text('Resignation')),
+      body: ProPage(
+        onRefresh: () async => _refresh(),
+        hero: ProHero(
+          title: 'My resignation',
+          subtitle: 'Your notice period and resignation requests',
+          overlap: info == null
+              ? null
+              : ProKpiStrip(cells: [
+                  ProKpi(value: '${info.noticePeriodDays}', label: 'Days notice'),
+                  ProKpi(
+                    value: info.tenureMonths != null ? '${info.tenureMonths}' : '—',
+                    label: 'Months of service',
+                  ),
+                  ProKpi(
+                    value: fmtShort(current?.lastWorkingDay),
+                    label: 'Last working day',
+                  ),
+                ]),
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.primary.withOpacity(0.22)),
+            if (current != null)
+              ProLiveLine(
+                text: '${_humanStatus(current.status)} · resignation date ${fmt(current.resignationDate)}'
+                    '${current.lastWorkingDay != null ? ' · last day ${fmt(current.lastWorkingDay)}' : ''}',
+                color: _liveDot(current.status),
               ),
-              child: Icon(Icons.event_note_rounded,
-                  color: AppColors.primary, size: 22),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '${info.noticePeriodDays} days notice period',
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.ink,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    info.tenureMonths != null
-                        ? '${info.tenureMonths} months of service${info.resolved ? '' : ' · org default'}'
-                        : (info.resolved ? 'Based on your tenure' : 'Organisation default'),
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.muted,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ],
         ),
+        children: children,
       ),
     );
   }
@@ -333,38 +270,23 @@ class _ApplyPrompt extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GlassCard(
-      padding: const EdgeInsets.all(18),
-      shadow: AppShadows.soft,
+      padding: const EdgeInsets.fromLTRB(18, 22, 18, 18),
       child: Column(
         children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: AppColors.danger.withOpacity(0.10),
-              shape: BoxShape.circle,
-              border: Border.all(color: AppColors.danger.withOpacity(0.2)),
-            ),
-            child: const Icon(Icons.logout_rounded,
-                color: AppColors.danger, size: 24),
-          ),
+          const ProIconWell(icon: Icons.logout_rounded, size: 48),
           const SizedBox(height: 14),
           const Text(
             'No active resignation',
-            style: TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
-              color: AppColors.ink,
-            ),
+            style: AppText.title,
           ),
           const SizedBox(height: 4),
           const Text(
             'If you wish to resign, submit a request below. HR will review it.',
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 12.5,
+              fontSize: 14,
               color: AppColors.muted,
-              height: 1.4,
+              height: 1.5,
             ),
           ),
           const SizedBox(height: 16),
@@ -372,10 +294,6 @@ class _ApplyPrompt extends StatelessWidget {
             width: double.infinity,
             child: FilledButton.icon(
               onPressed: onApply,
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                minimumSize: const Size.fromHeight(48),
-              ),
               icon: busy
                   ? const SizedBox(
                       height: 18,
@@ -407,89 +325,52 @@ class _ResignationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final r = resignation;
-    final color = resignationStatusColor(r.status);
     return GlassCard(
-      padding: const EdgeInsets.all(16),
-      shadow: AppShadows.soft,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
+              const ProIconWell(icon: Icons.description_outlined),
+              const SizedBox(width: 12),
               const Expanded(
                 child: Text(
                   'Resignation request',
                   style: TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.15,
                     color: AppColors.ink,
                   ),
                 ),
               ),
-              StatusPill(label: _humanStatus(r.status), color: color),
+              _statusPill(r.status),
             ],
           ),
-          const SizedBox(height: 12),
-          _row(Icons.event_outlined, 'Resignation date', _fmt(r.resignationDate)),
-          if (r.lastWorkingDay != null)
-            _row(Icons.event_available_outlined, 'Last working day',
-                _fmt(r.lastWorkingDay)),
-          if (r.noticePeriodDays != null)
-            _row(Icons.timelapse_rounded, 'Notice period',
-                '${r.noticePeriodDays} days'),
-          if (r.reason != null && r.reason!.isNotEmpty)
-            _row(Icons.notes_rounded, 'Reason', r.reason!),
-          if (r.reviewComment != null && r.reviewComment!.isNotEmpty)
-            _row(Icons.rate_review_outlined, 'Reviewer note', r.reviewComment!),
+          const SizedBox(height: 6),
+          ProKeyValue(rows: [
+            MapEntry('Resignation date', _fmt(r.resignationDate)),
+            if (r.lastWorkingDay != null)
+              MapEntry('Last working day', _fmt(r.lastWorkingDay)),
+            if (r.noticePeriodDays != null)
+              MapEntry('Notice period', '${r.noticePeriodDays} days'),
+            if (r.reason != null && r.reason!.isNotEmpty) MapEntry('Reason', r.reason!),
+            if (r.reviewComment != null && r.reviewComment!.isNotEmpty)
+              MapEntry('Reviewer note', r.reviewComment!),
+          ]),
           if (onWithdraw != null) ...[
-            const SizedBox(height: 14),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: onWithdraw,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.danger,
-                  side: BorderSide(color: AppColors.danger.withOpacity(0.4)),
-                  minimumSize: const Size.fromHeight(44),
-                ),
-                icon: const Icon(Icons.undo_rounded, size: 18),
-                label: const Text('Withdraw resignation'),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: onWithdraw,
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.dangerTint,
+                foregroundColor: AppColors.danger,
               ),
+              icon: const Icon(Icons.undo_rounded, size: 18),
+              label: const Text('Withdraw resignation'),
             ),
           ],
-        ],
-      ),
-    );
-  }
-
-  Widget _row(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 15, color: AppColors.muted),
-          const SizedBox(width: 10),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12.5,
-              color: AppColors.muted,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: AppColors.ink,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -582,102 +463,153 @@ class _ApplySheetState extends State<_ApplySheet> {
     final mq = MediaQuery.of(context);
     return Padding(
       padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.muted.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(2),
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: mq.size.height - mq.viewInsets.bottom - mq.padding.top - 24,
+        ),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFC6D3D6),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Apply for resignation',
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'HR will review your request. Your last working day defaults to the notice period.',
-                style: TextStyle(fontSize: 12.5, color: AppColors.muted, height: 1.4),
-              ),
-              const SizedBox(height: 18),
-              _DateField(
-                label: 'Resignation date',
-                value: _label(_resignationDate),
-                onTap: _pickResignationDate,
-              ),
-              const SizedBox(height: 12),
-              _DateField(
-                label: 'Last working day (optional)',
-                value: _label(_lastWorkingDay),
-                onTap: _pickLastWorkingDay,
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Reason (optional)',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.inkSoft,
-                ),
-              ),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _reasonCtrl,
-                minLines: 2,
-                maxLines: 4,
-                textCapitalization: TextCapitalization.words,
-                inputFormatters: const [TitleCaseTextFormatter()],
-                decoration: InputDecoration(
-                  hintText: 'Share a brief reason…',
-                  filled: true,
-                  fillColor: Colors.white,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    borderSide: BorderSide(color: AppColors.muted.withOpacity(0.25)),
+                  const SizedBox(height: 14),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Apply for resignation',
+                              style: TextStyle(
+                                fontSize: 19,
+                                height: 1.3,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.35,
+                                color: AppColors.ink,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'HR will review your request. Your last working day defaults to the notice period.',
+                              style: TextStyle(fontSize: 13, color: AppColors.muted, height: 1.45),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      _SheetClose(onTap: () => Navigator.of(context).pop()),
+                    ],
                   ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    borderSide: BorderSide(color: AppColors.muted.withOpacity(0.25)),
-                  ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (widget.noticePeriodDays != null) ...[
+                      ProNote(
+                        'Your notice period is ${widget.noticePeriodDays} days. '
+                        'Picking a resignation date suggests a last working day from it — you can change it.',
+                        tone: ProNoteTone.neutral,
+                        icon: Icons.event_note_rounded,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    ProField(
+                      label: 'Resignation date',
+                      required: true,
+                      child: _DateField(
+                        value: _label(_resignationDate),
+                        empty: _resignationDate == null,
+                        onTap: _pickResignationDate,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    ProField(
+                      label: 'Last working day (optional)',
+                      child: _DateField(
+                        value: _label(_lastWorkingDay),
+                        empty: _lastWorkingDay == null,
+                        onTap: _pickLastWorkingDay,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    ProField(
+                      label: 'Reason (optional)',
+                      child: TextField(
+                        controller: _reasonCtrl,
+                        minLines: 3,
+                        maxLines: 4,
+                        textCapitalization: TextCapitalization.words,
+                        inputFormatters: const [TitleCaseTextFormatter()],
+                        decoration: const InputDecoration(
+                          hintText: 'Share a brief reason…',
+                        ),
+                      ),
+                    ),
+                    if (_error != null) ...[
+                      const SizedBox(height: 14),
+                      ProNote(_error!, tone: ProNoteTone.bad),
+                    ],
+                  ],
                 ),
               ),
-              if (_error != null) ...[
-                const SizedBox(height: 10),
-                Text(
-                  _error!,
-                  style: const TextStyle(color: AppColors.danger, fontSize: 12.5),
-                ),
-              ],
-              const SizedBox(height: 18),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
+            ),
+            ProBottomBar(
+              children: [
+                FilledButton(
                   onPressed: _submit,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    minimumSize: const Size.fromHeight(48),
-                  ),
                   child: const Text('Submit resignation'),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetClose extends StatelessWidget {
+  const _SheetClose({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFFEEF3F4),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: const SizedBox(
+          width: 40,
+          height: 40,
+          child: Icon(Icons.close_rounded, size: 18, color: AppColors.ink),
         ),
       ),
     );
@@ -686,56 +618,47 @@ class _ApplySheetState extends State<_ApplySheet> {
 
 class _DateField extends StatelessWidget {
   const _DateField({
-    required this.label,
     required this.value,
+    required this.empty,
     required this.onTap,
   });
-  final String label;
   final String value;
+  final bool empty;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12.5,
-            fontWeight: FontWeight.w700,
-            color: AppColors.inkSoft,
-          ),
-        ),
-        const SizedBox(height: 6),
-        InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              border: Border.all(color: AppColors.muted.withOpacity(0.25)),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.calendar_today_outlined,
-                    size: 16, color: AppColors.muted),
-                const SizedBox(width: 10),
-                Text(
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        side: const BorderSide(color: Color(0xFFDBE3E5)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              const Icon(Icons.calendar_today_outlined, size: 18, color: AppColors.muted),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
                   value,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    color: AppColors.ink,
-                    fontWeight: FontWeight.w600,
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: empty ? AppColors.faint : AppColors.ink,
+                    fontWeight: empty ? FontWeight.w400 : FontWeight.w500,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
-              ],
-            ),
+              ),
+              const Icon(Icons.expand_more_rounded, size: 20, color: AppColors.faint),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 }

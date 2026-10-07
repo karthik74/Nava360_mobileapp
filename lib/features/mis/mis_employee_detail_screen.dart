@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_format.dart';
@@ -25,16 +26,35 @@ class MisEmployeeDetailScreen extends ConsumerWidget {
         mode: LaunchMode.externalApplication);
   }
 
+  static bool _has(String? v) => v != null && v.trim().isNotEmpty;
+
+  /// "2019-03-14" → "7y 6m" (time elapsed until today); "—" when unknown.
+  static String _tenure(String? iso) {
+    if (iso == null || iso.length < 10) return '—';
+    final from = DateTime.tryParse(iso.substring(0, 10));
+    if (from == null) return '—';
+    final now = DateTime.now();
+    var months = (now.year - from.year) * 12 + now.month - from.month;
+    if (now.day < from.day) months--;
+    if (months < 0) return '—';
+    final y = months ~/ 12;
+    final m = months % 12;
+    if (y == 0) return '${m}m';
+    return '${y}y ${m}m';
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final empAsync = ref.watch(misEmployeeProvider(empId));
     final personalAsync = ref.watch(misEmployeePersonalProvider(empId));
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
       appBar: AppBar(title: const Text('Employee')),
       body: empAsync.when(
-        loading: () => const AppLoadingBlock(height: 300),
+        loading: () => const Padding(
+          padding: EdgeInsets.all(16),
+          child: AppLoadingBlock(height: 300),
+        ),
         error: (e, _) => Padding(
           padding: const EdgeInsets.all(16),
           child: AppErrorPanel(
@@ -44,54 +64,72 @@ class MisEmployeeDetailScreen extends ConsumerWidget {
         ),
         data: (emp) {
           final personal = personalAsync.asData?.value;
-          return ListView(
-            padding: EdgeInsets.fromLTRB(
-                16, 14, 16, MediaQuery.of(context).padding.bottom + 24),
+          final hasManager =
+              emp.reportsToEmpId != null && emp.reportsToEmpId!.isNotEmpty;
+          void openManager() => context.push(
+              '/mis/employees/${Uri.encodeComponent(emp.reportsToEmpId!)}');
+          return ProPage(
+            hero: _hero(context, emp, personal,
+                onManager: hasManager ? openManager : null),
             children: [
-              _header(emp),
-              const SizedBox(height: 16),
               _section('Reporting', [
-                _field(
+                _KvRow(
                   'Reports to',
                   emp.reportsToName,
-                  onTap: emp.reportsToEmpId != null &&
-                          emp.reportsToEmpId!.isNotEmpty
-                      ? () => context.push(
-                          '/mis/employees/${Uri.encodeComponent(emp.reportsToEmpId!)}')
-                      : null,
+                  icon: Icons.chevron_right_rounded,
+                  onTap: hasManager ? openManager : null,
                 ),
-                _field('Manager ID', emp.reportsToEmpId),
+                _KvRow('Manager ID', emp.reportsToEmpId),
               ]),
               _section('Posting', [
-                _field('Branch', emp.branch),
-                _field('Area', emp.area),
-                _field('Division', emp.division),
-                _field('Region', emp.region),
-                _field('Joined', misPrettyDate(personal?.hireDate)),
-                _field('Posted since', misPrettyDate(emp.postedSince)),
+                _KvRow('Branch', emp.branch),
+                _KvRow('Area', emp.area),
+                _KvRow('Division', emp.division),
+                _KvRow('Region', emp.region),
+                _KvRow('Joined', misPrettyDate(personal?.hireDate)),
+                _KvRow('Posted since', misPrettyDate(emp.postedSince)),
               ]),
               _section('Contact & role', [
-                _field('Mobile', emp.mobile,
+                _KvRow('Mobile', emp.mobile,
+                    icon: Icons.call_rounded,
                     onTap: () => _launch('tel', emp.mobile)),
-                _field('Email', emp.email,
+                _KvRow('Email', emp.email,
+                    icon: Icons.mail_outline_rounded,
                     onTap: () => _launch('mailto', emp.email)),
-                _field('Emergency phone', emp.emergencyPhone,
+                _KvRow('Emergency phone', emp.emergencyPhone,
+                    icon: Icons.call_rounded,
                     onTap: () => _launch('tel', emp.emergencyPhone)),
-                _field('Role', emp.role),
-                _field('Designation', emp.designation),
-                _field('Gender', emp.gender),
+                _KvRow('Role', emp.role),
+                _KvRow('Designation', emp.designation),
+                _KvRow('Gender', emp.gender),
               ]),
-              _section('Personal', [
-                _field('Date of birth', misPrettyDate(personal?.dateOfBirth)),
-                _field('Joining date', misPrettyDate(personal?.hireDate)),
-                _field('PAN', personal?.pan),
-                _field(
-                    'Aadhaar (last 4)',
-                    personal?.aadhaarLast4 != null &&
-                            personal!.aadhaarLast4!.isNotEmpty
-                        ? '••••${personal.aadhaarLast4}'
-                        : null),
-              ]),
+              _section(
+                'Personal',
+                [
+                  _KvRow('Date of birth', misPrettyDate(personal?.dateOfBirth)),
+                  _KvRow('Joining date', misPrettyDate(personal?.hireDate)),
+                  _KvRow('PAN', personal?.pan),
+                  _KvRow(
+                      'Aadhaar (last 4)',
+                      personal?.aadhaarLast4 != null &&
+                              personal!.aadhaarLast4!.isNotEmpty
+                          ? '••••${personal.aadhaarLast4}'
+                          : null),
+                ],
+                trailing: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.lock_outline_rounded,
+                        size: 14, color: AppColors.muted),
+                    SizedBox(width: 4),
+                    Text('Private',
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.muted)),
+                  ],
+                ),
+              ),
             ],
           );
         },
@@ -99,7 +137,12 @@ class MisEmployeeDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _header(Employee emp) {
+  Widget _hero(
+    BuildContext context,
+    Employee emp,
+    EmployeePersonal? personal, {
+    VoidCallback? onManager,
+  }) {
     final initials = emp.displayName
         .split(RegExp(r'\s+'))
         .where((w) => w.isNotEmpty)
@@ -107,114 +150,134 @@ class MisEmployeeDetailScreen extends ConsumerWidget {
         .take(2)
         .join()
         .toUpperCase();
+    final hasStatus = emp.status != null && emp.status!.isNotEmpty;
+    return ProHero(
+      overlap: ProKpiStrip(cells: [
+        ProKpi(value: _tenure(personal?.hireDate), label: 'Service'),
+        ProKpi(value: _tenure(emp.postedSince), label: 'In this posting'),
+        ProKpi(
+          value: _has(emp.role) ? emp.role! : '—',
+          label: _has(emp.designation) ? emp.designation! : 'Role',
+        ),
+      ]),
+      children: [
+        ProHeroIdentity(
+          name: emp.displayName,
+          role: emp.designation ?? emp.role ?? '—',
+          initials: initials.isEmpty ? '?' : initials,
+          ringColor: emp.isWorking ? AppColors.live : Colors.white38,
+          tags: [
+            ProHeroTag(emp.empId, icon: Icons.badge_outlined),
+            if (hasStatus)
+              ProHeroTag(emp.status!,
+                  tone: emp.isWorking ? ProTagTone.ok : ProTagTone.neutral),
+            if (_has(emp.postedSince))
+              ProHeroTag('Since ${misPrettyDate(emp.postedSince)}'),
+          ],
+        ),
+        if (_has(emp.reportsToName))
+          ProLiveLine(
+            text: 'Reports to ${emp.reportsToName}'
+                '${_has(emp.branch) ? ' · ${emp.branch}' : ''}',
+            color: emp.isWorking ? AppColors.live : Colors.white54,
+          ),
+        ProHeroActions(actions: [
+          ProAction(
+            icon: Icons.call_rounded,
+            label: 'Call',
+            primary: true,
+            onTap: _has(emp.mobile) ? () => _launch('tel', emp.mobile) : null,
+          ),
+          ProAction(
+            icon: Icons.mail_outline_rounded,
+            label: 'Email',
+            onTap: _has(emp.email) ? () => _launch('mailto', emp.email) : null,
+          ),
+          ProAction(
+            icon: Icons.emergency_outlined,
+            label: 'Emergency',
+            onTap: _has(emp.emergencyPhone)
+                ? () => _launch('tel', emp.emergencyPhone)
+                : null,
+          ),
+          ProAction(
+            icon: Icons.account_tree_outlined,
+            label: 'Manager',
+            onTap: onManager,
+          ),
+        ]),
+      ],
+    );
+  }
+
+  Widget _section(String title, List<Widget> rows, {Widget? trailing}) {
     return GlassCard(
-      child: Row(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            width: 52,
-            height: 52,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              gradient: AppColors.heroGradient,
-              borderRadius: BorderRadius.circular(14),
+          ProSectionHeader(title: title, trailing: trailing),
+          const SizedBox(height: 4),
+          for (var i = 0; i < rows.length; i++)
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: i == 0
+                    ? null
+                    : const Border(
+                        top: BorderSide(color: AppColors.hairlineSoft)),
+              ),
+              child: rows[i],
             ),
-            child: Text(initials.isEmpty ? '?' : initials,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800)),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(emp.displayName,
-                    style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.ink)),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                          '${emp.empId} · ${emp.designation ?? emp.role ?? '—'}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontSize: 12.5, color: AppColors.muted)),
-                    ),
-                    if (emp.status != null && emp.status!.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      StatusPill(
-                        label: emp.status!,
-                        color: emp.isWorking
-                            ? AppColors.success
-                            : AppColors.muted,
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
   }
+}
 
-  Widget _section(String title, List<Widget> fields) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: GlassCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title,
-                style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink)),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 22,
-              runSpacing: 14,
-              children: fields,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+/// Label / value row; tappable values (call, mail, manager) use the brand
+/// colour with a small trailing icon.
+class _KvRow extends StatelessWidget {
+  const _KvRow(this.label, this.value, {this.onTap, this.icon});
+  final String label;
+  final String? value;
+  final VoidCallback? onTap;
+  final IconData? icon;
 
-  Widget _field(String label, String? value, {VoidCallback? onTap}) {
-    final has = value != null && value.trim().isNotEmpty;
+  @override
+  Widget build(BuildContext context) {
+    final has = value != null && value!.trim().isNotEmpty;
     final tappable = has && onTap != null;
-    return SizedBox(
-      width: 150,
-      child: Column(
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 11),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label,
               style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
                   color: AppColors.muted)),
-          const SizedBox(height: 2),
-          GestureDetector(
-            onTap: tappable ? onTap : null,
+          const SizedBox(width: 12),
+          Expanded(
             child: Text(
-              has ? value : '—',
+              has ? value! : '—',
+              textAlign: TextAlign.right,
               style: TextStyle(
                 fontSize: 14,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w500,
                 color: tappable ? AppColors.primary : AppColors.ink,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ),
+          if (tappable && icon != null) ...[
+            const SizedBox(width: 6),
+            Icon(icon, size: 16, color: AppColors.primary),
+          ],
         ],
       ),
     );
+    if (!tappable) return row;
+    return InkWell(onTap: onTap, child: row);
   }
 }

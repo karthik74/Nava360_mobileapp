@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -25,6 +26,9 @@ import 'task_models.dart';
 import 'task_repository.dart';
 
 enum _Queue { branch, mine }
+
+/// Branch review views (server value, label).
+const _kViews = [('PENDING', 'Pending'), ('APPROVED', 'Approved'), ('REJECTED', 'Rejected')];
 
 class TaskReviewsScreen extends ConsumerStatefulWidget {
   const TaskReviewsScreen({super.key});
@@ -81,50 +85,31 @@ class _TaskReviewsScreenState extends ConsumerState<TaskReviewsScreen> {
     final user = ref.watch(authUserProvider);
     final canBranch = user?.hasPermission('TASK_REVIEW_BRANCH') ?? false;
     final canMine = user?.hasPermission('TASK_REVIEW') ?? false;
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Task Reviews'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        body: _queue == null
-            ? const Padding(
-                padding: EdgeInsets.all(16),
-                child: AppEmptyState(icon: Icons.lock_outline_rounded, message: 'You do not have access to task reviews.'),
-              )
-            : RefreshIndicator(
-                onRefresh: () async {
-                  _reload();
-                  await _future;
-                },
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                  children: [
-                    if (canBranch && canMine) ...[
-                      SegmentedButton<_Queue>(
-                        segments: const [
-                          ButtonSegment(value: _Queue.branch, label: Text('Branch'), icon: Icon(Icons.store_rounded, size: 16)),
-                          ButtonSegment(value: _Queue.mine, label: Text('My reviews'), icon: Icon(Icons.person_rounded, size: 16)),
-                        ],
-                        selected: {_queue!},
-                        onSelectionChanged: (s) {
-                          _queue = s.first;
-                          _reload();
-                        },
-                      ),
-                      const SizedBox(height: 10),
-                    ],
-                    if (_queue == _Queue.branch) ...[
-                      TextField(
+    final branch = _queue == _Queue.branch;
+    final viewIndex = _kViews.indexWhere((v) => v.$1 == _view);
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(title: const Text('Task reviews')),
+      body: _queue == null
+          ? const Padding(
+              padding: EdgeInsets.all(16),
+              child: AppEmptyState(icon: Icons.lock_outline_rounded, message: 'You do not have access to task reviews.'),
+            )
+          : ProPage(
+              onRefresh: () async {
+                _reload();
+                await _future;
+              },
+              hero: ProHero(
+                title: branch ? 'Branch reviews' : 'My reviews',
+                subtitle: branch
+                    ? 'Submissions from employees in your branches'
+                    : 'Tasks waiting on your review',
+                overlap: branch
+                    ? ProSearchField(
+                        raised: true,
                         controller: _search,
-                        decoration: const InputDecoration(
-                          hintText: 'Search employee, code or task',
-                          prefixIcon: Icon(Icons.search_rounded, size: 20),
-                          isDense: true,
-                        ),
+                        hint: 'Search employee, code or task',
                         onChanged: (v) {
                           _debounce?.cancel();
                           _debounce = Timer(const Duration(milliseconds: 400), () {
@@ -132,55 +117,79 @@ class _TaskReviewsScreenState extends ConsumerState<TaskReviewsScreen> {
                             _reload();
                           });
                         },
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 6,
-                        children: [
-                          for (final v in const [('PENDING', 'Pending'), ('APPROVED', 'Approved'), ('REJECTED', 'Rejected')])
-                            ChoiceChip(
-                              label: Text(v.$2),
-                              selected: _view == v.$1,
-                              onSelected: (_) {
-                                _view = v.$1;
-                                _reload();
-                              },
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    FutureBuilder<List<TeamTaskAssignment>>(
-                      future: _future,
-                      builder: (context, snap) {
-                        if (snap.connectionState != ConnectionState.done) {
-                          return const Padding(
-                            padding: EdgeInsets.only(top: 40),
-                            child: Center(child: CircularProgressIndicator()),
-                          );
-                        }
-                        if (snap.hasError) {
-                          return AppErrorPanel(message: '${snap.error}', onRetry: _reload);
-                        }
-                        final rows = snap.data ?? const [];
-                        if (rows.isEmpty) {
-                          return const Padding(
-                            padding: EdgeInsets.only(top: 24),
-                            child: AppEmptyState(icon: Icons.task_alt_rounded, message: 'Nothing waiting for review.'),
-                          );
-                        }
-                        return Column(children: [for (final a in rows) _ReviewTile(a: a, onTap: () => _open(a))]);
+                      )
+                    : null,
+                children: [
+                  if (canBranch && canMine)
+                    ProHeroSegmented(
+                      labels: const ['Branch', 'My reviews'],
+                      icons: const [Icons.store_rounded, Icons.person_rounded],
+                      selected: branch ? 0 : 1,
+                      onChanged: (i) {
+                        _queue = i == 0 ? _Queue.branch : _Queue.mine;
+                        _reload();
                       },
                     ),
-                  ],
-                ),
+                ],
               ),
-      ),
+              children: [
+                if (branch)
+                  ProChipBar(
+                    labels: [for (final v in _kViews) v.$2],
+                    selected: viewIndex < 0 ? 0 : viewIndex,
+                    onSelected: (i) {
+                      _view = _kViews[i].$1;
+                      _reload();
+                    },
+                    bleed: 0,
+                  ),
+                FutureBuilder<List<TeamTaskAssignment>>(
+                  future: _future,
+                  builder: (context, snap) {
+                    if (snap.connectionState != ConnectionState.done) {
+                      return const AppLoadingBlock(height: 140);
+                    }
+                    if (snap.hasError) {
+                      return AppErrorPanel(message: '${snap.error}', onRetry: _reload);
+                    }
+                    final rows = snap.data ?? const [];
+                    if (rows.isEmpty) {
+                      return const ProEmpty(
+                        icon: Icons.task_alt_rounded,
+                        title: 'Nothing waiting for review.',
+                      );
+                    }
+                    final label = branch
+                        ? (viewIndex < 0 ? _view : _kViews[viewIndex].$2)
+                        : 'Waiting for you';
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        ProSectionHeader(title: '$label · ${rows.length}', small: true),
+                        const SizedBox(height: 10),
+                        ProListGroup(
+                          dividerIndent: 64,
+                          children: [for (final a in rows) _ReviewTile(a: a, onTap: () => _open(a))],
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
     );
   }
 }
 
 String _when(DateTime? d) => d == null ? '' : DateFormat('d MMM, h:mm a').format(d.toLocal());
+
+/// Status label + Pro pill for a review row.
+ProPill _reviewPill(String status) => switch (status) {
+      'IN_REVIEW' => ProPill.warn('In review'),
+      'DONE' => ProPill.ok('Approved'),
+      'REJECTED' => ProPill.bad('Rejected'),
+      _ => ProPill.neutral(status),
+    };
 
 class _ReviewTile extends StatelessWidget {
   const _ReviewTile({required this.a, required this.onTap});
@@ -189,51 +198,20 @@ class _ReviewTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (label, color) = switch (a.status) {
-      'IN_REVIEW' => ('In review', const Color(0xFFD97706)),
-      'DONE' => ('Approved', AppColors.success),
-      'REJECTED' => ('Rejected', AppColors.danger),
-      _ => (a.status, AppColors.muted),
-    };
     final who = [a.assigneeName, a.assigneeCode].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
     final meta = [a.assigneeBranchName, a.templateName, a.customerName]
         .whereType<String>()
         .where((s) => s.isNotEmpty)
         .join(' · ');
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: GlassCard(
-        padding: EdgeInsets.zero,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(children: [
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(a.taskTitle, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.ink)),
-                  if (who.isNotEmpty)
-                    Text(who, style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
-                  if (meta.isNotEmpty)
-                    Text(meta, style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                  if (a.submittedAt != null)
-                    Text('Submitted ${_when(a.submittedAt)}', style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                ]),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
-              ),
-            ]),
-          ),
-        ),
-      ),
+    final sub = [who, meta].where((s) => s.isNotEmpty).join(' · ');
+    return ProListRow(
+      leading: ProAvatar(name: a.assigneeName ?? a.taskTitle, size: 40),
+      title: a.taskTitle,
+      titleMaxLines: 2,
+      subtitle: sub.isEmpty ? null : sub,
+      meta: a.submittedAt != null ? 'Submitted ${_when(a.submittedAt)}' : null,
+      pill: _reviewPill(a.status),
+      onTap: onTap,
     );
   }
 }
@@ -377,125 +355,175 @@ class _TaskReviewDetailScreenState extends ConsumerState<TaskReviewDetailScreen>
     }
   }
 
+  Widget _hero() {
+    final who = [_a.assigneeName, _a.assigneeCode].whereType<String>().where((s) => s.isNotEmpty).join(' · ');
+    final (label, tone, dot) = switch (_a.status) {
+      'IN_REVIEW' => ('In review', ProTagTone.warn, const Color(0xFFF2B347)),
+      'DONE' => ('Approved', ProTagTone.ok, AppColors.live),
+      'REJECTED' => ('Rejected', ProTagTone.bad, const Color(0xFFE5484D)),
+      _ => (_a.status, ProTagTone.neutral, Colors.white54),
+    };
+    return ProHero(
+      children: [
+        ProHeroIdentity(
+          name: _a.taskTitle,
+          role: who.isEmpty ? null : who,
+          icon: Icons.fact_check_outlined,
+          tags: [
+            ProHeroTag(label, tone: tone),
+            if (_a.templateName != null && _a.templateName!.isNotEmpty)
+              ProHeroTag(_a.templateName!, icon: Icons.description_outlined),
+          ],
+        ),
+        if (_a.submittedAt != null)
+          ProLiveLine(text: 'Submitted ${_when(_a.submittedAt)}', color: dot),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final task = _task;
     final schema = task == null ? null : FormSchema.parse(task.formSchema);
+    final summary = <MapEntry<String, String>>[
+      if ((_a.assigneeName ?? '').isNotEmpty) MapEntry('Employee', _a.assigneeName!),
+      if ((_a.assigneeCode ?? '').isNotEmpty) MapEntry('Employee code', _a.assigneeCode!),
+      if ((_a.assigneeBranchName ?? '').isNotEmpty) MapEntry('Branch', _a.assigneeBranchName!),
+      if ((_a.templateName ?? '').isNotEmpty) MapEntry('Form', _a.templateName!),
+      if ((_a.customerName ?? '').isNotEmpty) MapEntry('Customer', _a.customerName!),
+      if (_a.submittedAt != null) MapEntry('Submitted', _when(_a.submittedAt)),
+    ];
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_a.taskTitle, overflow: TextOverflow.ellipsis),
-        backgroundColor: AppColors.surface,
-        foregroundColor: AppColors.ink,
-        elevation: 0.5,
-      ),
-      body: _error != null
-          ? Padding(padding: const EdgeInsets.all(16), child: AppErrorPanel(message: _error!, onRetry: _load))
-          : task == null
-              ? const Center(child: CircularProgressIndicator())
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
+      backgroundColor: AppColors.bg,
+      appBar: AppBar(title: const Text('Review')),
+      body: ProPage(
+        hero: _hero(),
+        children: [
+          if (_error != null)
+            AppErrorPanel(message: _error!, onRetry: _load)
+          else if (task == null)
+            const AppLoadingBlock(height: 160)
+          else ...[
+            if (summary.isNotEmpty)
+              GlassCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    GlassCard(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text([_a.assigneeName, _a.assigneeCode].whereType<String>().join(' · '),
-                            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: AppColors.ink)),
-                        Text(
-                          [_a.assigneeBranchName, _a.templateName, _a.customerName]
-                              .whereType<String>()
-                              .where((s) => s.isNotEmpty)
-                              .join(' · '),
-                          style: const TextStyle(fontSize: 12, color: AppColors.inkSoft),
-                        ),
-                        if (_a.submittedAt != null)
-                          Text('Submitted ${_when(_a.submittedAt)}', style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-                        if (_a.status == 'REJECTED' && (_a.rejectionReason ?? '').isNotEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text('Rejected: ${_a.rejectionReason}',
-                                style: const TextStyle(fontSize: 12.5, color: AppColors.danger)),
-                          ),
-                      ]),
-                    ),
-                    const SizedBox(height: 12),
-                    if (_editing)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text('Correcting the submitted details. Saving keeps the task in review.',
-                            style: TextStyle(fontSize: 12.5, color: AppColors.primary)),
-                      ),
-                    if (schema == null)
-                      const Text('This task has no form details.', style: TextStyle(color: AppColors.muted))
-                    else
-                      FormRenderer(
-                        schema: schema,
-                        values: _values,
-                        readOnly: !_editing || _busy,
-                        errors: _errors,
-                        ownerFillsAssigned: true,
-                        onChanged: (name, v) => setState(() {
-                          if (v == null) {
-                            _values.remove(name);
-                          } else {
-                            _values[name] = v;
-                          }
-                        }),
-                      ),
+                    const ProSectionHeader(title: 'Submission'),
+                    const SizedBox(height: 6),
+                    ProKeyValue(rows: summary),
                   ],
                 ),
+              ),
+            if (_a.status == 'REJECTED' && (_a.rejectionReason ?? '').isNotEmpty)
+              ProNote('Rejected: ${_a.rejectionReason}', tone: ProNoteTone.bad),
+            if (_editing)
+              const ProNote(
+                'Correcting the submitted details. Saving keeps the task in review.',
+                tone: ProNoteTone.info,
+                icon: Icons.edit_note_rounded,
+              ),
+            const ProSectionHeader(title: 'Submitted answers', small: true),
+            if (schema == null)
+              const GlassCard(
+                child: Text('This task has no form details.',
+                    style: TextStyle(fontSize: 14, color: AppColors.muted)),
+              )
+            else
+              FormRenderer(
+                schema: schema,
+                values: _values,
+                readOnly: !_editing || _busy,
+                errors: _errors,
+                ownerFillsAssigned: true,
+                sectionCards: true,
+                onChanged: (name, v) => setState(() {
+                  if (v == null) {
+                    _values.remove(name);
+                  } else {
+                    _values[name] = v;
+                  }
+                }),
+              ),
+          ],
+        ],
+      ),
       bottomNavigationBar: task == null || !_pending
           ? null
-          : SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: _editing
-                    ? Row(children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: _busy
-                                ? null
-                                : () => setState(() {
-                                      _editing = false;
-                                      _errors = const {};
-                                      _values = parseFormValues(task.formResponse);
-                                    }),
-                            child: const Text('Cancel'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: _busy || schema == null ? null : () => _saveEdits(schema),
-                            child: Text(_busy ? 'Saving…' : 'Save changes'),
-                          ),
-                        ),
-                      ])
-                    : Row(children: [
-                        if (widget.branchMode && schema != null) ...[
-                          IconButton.outlined(
-                            tooltip: 'Edit details',
-                            onPressed: _busy ? null : () => setState(() => _editing = true),
-                            icon: const Icon(Icons.edit_rounded),
-                          ),
-                          const SizedBox(width: 8),
-                        ],
-                        Expanded(
-                          child: OutlinedButton(
-                            style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
-                            onPressed: _busy ? null : _reject,
-                            child: const Text('Reject'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: _busy ? null : _approve,
-                            child: const Text('Approve'),
-                          ),
-                        ),
-                      ]),
-              ),
-            ),
+          : _editing
+              ? ProBottomBar(children: [
+                  OutlinedButton(
+                    onPressed: _busy
+                        ? null
+                        : () => setState(() {
+                              _editing = false;
+                              _errors = const {};
+                              _values = parseFormValues(task.formResponse);
+                            }),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: _busy || schema == null ? null : () => _saveEdits(schema),
+                    child: Text(_busy ? 'Saving…' : 'Save changes'),
+                  ),
+                ])
+              : _DecisionBar(children: [
+                  if (widget.branchMode && schema != null) ...[
+                    IconButton.outlined(
+                      tooltip: 'Edit details',
+                      onPressed: _busy ? null : () => setState(() => _editing = true),
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                        backgroundColor: AppColors.surface,
+                        side: const BorderSide(color: Color(0xFFD4DEE0)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      icon: const Icon(Icons.edit_rounded),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.dangerTint,
+                        foregroundColor: AppColors.danger,
+                      ),
+                      onPressed: _busy ? null : _reject,
+                      child: const Text('Reject'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _busy ? null : _approve,
+                      child: const Text('Approve'),
+                    ),
+                  ),
+                ]),
+    );
+  }
+}
+
+/// Sticky bottom bar in the [ProBottomBar] style whose children size
+/// themselves (an icon button next to two expanded buttons).
+class _DecisionBar extends StatelessWidget {
+  const _DecisionBar({required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xF0F4F6F6),
+        border: Border(top: BorderSide(color: AppColors.hairline)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Row(children: children),
+        ),
+      ),
     );
   }
 }

@@ -9,8 +9,8 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/branding.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
-import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import '../home/home_shell.dart' show employeeProfileProvider;
 
@@ -170,107 +170,131 @@ class _BusinessCardScreenState extends ConsumerState<BusinessCardScreen> {
       website: branding.website,
     );
 
-    final mq = MediaQuery.of(context);
+    final canShare = _valid && !_sharing;
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: const BackButton(color: AppColors.ink),
-      ),
-      body: GlassBackdrop(
-        child: loading
-            ? const Center(child: CircularProgressIndicator())
-            : SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                padding: EdgeInsets.fromLTRB(
-                  16,
-                  mq.padding.top + kToolbarHeight + 8,
-                  16,
-                  mq.padding.bottom + 16,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const AppPageHeader(
-                      title: 'My Business Card',
-                      subtitle: 'Share your digital visiting card',
-                    ),
-                    const SizedBox(height: 16),
-                    // The card renders at its design size inside a FittedBox;
-                    // the RepaintBoundary is what gets rasterized on share.
-                    FittedBox(
-                      child: SizedBox(
-                        width: BusinessCardView.designWidth,
-                        height: BusinessCardView.designHeight,
-                        child: RepaintBoundary(
-                          key: _cardKey,
-                          child: BusinessCardView(
-                            name: _name.text.trim(),
-                            designation: _designation.text.trim(),
-                            phone: _phone.text.trim(),
-                            email: _email.text.trim(),
-                            location: _location.text.trim(),
-                          ),
+      appBar: AppBar(title: const Text('Business card')),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : ProPage(
+              hero: ProHero(
+                title: 'My business card',
+                subtitle: 'Share your digital visiting card',
+                actions: [
+                  ProHeroIconButton(
+                    icon: Icons.ios_share_rounded,
+                    tooltip: 'Share card image',
+                    onTap: canShare ? _shareCard : null,
+                  ),
+                ],
+                // The card renders at its design size inside a FittedBox;
+                // the RepaintBoundary is what gets rasterized on share.
+                overlap: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: AppShadows.lifted,
+                  ),
+                  child: FittedBox(
+                    child: SizedBox(
+                      width: BusinessCardView.designWidth,
+                      height: BusinessCardView.designHeight,
+                      child: RepaintBoundary(
+                        key: _cardKey,
+                        child: BusinessCardView(
+                          name: _name.text.trim(),
+                          designation: _designation.text.trim(),
+                          phone: _phone.text.trim(),
+                          email: _email.text.trim(),
+                          location: _location.text.trim(),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 18),
-                    const AppSectionHeader(
-                      title: 'Card details',
-                      subtitle:
-                          'Name & designation are filled from your profile — '
-                          'edit your contact details below',
-                    ),
-                    const SizedBox(height: 8),
-                    // Name & designation are auto-filled from the profile and
-                    // shown on the card; only the contact details are editable.
-                    _field('Mobile', Icons.phone_outlined, _phone,
-                        keyboard: TextInputType.phone),
-                    _field('Email', Icons.email_outlined, _email,
-                        keyboard: TextInputType.emailAddress),
-                    _field('Address', Icons.location_on_outlined, _location,
-                        lines: 3),
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        icon: _sharing
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white),
-                              )
-                            : const Icon(Icons.share_rounded, size: 18),
-                        label:
-                            Text(_sharing ? 'Preparing…' : 'Share card image'),
-                        onPressed: _valid && !_sharing ? _shareCard : null,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    if (_valid) _QrSection(vcard: vcard),
-                  ],
+                  ),
                 ),
               ),
-      ),
+              children: [
+                GlassCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const ProSectionHeader(
+                        title: 'Card details',
+                        subtitle:
+                            'Name & designation are filled from your profile — '
+                            'edit your contact details below',
+                      ),
+                      const SizedBox(height: 8),
+                      // Name & designation are auto-filled from the profile
+                      // and shown on the card; only the contact details are
+                      // editable.
+                      ProKeyValue(
+                        rows: [
+                          MapEntry(
+                              'Name',
+                              _name.text.trim().isEmpty
+                                  ? '—'
+                                  : _name.text.trim()),
+                          MapEntry(
+                              'Designation',
+                              _designation.text.trim().isEmpty
+                                  ? '—'
+                                  : _designation.text.trim()),
+                        ],
+                      ),
+                      _field('Mobile', Icons.phone_outlined, _phone,
+                          keyboard: TextInputType.phone),
+                      _field('Email', Icons.email_outlined, _email,
+                          keyboard: TextInputType.emailAddress),
+                      _field('Address', Icons.location_on_outlined, _location,
+                          lines: 3),
+                    ],
+                  ),
+                ),
+                if (_valid) _QrSection(vcard: vcard),
+              ],
+            ),
+      bottomNavigationBar: loading
+          ? null
+          : ProBottomBar(
+              children: [
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                    disabledBackgroundColor:
+                        _sharing ? AppColors.primary : null,
+                    disabledForegroundColor: _sharing ? Colors.white : null,
+                  ),
+                  icon: _sharing
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.share_rounded, size: 18),
+                  label: Text(_sharing ? 'Preparing…' : 'Share card image'),
+                  onPressed: canShare ? _shareCard : null,
+                ),
+              ],
+            ),
     );
   }
 
   Widget _field(String label, IconData icon, TextEditingController controller,
       {TextInputType? keyboard, int lines = 1}) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: TextField(
-        controller: controller,
-        keyboardType: keyboard,
-        minLines: lines,
-        maxLines: lines,
-        onChanged: (_) => setState(() {}), // live preview + button state
-        decoration: InputDecoration(
-          labelText: label,
-          prefixIcon: Icon(icon, size: 19),
+      padding: const EdgeInsets.only(top: 12),
+      child: ProField(
+        label: label,
+        child: TextField(
+          controller: controller,
+          keyboardType: keyboard,
+          minLines: lines,
+          maxLines: lines,
+          onChanged: (_) => setState(() {}), // live preview + button state
+          style: const TextStyle(fontSize: 15, color: AppColors.ink),
+          decoration: InputDecoration(
+            prefixIcon: Icon(icon, size: 19),
+          ),
         ),
       ),
     );
@@ -470,53 +494,45 @@ class _QrSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.hairline),
-      ),
+    return GlassCard(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Row(
-            children: [
-              Icon(Icons.qr_code_2_rounded,
-                  size: 18, color: BusinessCardView.teal),
-              SizedBox(width: 8),
-              Text('Scan to save contact',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.ink)),
-            ],
+          ProSectionHeader(
+            title: 'Scan to save contact',
+            trailing: ProPill(
+              'vCard',
+              color: AppColors.primary,
+              background: AppColors.primary.withOpacity(0.1),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.hairline),
+              ),
+              child: QrImageView(
+                data: vcard,
+                size: 180,
+                backgroundColor: Colors.white,
+                eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.square,
+                    color: BusinessCardView.teal),
+                dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square,
+                    color: BusinessCardView.teal),
+              ),
+            ),
           ),
           const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFE8E8E8), width: 2),
-            ),
-            child: QrImageView(
-              data: vcard,
-              size: 180,
-              backgroundColor: Colors.white,
-              eyeStyle: const QrEyeStyle(
-                  eyeShape: QrEyeShape.square,
-                  color: BusinessCardView.teal),
-              dataModuleStyle: const QrDataModuleStyle(
-                  dataModuleShape: QrDataModuleShape.square,
-                  color: BusinessCardView.teal),
-            ),
-          ),
-          const SizedBox(height: 10),
           const Text(
             'Anyone can point their camera here to add you to their contacts.',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+            style: AppText.caption,
           ),
         ],
       ),

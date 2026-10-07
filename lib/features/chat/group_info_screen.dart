@@ -1,10 +1,8 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
-import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import 'chat_controller.dart';
 import 'chat_models.dart';
@@ -16,7 +14,6 @@ class GroupInfoScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final mq = MediaQuery.of(context);
     final user = ref.watch(authUserProvider);
     final myEmpId = user?.employeeId;
     // Follow the live list copy so a rename / member change made here (or by
@@ -32,222 +29,112 @@ class GroupInfoScreen extends ConsumerWidget {
         .firstOrNull;
     final isAdmin = myMember?.isAdmin ?? false;
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: PreferredSize(
-          preferredSize:
-              Size.fromHeight(mq.padding.top + AppChrome.appBarHeight),
-          child: ClipRect(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: GlassBlur.chrome,
-                sigmaY: GlassBlur.chrome,
+    // Hero numbers from the member list already on the conversation.
+    final memberN = conversation.members.length;
+    final adminN = conversation.members.where((m) => m.isAdmin).length;
+    final onlineN = conversation.members.where((m) => m.online).length;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Group info')),
+      body: ProPage(
+        hero: ProHero(
+          overlap: ProKpiStrip(
+            cells: [
+              ProKpi(value: '$memberN', label: 'Members'),
+              ProKpi(value: '$adminN', label: 'Admins'),
+              ProKpi(
+                value: '$onlineN',
+                label: 'Online now',
+                valueColor: onlineN > 0 ? AppColors.success : null,
               ),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.62),
-                  border: Border(
-                    bottom: BorderSide(color: Colors.white.withOpacity(0.5)),
-                  ),
-                ),
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                          onPressed: () => Navigator.pop(context),
-                          color: AppColors.inkSoft,
-                        ),
-                        const SizedBox(width: 4),
-                        const Expanded(
-                          child: Text(
-                            'Group Info',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.ink,
-                              letterSpacing: -0.2,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        body: ListView(
-          physics: const BouncingScrollPhysics(
-            parent: AlwaysScrollableScrollPhysics(),
-          ),
-          padding: EdgeInsets.fromLTRB(
-            16,
-            12,
-            16,
-            mq.padding.bottom + 20,
+            ],
           ),
           children: [
-            // Group header card
-            GlassCard(
-              padding: const EdgeInsets.all(20),
-              shadow: AppShadows.card,
-              child: Column(
-                children: [
-                  Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      gradient: AppColors.heroGradient,
-                      borderRadius: BorderRadius.circular(22),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primary.withOpacity(0.3),
-                          blurRadius: 16,
-                          offset: const Offset(0, 6),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.group_rounded,
-                      color: Colors.white,
-                      size: 32,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          conversation.title,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.ink,
-                            letterSpacing: -0.3,
-                          ),
-                        ),
-                      ),
-                      if (isAdmin) ...[
-                        const SizedBox(width: 4),
-                        IconButton(
-                          visualDensity: VisualDensity.compact,
-                          tooltip: 'Rename group',
-                          icon: Icon(Icons.edit_rounded,
-                              size: 18, color: AppColors.primary),
-                          onPressed: () =>
-                              _rename(context, ref, conversation),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${conversation.members.length} members',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: AppColors.muted,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
+            ProHeroIdentity(
+              name: conversation.title,
+              role: 'Group chat · $memberN members',
+              icon: Icons.group_rounded,
+              tags: [
+                if (isAdmin) const ProHeroTag('You are admin', tone: ProTagTone.ok),
+                ProHeroTag('$adminN admin${adminN == 1 ? '' : 's'}'),
+              ],
             ),
-            const SizedBox(height: 16),
-            // Members section
-            const AppSectionHeader(
-              title: 'Members',
-              subtitle: 'Group participants',
+            ProLiveLine(
+              text: onlineN == 0
+                  ? 'Nobody in this group is online right now'
+                  : '$onlineN of $memberN online now',
+              color: onlineN == 0 ? Colors.white38 : AppColors.live,
             ),
-            const SizedBox(height: 10),
-            ...conversation.members.map((member) => _MemberTile(
+            ProHeroActions(
+              actions: [
+                ProAction(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  label: 'Open chat',
+                  primary: true,
+                  // Group info is only opened from its thread — back = chat.
+                  onTap: () => Navigator.of(context).maybePop(),
+                ),
+                if (isAdmin)
+                  ProAction(
+                    icon: Icons.edit_rounded,
+                    label: 'Rename',
+                    onTap: () => _rename(context, ref, conversation),
+                  ),
+                ProAction(
+                  icon: Icons.exit_to_app_rounded,
+                  label: 'Leave',
+                  onTap: () => _confirmLeave(context, ref),
+                ),
+              ],
+            ),
+          ],
+        ),
+        children: [
+          // Members section
+          ProSectionHeader(
+            title: 'Group participants · $memberN',
+            small: true,
+          ),
+          ProListGroup(
+            dividerIndent: 66,
+            children: [
+              for (final member in conversation.members)
+                _MemberTile(
                   member: member,
                   isAdmin: isAdmin,
                   myEmployeeId: myEmpId,
                   conversationId: conversation.id,
-                )),
-            // Leave group — any member may leave, not just the creator/admins
-            // (mirrors ChatPage.tsx on web).
-            const SizedBox(height: 20),
-            // Leave group button
-              GlassCard(
-                padding: EdgeInsets.zero,
-                shadow: AppShadows.soft,
-                border: Border.all(color: AppColors.danger.withOpacity(0.25)),
-                child: ListTile(
-                  leading: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: AppColors.danger.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(Icons.exit_to_app_rounded,
-                        size: 18, color: AppColors.danger),
-                  ),
-                  title: const Text(
-                    'Leave group',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.danger,
-                    ),
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.lg),
-                  ),
-                  onTap: () => _confirmLeave(context, ref),
                 ),
+            ],
+          ),
+          // Leave group — any member may leave, not just the creator/admins
+          // (mirrors ChatPage.tsx on web). Delete is admin-only.
+          ProListGroup(
+            children: [
+              _DangerRow(
+                icon: Icons.exit_to_app_rounded,
+                title: 'Leave group',
+                subtitle: 'You will no longer receive its messages',
+                onTap: () => _confirmLeave(context, ref),
               ),
-            if (isAdmin) ...[
-              const SizedBox(height: 12),
-              // Delete group (for everyone)
-              GlassCard(
-                padding: EdgeInsets.zero,
-                shadow: AppShadows.soft,
-                border: Border.all(color: AppColors.danger.withOpacity(0.25)),
-                child: ListTile(
-                  leading: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: AppColors.danger.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(Icons.delete_forever_rounded,
-                        size: 18, color: AppColors.danger),
-                  ),
-                  title: const Text(
-                    'Delete group',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.danger,
-                    ),
-                  ),
-                  subtitle: const Text(
-                    'Closes and hides the group for everyone',
-                    style: TextStyle(fontSize: 11, color: AppColors.muted),
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.lg),
-                  ),
+              if (isAdmin)
+                _DangerRow(
+                  icon: Icons.delete_forever_rounded,
+                  title: 'Delete group',
+                  subtitle: 'Closes and hides the group for everyone',
                   onTap: () => _confirmDelete(context, ref, conversation),
                 ),
-              ),
             ],
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
+
+  static final _destructive = FilledButton.styleFrom(
+    backgroundColor: AppColors.dangerTint,
+    foregroundColor: AppColors.danger,
+  );
 
   Future<void> _rename(
       BuildContext context, WidgetRef ref, Conversation conv) async {
@@ -255,13 +142,9 @@ class GroupInfoScreen extends ConsumerWidget {
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white.withOpacity(0.92),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-        ),
         title: const Text(
           'Rename group',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          style: TextStyle(fontSize: 19, fontWeight: FontWeight.w600),
         ),
         content: TextField(
           controller: ctrl,
@@ -310,13 +193,9 @@ class GroupInfoScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white.withOpacity(0.92),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-        ),
         title: const Text(
           'Delete group?',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          style: TextStyle(fontSize: 19, fontWeight: FontWeight.w600),
         ),
         content: Text(
           '"${conv.title}" will be closed and hidden for every participant. '
@@ -329,7 +208,7 @@ class GroupInfoScreen extends ConsumerWidget {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            style: _destructive,
             onPressed: () async {
               Navigator.pop(ctx);
               try {
@@ -358,13 +237,9 @@ class GroupInfoScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white.withOpacity(0.92),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-        ),
         title: const Text(
           'Leave group?',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          style: TextStyle(fontSize: 19, fontWeight: FontWeight.w600),
         ),
         content: const Text(
           'You will no longer receive messages from this group.',
@@ -376,7 +251,7 @@ class GroupInfoScreen extends ConsumerWidget {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            style: _destructive,
             onPressed: () async {
               Navigator.pop(ctx);
               try {
@@ -405,6 +280,59 @@ class GroupInfoScreen extends ConsumerWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Danger row (leave / delete)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DangerRow extends StatelessWidget {
+  const _DangerRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+          child: Row(
+            children: [
+              ProIconWell(icon: icon, color: AppColors.danger),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        height: 1.33,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.danger,
+                      ),
+                    ),
+                    Text(subtitle, style: AppText.caption),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Member tile
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -423,110 +351,51 @@ class _MemberTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isSelf = member.employeeId == myEmployeeId;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: GlassCard(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        shadow: const [],
-        child: ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              UserAvatar(name: member.name, size: 40, radius: 20),
-              if (member.online)
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: AppColors.success,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          title: Row(
-            children: [
-              Flexible(
-                child: Text(
-                  member.name + (isSelf ? ' (You)' : ''),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
-                  ),
-                ),
+    return ProListRow(
+      leading: ProAvatar(
+        name: member.name,
+        dark: isSelf,
+        dot: member.online ? AppColors.live : null,
+      ),
+      title: member.name + (isSelf ? ' (You)' : ''),
+      subtitle: (member.designation ?? '').isEmpty ? null : member.designation,
+      pill: member.isAdmin
+          ? ProPill(
+              'Admin',
+              color: AppColors.primary,
+              background: Color.alphaBlend(
+                  AppColors.primary.withOpacity(0.10), Colors.white),
+            )
+          : null,
+      chevron: false,
+      trailing: (isAdmin && !isSelf)
+          ? PopupMenuButton<String>(
+              tooltip: 'Member options',
+              icon: const Icon(Icons.more_vert_rounded,
+                  size: 20, color: AppColors.muted),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadii.md),
               ),
-              if (member.isAdmin) ...[
-                const SizedBox(width: 6),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    gradient: AppColors.heroGradient,
-                    borderRadius: BorderRadius.circular(AppRadii.pill),
+              onSelected: (action) => _onAction(action, context, ref),
+              itemBuilder: (_) => [
+                if (!member.isAdmin)
+                  const PopupMenuItem(
+                    value: 'promote',
+                    child: Text('Make admin'),
                   ),
-                  child: const Text(
-                    'Admin',
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                    ),
+                if (member.isAdmin)
+                  const PopupMenuItem(
+                    value: 'demote',
+                    child: Text('Remove admin'),
                   ),
+                const PopupMenuItem(
+                  value: 'remove',
+                  child: Text('Remove from group',
+                      style: TextStyle(color: AppColors.danger)),
                 ),
               ],
-            ],
-          ),
-          subtitle: Text(
-            member.designation ?? '',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 11,
-              color: AppColors.muted,
-            ),
-          ),
-          trailing: (isAdmin && !isSelf)
-              ? PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert_rounded,
-                      size: 18, color: AppColors.muted),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                  ),
-                  onSelected: (action) =>
-                      _onAction(action, context, ref),
-                  itemBuilder: (_) => [
-                    if (!member.isAdmin)
-                      const PopupMenuItem(
-                        value: 'promote',
-                        child: Text('Make admin'),
-                      ),
-                    if (member.isAdmin)
-                      const PopupMenuItem(
-                        value: 'demote',
-                        child: Text('Remove admin'),
-                      ),
-                    const PopupMenuItem(
-                      value: 'remove',
-                      child: Text('Remove from group',
-                          style: TextStyle(color: AppColors.danger)),
-                    ),
-                  ],
-                )
-              : null,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.lg),
-          ),
-        ),
-      ),
+            )
+          : null,
     );
   }
 

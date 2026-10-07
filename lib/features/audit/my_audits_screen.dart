@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/branding.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -30,11 +31,11 @@ const _kStatusFilters = <({String? value, String label})>[
   (value: 'DRAFT', label: 'Draft'),
   (value: 'PLANNED', label: 'Planned'),
   (value: 'ASSIGNED', label: 'Assigned'),
-  (value: 'IN_PROGRESS', label: 'In Progress'),
+  (value: 'IN_PROGRESS', label: 'In progress'),
   (value: 'SUBMITTED', label: 'Submitted'),
-  (value: 'SUPERVISOR_APPROVAL_PENDING', label: 'Supervisor Approval'),
+  (value: 'SUPERVISOR_APPROVAL_PENDING', label: 'Supervisor approval'),
   (value: 'BM_ACTION_PENDING', label: 'Sent to BM'),
-  (value: 'BM_ACTION_SUBMITTED', label: 'BM Action Submitted'),
+  (value: 'BM_ACTION_SUBMITTED', label: 'BM action submitted'),
   (value: 'VERIFICATION_PENDING', label: 'Verification'),
   (value: 'REOPENED', label: 'Reopened'),
   (value: 'CLOSED', label: 'Closed'),
@@ -143,11 +144,12 @@ class _MyAuditsScreenState extends ConsumerState<MyAuditsScreen> {
     final branches = ref.watch(auditBranchesProvider).asData?.value ??
         const <BranchOption>[];
     final scoped = _inScope(branches);
+    final termBranch = Branding.current.term('branch');
 
     final query = AuditPlansQuery(
       status: _status,
-      // Only branchId is server-filterable — see _OrgFilterCard for why the
-      // upper levels narrow the Branch dropdown instead of filtering directly.
+      // Only branchId is server-filterable — see _orgFilterCard for why the
+      // upper levels narrow the Branch picker instead of filtering directly.
       branchId: _branchId,
       auditorId: auditorId,
       q: _q,
@@ -155,118 +157,188 @@ class _MyAuditsScreenState extends ConsumerState<MyAuditsScreen> {
       size: 20,
     );
     final async = ref.watch(myAuditsProvider(query));
+    final pageData = async.valueOrNull;
+    final title = widget.mine == true ? 'My audits' : 'Audit plans';
 
-    final content = RefreshIndicator(
-          color: AppColors.primary,
-          onRefresh: () async {
-            ref.invalidate(myAuditsProvider);
-            await Future<void>.delayed(const Duration(milliseconds: 250));
+    final content = ProPage(
+      onRefresh: () async {
+        ref.invalidate(myAuditsProvider);
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      },
+      // Room for the "New plan" button when hosted in the audit home tabs.
+      padding: EdgeInsets.fromLTRB(16, 16, 16, widget.embedded ? 96 : 24),
+      hero: ProHero(
+        title: title,
+        subtitle: pageData == null
+            ? 'Loading audits…'
+            : '${pageData.totalElements} '
+                '${pageData.totalElements == 1 ? 'audit' : 'audits'}'
+                '${_q.isEmpty ? '' : ' · “$_q”'}',
+        actions: [
+          if (branches.isNotEmpty)
+            ProHeroIconButton(
+              icon: Icons.tune_rounded,
+              tooltip: 'Filter by $termBranch',
+              badge: _hasOrgFilter,
+              onTap: () => setState(() => _filtersOpen = !_filtersOpen),
+            ),
+        ],
+        overlap: _SubmitSearchField(
+          controller: _searchCtrl,
+          hint: 'Search code or title',
+          showClear: _q.isNotEmpty,
+          onSubmitted: (v) => setState(() {
+            _q = v.trim();
+            _page = 0;
+          }),
+          onClear: () {
+            _searchCtrl.clear();
+            setState(() {
+              _q = '';
+              _page = 0;
+            });
           },
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-            children: [
-              TextField(
-                controller: _searchCtrl,
-                textInputAction: TextInputAction.search,
-                decoration: InputDecoration(
-                  hintText: 'Search code or title',
-                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                  suffixIcon: _q.isEmpty
-                      ? null
-                      : IconButton(
-                          icon: const Icon(Icons.close_rounded, size: 18),
-                          onPressed: () {
-                            _searchCtrl.clear();
-                            setState(() {
-                              _q = '';
-                              _page = 0;
-                            });
-                          },
-                        ),
-                ),
-                onSubmitted: (v) => setState(() {
-                  _q = v.trim();
-                  _page = 0;
-                }),
-              ),
-              const SizedBox(height: 10),
-              _StatusFilterBar(
-                selected: _status,
-                onChanged: (v) => setState(() {
-                  _status = v;
-                  _page = 0;
-                }),
-              ),
-              const SizedBox(height: 10),
-              _buildOrgFilters(branches, scoped),
-              const SizedBox(height: 14),
-              async.when(
-                loading: () => const AppLoadingBlock(height: 240),
-                error: (e, __) => AppErrorPanel(
-                  message: 'Could not load audits.\n$e',
-                  onRetry: () => ref.invalidate(myAuditsProvider),
-                ),
-                data: (pageData) {
-                  if (pageData.content.isEmpty) {
-                    return AppEmptyState(
-                      icon: Icons.fact_check_rounded,
-                      message: _hasOrgFilter
-                          ? 'No audits for the selected scope.\nTry clearing the filter.'
-                          : 'No audits found.\nAssigned branch audits will appear here.',
-                    );
-                  }
-                  return Column(
-                    children: [
-                      for (final plan in pageData.content)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _AuditPlanCard(
-                            plan: plan,
-                            onTap: () => _open(plan),
-                          ),
-                        ),
-                      if (pageData.totalPages > 1)
-                        _Pager(
-                          page: pageData.page,
-                          totalPages: pageData.totalPages,
-                          onPrev: _page > 0
-                              ? () => setState(() => _page -= 1)
-                              : null,
-                          onNext: pageData.last
-                              ? null
-                              : () => setState(() => _page += 1),
-                        ),
-                    ],
-                  );
-                },
-              ),
-            ],
+        ),
+        children: [ProHeroStats(stats: _stats(pageData))],
+      ),
+      children: [
+        ProChipBar(
+          labels: [for (final f in _kStatusFilters) f.label],
+          selected: _kStatusFilters.indexWhere((f) => f.value == _status),
+          onSelected: (i) => setState(() {
+            _status = _kStatusFilters[i].value;
+            _page = 0;
+          }),
+          bleed: 0,
+        ),
+        if (_filtersOpen && branches.isNotEmpty)
+          _orgFilterCard(branches, scoped, termBranch),
+        if (_hasOrgFilter) _scopeNote(scoped, termBranch),
+        async.when(
+          loading: () => const AppLoadingBlock(height: 240),
+          error: (e, __) => AppErrorPanel(
+            message: 'Could not load audits.\n$e',
+            onRetry: () => ref.invalidate(myAuditsProvider),
           ),
-        );
+          data: (pageData) {
+            if (pageData.content.isEmpty) {
+              return ProEmpty(
+                icon: Icons.fact_check_rounded,
+                title: _hasOrgFilter
+                    ? 'No audits for the selected scope.'
+                    : 'No audits found.',
+                message: _hasOrgFilter
+                    ? 'Try clearing the filter.'
+                    : 'Assigned branch audits will appear here.',
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ProSectionHeader(
+                  title: '$title · ${pageData.totalElements}',
+                  small: true,
+                ),
+                const SizedBox(height: 8),
+                ProListGroup(
+                  children: [
+                    for (final plan in pageData.content)
+                      _AuditPlanRow(plan: plan, onTap: () => _open(plan)),
+                  ],
+                ),
+                if (pageData.totalPages > 1) ...[
+                  const SizedBox(height: 14),
+                  AuditPager(
+                    page: pageData.page,
+                    totalPages: pageData.totalPages,
+                    onPrev:
+                        _page > 0 ? () => setState(() => _page -= 1) : null,
+                    onNext: pageData.last
+                        ? null
+                        : () => setState(() => _page += 1),
+                  ),
+                ],
+              ],
+            );
+          },
+        ),
+      ],
+    );
     if (widget.embedded) return content;
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: Text(widget.mine == true ? 'My Audits' : 'Audit Plans'),
-        backgroundColor: AppColors.surface,
-        foregroundColor: AppColors.ink,
-        elevation: 0,
-      ),
-      body: SafeArea(child: content),
+      appBar: AppBar(title: const Text('Internal audit')),
+      body: content,
     );
+  }
+
+  /// Hero tiles built from the page already loaded.
+  List<ProStat> _stats(AuditPage<AuditPlan>? pd) {
+    final rows = pd?.content ?? const <AuditPlan>[];
+    final scored = rows.where((p) => p.finalScore != null).toList();
+    final avg = scored.isEmpty
+        ? null
+        : scored.fold<double>(0, (a, p) => a + p.finalScore!) / scored.length;
+    String statusLabel() {
+      for (final f in _kStatusFilters) {
+        if (f.value == _status) return f.label;
+      }
+      return _status ?? 'All statuses';
+    }
+
+    return [
+      ProStat(
+        label: 'Audits',
+        value: pd == null ? '—' : '${pd.totalElements}',
+        sub: _status == null ? 'All statuses' : statusLabel(),
+        dot: const Color(0xFF9FCBD5),
+      ),
+      ProStat(
+        label: 'In view',
+        value: pd == null ? '—' : '${rows.length}',
+        sub: pd == null
+            ? null
+            : (pd.totalPages > 1
+                ? 'Page ${pd.page + 1} of ${pd.totalPages}'
+                : 'All loaded'),
+        dot: const Color(0xFF5FC3D6),
+      ),
+      ProStat(
+        label: 'Avg score',
+        value: auditPct(avg),
+        sub: pd == null ? null : '${scored.length} scored',
+        dot: AppColors.live,
+      ),
+    ];
+  }
+
+  Future<void> _pick<T>({
+    required String title,
+    required T? selected,
+    required List<({T? value, String label})> options,
+    required ValueChanged<T?> onChanged,
+  }) async {
+    final r = await showAuditPicker<T>(
+      context,
+      title: title,
+      options: options,
+      selected: selected,
+    );
+    if (r == null || !mounted) return;
+    onChanged(r.value);
   }
 
   /// Region → Division → Area → Branch cascade.
   ///
   /// `GET /api/audit/plans` accepts `branchId` only — it has no region /
   /// division / area parameters — so the upper three levels narrow the Branch
-  /// dropdown rather than filtering the list themselves. The list re-queries
+  /// picker rather than filtering the list themselves. The list re-queries
   /// once a branch is picked. Filtering the upper levels client-side instead
   /// would silently break the server-side pager.
-  Widget _buildOrgFilters(List<BranchOption> all, List<BranchOption> scoped) {
-    if (all.isEmpty) return const SizedBox.shrink();
-
+  Widget _orgFilterCard(
+    List<BranchOption> all,
+    List<BranchOption> scoped,
+    String termBranch,
+  ) {
     final regions = _distinct(all.map((b) => b.regionLabel));
     final divisions = _distinct(all
         .where((b) => _region == null || b.regionLabel == _region)
@@ -280,136 +352,154 @@ class _MyAuditsScreenState extends ConsumerState<MyAuditsScreen> {
     final termRegion = Branding.current.term('region');
     final termDivision = Branding.current.term('division');
     final termArea = Branding.current.term('area');
-    final termBranch = Branding.current.term('branch');
+
+    List<({String? value, String label})> strOpts(List<String> v, String allLabel) => [
+          (value: null, label: allLabel),
+          for (final s in v) (value: s, label: s),
+        ];
+
+    String? branchLabel;
+    for (final b in scoped) {
+      if (b.id == _branchId) branchLabel = b.label;
+    }
+
+    final region = AuditPickField(
+      label: termRegion,
+      value: _region ?? 'All ${_plural(termRegion)}',
+      active: _region != null,
+      onTap: () => _pick<String>(
+        title: termRegion,
+        selected: _region,
+        options: strOpts(regions, 'All ${_plural(termRegion)}'),
+        onChanged: (v) => setState(() {
+          _region = v;
+          _division = null;
+          _area = null;
+          _branchId = null;
+          _page = 0;
+        }),
+      ),
+    );
+    final division = AuditPickField(
+      label: termDivision,
+      value: _division ?? 'All ${_plural(termDivision)}',
+      active: _division != null,
+      onTap: () => _pick<String>(
+        title: termDivision,
+        selected: _division,
+        options: strOpts(divisions, 'All ${_plural(termDivision)}'),
+        onChanged: (v) => setState(() {
+          _division = v;
+          _area = null;
+          _branchId = null;
+          _page = 0;
+        }),
+      ),
+    );
+    final area = AuditPickField(
+      label: termArea,
+      value: _area ?? 'All ${_plural(termArea)}',
+      active: _area != null,
+      onTap: () => _pick<String>(
+        title: termArea,
+        selected: _area,
+        options: strOpts(areas, 'All ${_plural(termArea)}'),
+        onChanged: (v) => setState(() {
+          _area = v;
+          _branchId = null;
+          _page = 0;
+        }),
+      ),
+    );
+    final branch = AuditPickField(
+      label: termBranch,
+      value: branchLabel ?? 'All ${_plural(termBranch)}',
+      active: _branchId != null,
+      onTap: () => _pick<int>(
+        title: termBranch,
+        selected: _branchId,
+        options: [
+          (value: null, label: 'All ${_plural(termBranch)}'),
+          for (final b in scoped) (value: b.id, label: b.label),
+        ],
+        onChanged: (v) => setState(() {
+          _branchId = v;
+          _page = 0;
+        }),
+      ),
+    );
 
     return GlassCard(
-      padding: const EdgeInsets.all(12),
-      shadow: AppShadows.soft,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          InkWell(
-            onTap: () => setState(() => _filtersOpen = !_filtersOpen),
-            child: Row(
+          ProSectionHeader(
+            title: 'Filter by $termBranch',
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.tune_rounded, size: 16, color: AppColors.muted),
-                const SizedBox(width: 6),
-                Text(
-                  'Filter by $termBranch',
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
-                ),
-                if (_activeFilterCount > 0) ...[
-                  const SizedBox(width: 6),
-                  StatusPill(
-                    label: '$_activeFilterCount',
-                    color: AppColors.primary,
-                  ),
-                ],
-                const Spacer(),
-                Icon(
-                  _filtersOpen
-                      ? Icons.expand_less_rounded
-                      : Icons.expand_more_rounded,
-                  size: 20,
-                  color: AppColors.muted,
+                if (_activeFilterCount > 0)
+                  ProPill('$_activeFilterCount', color: AppColors.primary),
+                IconButton(
+                  tooltip: 'Close filter',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.close_rounded,
+                      size: 20, color: AppColors.muted),
+                  onPressed: () => setState(() => _filtersOpen = false),
                 ),
               ],
             ),
           ),
-          if (_filtersOpen) ...[
-            const SizedBox(height: 10),
-            _dropdown<String>(
-              hint: 'All ${_plural(termRegion)}',
-              value: _region,
-              items: _stringItems(regions, 'All ${_plural(termRegion)}'),
-              onChanged: (v) => setState(() {
-                _region = v;
-                _division = null;
-                _area = null;
-                _branchId = null;
-                _page = 0;
-              }),
-            ),
-            _dropdown<String>(
-              hint: 'All ${_plural(termDivision)}',
-              value: _division,
-              items: _stringItems(divisions, 'All ${_plural(termDivision)}'),
-              onChanged: (v) => setState(() {
-                _division = v;
-                _area = null;
-                _branchId = null;
-                _page = 0;
-              }),
-            ),
-            _dropdown<String>(
-              hint: 'All ${_plural(termArea)}',
-              value: _area,
-              items: _stringItems(areas, 'All ${_plural(termArea)}'),
-              onChanged: (v) => setState(() {
-                _area = v;
-                _branchId = null;
-                _page = 0;
-              }),
-            ),
-            _dropdown<int>(
-              hint: 'All ${_plural(termBranch)}',
-              value: _branchId,
-              items: [
-                DropdownMenuItem<int>(
-                  value: null,
-                  child: Text('All ${_plural(termBranch)}'),
-                ),
-                for (final b in scoped)
-                  DropdownMenuItem<int>(
-                    value: b.id,
-                    child: Text(b.label, overflow: TextOverflow.ellipsis),
-                  ),
-              ],
-              onChanged: (v) => setState(() {
-                _branchId = v;
-                _page = 0;
-              }),
-            ),
-          ],
-          if (_hasOrgFilter) ...[
-            const SizedBox(height: 2),
-            Row(
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: region),
+            const SizedBox(width: 8),
+            Expanded(child: division),
+          ]),
+          const SizedBox(height: 8),
+          Row(children: [
+            Expanded(child: area),
+            const SizedBox(width: 8),
+            Expanded(child: branch),
+          ]),
+        ],
+      ),
+    );
+  }
+
+  Widget _scopeNote(List<BranchOption> scoped, String termBranch) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+      decoration: BoxDecoration(
+        color: AppColors.neutralTint,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.filter_alt_outlined, size: 17, color: AppColors.inkSoft),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    _scopeText(scoped, termBranch),
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.inkSoft,
-                    ),
+                Text(
+                  _scopeText(scoped, termBranch),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.inkSoft,
+                    fontFeatures: [FontFeature.tabularFigures()],
                   ),
                 ),
-                TextButton(
-                  onPressed: _clearOrgFilter,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                if (_branchId == null)
+                  Text(
+                    'Pick a ${termBranch.toLowerCase()} to filter the list.',
+                    style: AppText.caption,
                   ),
-                  child: const Text('Clear', style: TextStyle(fontSize: 12)),
-                ),
               ],
             ),
-            if (_branchId == null)
-              Text(
-                'Pick a ${termBranch.toLowerCase()} to filter the list.',
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.muted,
-                ),
-              ),
-          ],
+          ),
+          TextButton(onPressed: _clearOrgFilter, child: const Text('Clear')),
         ],
       ),
     );
@@ -436,62 +526,6 @@ class _MyAuditsScreenState extends ConsumerState<MyAuditsScreen> {
   static String _plural(String term) =>
       term.endsWith('s') ? term : '${term}s';
 
-  static List<DropdownMenuItem<String>> _stringItems(
-    List<String> options,
-    String allLabel,
-  ) =>
-      [
-        DropdownMenuItem<String>(value: null, child: Text(allLabel)),
-        for (final o in options)
-          DropdownMenuItem<String>(
-            value: o,
-            child: Text(o, overflow: TextOverflow.ellipsis),
-          ),
-      ];
-
-  Widget _dropdown<T>({
-    required String hint,
-    required T? value,
-    required List<DropdownMenuItem<T>> items,
-    required ValueChanged<T?> onChanged,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: Border.all(color: AppColors.hairline),
-        ),
-        child: DropdownButtonHideUnderline(
-          child: DropdownButton<T>(
-            isExpanded: true,
-            value: value,
-            icon: const Icon(Icons.expand_more_rounded,
-                size: 18, color: AppColors.muted),
-            hint: Text(
-              hint,
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.muted,
-              ),
-            ),
-            style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: AppColors.ink,
-            ),
-            items: items,
-            onChanged: onChanged,
-          ),
-        ),
-      ),
-    );
-  }
-
   void _open(AuditPlan plan) {
     final id = plan.id;
     if (id == null) return;
@@ -501,72 +535,61 @@ class _MyAuditsScreenState extends ConsumerState<MyAuditsScreen> {
   }
 }
 
-class _StatusFilterBar extends StatelessWidget {
-  const _StatusFilterBar({required this.selected, required this.onChanged});
-  final String? selected;
-  final ValueChanged<String?> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          for (final f in _kStatusFilters) ...[
-            _FilterChip(
-              label: f.label,
-              selected: selected == f.value,
-              onTap: () => onChanged(f.value),
-            ),
-            const SizedBox(width: 8),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
+/// Raised search field (hero overlap) that searches on submit, like before.
+class _SubmitSearchField extends StatelessWidget {
+  const _SubmitSearchField({
+    required this.controller,
+    required this.hint,
+    required this.showClear,
+    required this.onSubmitted,
+    required this.onClear,
   });
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
+
+  final TextEditingController controller;
+  final String hint;
+  final bool showClear;
+  final ValueChanged<String> onSubmitted;
+  final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: selected ? AppColors.primary : AppColors.surface,
-      borderRadius: BorderRadius.circular(AppRadii.pill),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            border: Border.all(
-                color: selected ? AppColors.primary : AppColors.hairline),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: selected ? Colors.white : AppColors.inkSoft,
-            ),
-          ),
+    OutlineInputBorder border(Color c, [double w = 1]) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(15),
+          borderSide: BorderSide(color: c, width: w),
+        );
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: AppShadows.lifted,
+      ),
+      child: TextField(
+        controller: controller,
+        textInputAction: TextInputAction.search,
+        style: const TextStyle(fontSize: 15, color: AppColors.ink),
+        decoration: InputDecoration(
+          hintText: hint,
+          prefixIcon: const Icon(Icons.search_rounded, size: 21),
+          suffixIcon: showClear
+              ? IconButton(
+                  tooltip: 'Clear search',
+                  icon: const Icon(Icons.close_rounded, size: 19),
+                  onPressed: onClear,
+                )
+              : null,
+          contentPadding: const EdgeInsets.symmetric(vertical: 15),
+          border: border(AppColors.hairline),
+          enabledBorder: border(AppColors.hairline),
+          focusedBorder: border(AppColors.primary, 1.6),
         ),
+        onSubmitted: onSubmitted,
       ),
     );
   }
 }
 
-class _AuditPlanCard extends StatelessWidget {
-  const _AuditPlanCard({required this.plan, required this.onTap});
+class _AuditPlanRow extends StatelessWidget {
+  const _AuditPlanRow({required this.plan, required this.onTap});
   final AuditPlan plan;
   final VoidCallback onTap;
 
@@ -586,146 +609,26 @@ class _AuditPlanCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tone = auditScoreTone(plan.finalScore);
-    return InkWell(
-      borderRadius: BorderRadius.circular(AppRadii.lg),
+    final idLine = [
+      if ((plan.code ?? '').isNotEmpty) plan.code!,
+      if ((plan.branchName ?? '').isNotEmpty) plan.branchName!,
+    ].join(' · ');
+    final dates = _dateRange().isEmpty ? 'No dates set' : _dateRange();
+    return ProListRow(
+      leading: ProIconWell(
+        icon: Icons.fact_check_rounded,
+        color: auditStatusTone(plan.status).color,
+      ),
+      title: plan.title ?? plan.code ?? 'Audit',
+      titleMaxLines: 2,
+      subtitle: idLine.isEmpty ? null : idLine,
+      meta: (plan.finalScore != null && (plan.grade ?? '').isNotEmpty)
+          ? '$dates · Grade ${plan.grade}'
+          : dates,
+      value: plan.finalScore != null ? auditPct(plan.finalScore) : null,
+      valueColor: auditInk(tone),
+      pill: AuditStatusChip(status: plan.status),
       onTap: onTap,
-      child: GlassCard(
-        padding: const EdgeInsets.all(12),
-        shadow: AppShadows.soft,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        plan.title ?? plan.code ?? 'Audit',
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.ink,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        [
-                          if ((plan.code ?? '').isNotEmpty) plan.code!,
-                          if ((plan.branchName ?? '').isNotEmpty)
-                            plan.branchName!,
-                        ].join(' · '),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w500,
-                          color: AppColors.muted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                AuditStatusChip(status: plan.status),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const Icon(Icons.calendar_month_rounded,
-                    size: 13, color: AppColors.muted),
-                const SizedBox(width: 5),
-                Expanded(
-                  child: Text(
-                    _dateRange().isEmpty ? 'No dates set' : _dateRange(),
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.inkSoft,
-                    ),
-                  ),
-                ),
-                if (plan.finalScore != null) ...[
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: tone.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(AppRadii.pill),
-                      border: Border.all(color: tone.withValues(alpha: 0.30)),
-                    ),
-                    child: Text(
-                      auditPct(plan.finalScore),
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        color: tone,
-                      ),
-                    ),
-                  ),
-                  if ((plan.grade ?? '').isNotEmpty) ...[
-                    const SizedBox(width: 6),
-                    StatusPill(
-                      label: 'Grade ${plan.grade}',
-                      color: AppColors.primary,
-                    ),
-                  ],
-                ],
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Pager extends StatelessWidget {
-  const _Pager({
-    required this.page,
-    required this.totalPages,
-    required this.onPrev,
-    required this.onNext,
-  });
-  final int page;
-  final int totalPages;
-  final VoidCallback? onPrev;
-  final VoidCallback? onNext;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          IconButton(
-            onPressed: onPrev,
-            icon: const Icon(Icons.chevron_left_rounded),
-            color: AppColors.primary,
-            disabledColor: AppColors.hairline,
-          ),
-          Text(
-            'Page ${page + 1} of $totalPages',
-            style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: AppColors.inkSoft,
-            ),
-          ),
-          IconButton(
-            onPressed: onNext,
-            icon: const Icon(Icons.chevron_right_rounded),
-            color: AppColors.primary,
-            disabledColor: AppColors.hairline,
-          ),
-        ],
-      ),
     );
   }
 }

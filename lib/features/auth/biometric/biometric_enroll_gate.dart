@@ -53,7 +53,7 @@ class _BiometricEnrollGateState extends ConsumerState<BiometricEnrollGate> {
     final enable = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Enable Biometric Login?'),
+        title: const Text('Enable biometric login?'),
         content: Text(
           'Use ${bio.label} to sign in faster next time. '
           'You can turn this off anytime in Settings → Security.',
@@ -61,7 +61,7 @@ class _BiometricEnrollGateState extends ConsumerState<BiometricEnrollGate> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Not Now'),
+            child: const Text('Not now'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),

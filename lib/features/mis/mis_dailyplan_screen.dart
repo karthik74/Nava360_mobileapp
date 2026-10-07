@@ -13,9 +13,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_auth.dart';
+import 'mis_collection_widgets.dart';
 import 'mis_dailyplan_report.dart';
 import 'mis_models.dart';
 import 'mis_repository.dart';
@@ -269,25 +271,31 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
   /// behind it. Wider roles build a report explicitly.
   Widget _managerView(String role) {
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('Daily Reports')),
-      body: RefreshIndicator(onRefresh: _load, child: ListView(
-        padding: EdgeInsets.fromLTRB(
-            16, 14, 16, MediaQuery.of(context).padding.bottom + 32),
+      appBar: AppBar(title: const Text('MIS')),
+      body: ProPage(
+        onRefresh: _load,
+        hero: ProHero(
+          title: 'Daily reports',
+          subtitle: role == 'AM'
+              ? 'Branch plans & achievements in your area'
+              : 'Branch daily planning & achievement',
+          children: [
+            Text(
+              role == 'AM'
+                  ? 'Plans & achievements filed by the branches in your area — '
+                      "today's load automatically; use the date controls to "
+                      'review previous days.'
+                  : 'Branch-level daily planning & achievement reports — build a '
+                      'custom report by date and level.',
+              style: const TextStyle(
+                  fontSize: 13, height: 1.45, color: Colors.white70),
+            ),
+          ],
+        ),
         children: [
-          Text(
-            role == 'AM'
-                ? 'Plans & achievements filed by the branches in your area — '
-                    "today's load automatically; use the date controls to "
-                    'review previous days.'
-                : 'Branch-level daily planning & achievement reports — build a '
-                    'custom report by date and level.',
-            style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
-          ),
-          const SizedBox(height: 14),
           MisDailyPlanReport(role: role, autoLoad: role == 'AM'),
         ],
-      )),
+      ),
     );
   }
 
@@ -322,100 +330,25 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
     final achDone = _ach?.exists ?? false;
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('Daily Report'), actions: [IconButton(icon: const Icon(Icons.refresh_rounded), tooltip: 'Refresh data', onPressed: _load)]),
-      body: RefreshIndicator(onRefresh: _load, child: ListView(
-        padding: EdgeInsets.fromLTRB(
-            16, 14, 16, MediaQuery.of(context).padding.bottom + 32),
-        children: [
-          // Branch + date + overall status
-          GlassCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: _pickerMode
-                          ? (_branches.isEmpty
-                              ? const Text('No branches available',
-                                  style: TextStyle(
-                                      color: AppColors.muted, fontSize: 13))
-                              : MisDropdown<String>(
-                                  value: _branch ?? '',
-                                  items: [
-                                    for (final b in _branches)
-                                      DropdownMenuItem(
-                                          value: b.branchName,
-                                          child: Text(b.label,
-                                              overflow: TextOverflow.ellipsis)),
-                                  ],
-                                  onChanged: _setBranch,
-                                ))
-                          : Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: AppColors.primary.withOpacity(0.1),
-                                borderRadius:
-                                    BorderRadius.circular(AppRadii.pill),
-                              ),
-                              child: Text(_fixedBranch ?? '—',
-                                  style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppColors.primary)),
-                            ),
-                    ),
-                    const SizedBox(width: 10),
-                    StatusPill(
-                      label: planDone && achDone
-                          ? 'Day complete'
-                          : (planDone || achDone)
-                              ? 'In progress'
-                              : 'Not started',
-                      color: planDone && achDone
-                          ? AppColors.success
-                          : (planDone || achDone)
-                              ? AppColors.warning
-                              : AppColors.muted,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(_prettyDay(_date),
-                    style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.muted)),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    for (final c in [
-                      ('Yesterday', _shiftIso(_todayIso(), -1)),
-                      ('Today', _todayIso()),
-                      if (_type == 'plan') ('Tomorrow', _shiftIso(_todayIso(), 1)),
-                    ]) ...[
-                      _DateChip(
-                        label: c.$1,
-                        active: _date == c.$2,
-                        onTap: () => _setDate(c.$2),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          // Mode selector
-          Row(
+      appBar: AppBar(title: const Text('MIS'), actions: [
+        IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Refresh data',
+            onPressed: _load),
+      ]),
+      body: ProPage(
+        onRefresh: _load,
+        hero: ProHero(
+          title: 'Daily report',
+          subtitle: _activeBranch == null || _activeBranch!.isEmpty
+              ? 'Branch plan & achievement'
+              : '${_activeBranch!} · plan & achievement',
+          // Mode selector straddles the hero edge.
+          overlap: Row(
             children: [
               Expanded(
                 child: _ModeCard(
-                  label: 'Daily Report',
+                  label: 'Daily report',
                   hint: 'Morning',
                   icon: Icons.wb_sunny_rounded,
                   active: _type == 'plan',
@@ -436,27 +369,20 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-
-          if (_chainWarn) ...[
-            _Banner(
-              icon: Icons.warning_amber_rounded,
-              color: AppColors.warning,
-              text:
-                  'Yesterday\'s plan has no achievement recorded for $_activeBranch. Close it before submitting today\'s plan.',
+          children: [_dayCard(planDone, achDone)],
+        ),
+        children: [
+          if (_chainWarn)
+            ProNote(
+              'Yesterday\'s plan has no achievement recorded for $_activeBranch. Close it before submitting today\'s plan.',
+              tone: ProNoteTone.warn,
             ),
-            const SizedBox(height: 12),
-          ],
-
-          if (_achBlocked) ...[
-            const _Banner(
+          if (_achBlocked)
+            const ProNote(
+              'An achievement cannot be recorded for a future date.',
+              tone: ProNoteTone.warn,
               icon: Icons.lock_outline_rounded,
-              color: AppColors.warning,
-              text: 'An achievement cannot be recorded for a future date.',
             ),
-            const SizedBox(height: 12),
-          ],
-
           if (_loading)
             const AppLoadingBlock(height: 300)
           else ...[
@@ -468,15 +394,13 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
               _row('DPD 61-90', 'dpd_61_90_actual', 'dpd_61_90_plan'),
               _row('FY Non-Start', 'fy_non_start_acc', 'fy_non_start_plan'),
             ]),
-            const SizedBox(height: 12),
             _group('Disbursement', AppColors.primary, [
               _rowHead('Accounts', 'Amount ₹'),
               _row('IGL', 'disb_igl_acc', 'disb_igl_amt'),
               _row('FIG', 'disb_fig_acc', 'disb_fig_amt'),
               _row('IL', 'disb_il_acc', 'disb_il_amt'),
             ]),
-            const SizedBox(height: 12),
-            _group('KYC', AppColors.warning, [
+            _group('KYC', const Color(0xFFF2B347), [
               Row(
                 children: [
                   _cell('IGL', 'kyc_igl'),
@@ -485,7 +409,6 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
                 ],
               ),
             ]),
-            const SizedBox(height: 12),
             _group('NPA', AppColors.danger, [
               Row(
                 children: [
@@ -494,32 +417,120 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
                 ],
               ),
             ]),
-            const SizedBox(height: 16),
-            if (_msg != null) ...[
-              _Banner(
-                icon: _msg!.$1
-                    ? Icons.check_circle_rounded
-                    : Icons.error_outline_rounded,
-                color: _msg!.$1 ? AppColors.success : AppColors.danger,
-                text: _msg!.$2,
+            if (_msg != null)
+              ProNote(
+                _msg!.$2,
+                tone: _msg!.$1 ? ProNoteTone.ok : ProNoteTone.bad,
               ),
-              const SizedBox(height: 12),
-            ],
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed:
-                    (_busy || _activeBranch == null || _achBlocked) ? null : _save,
-                icon: const Icon(Icons.save_rounded, size: 18),
-                label: Text(_busy
-                    ? 'Saving…'
-                    : 'Save ${_type == 'plan' ? 'Daily Report' : 'Achievement'}'),
-              ),
-            ),
           ],
         ],
       ),
-    ));
+      bottomNavigationBar: _loading
+          ? null
+          : ProBottomBar(
+              children: [
+                FilledButton.icon(
+                  onPressed: (_busy || _activeBranch == null || _achBlocked)
+                      ? null
+                      : _save,
+                  icon: _busy
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.save_rounded, size: 18),
+                  label: Text(_busy
+                      ? 'Saving…'
+                      : 'Save ${_type == 'plan' ? 'daily report' : 'achievement'}'),
+                ),
+              ],
+            ),
+    );
+  }
+
+  /// Branch + day + overall status, with the quick date chips, on the hero.
+  Widget _dayCard(bool planDone, bool achDone) {
+    final status = planDone && achDone
+        ? 'Day complete'
+        : (planDone || achDone)
+            ? 'In progress'
+            : 'Not started';
+    final tone = planDone && achDone
+        ? ProTagTone.ok
+        : (planDone || achDone)
+            ? ProTagTone.warn
+            : ProTagTone.neutral;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_pickerMode) ...[
+            _branches.isEmpty
+                ? const Text('No branches available',
+                    style: TextStyle(color: Colors.white70, fontSize: 13))
+                : MisDropdown<String>(
+                    value: _branch ?? '',
+                    items: [
+                      for (final b in _branches)
+                        DropdownMenuItem(
+                            value: b.branchName,
+                            child: Text(b.label,
+                                overflow: TextOverflow.ellipsis)),
+                    ],
+                    onChanged: _setBranch,
+                  ),
+            const SizedBox(height: 10),
+          ],
+          Row(
+            children: [
+              if (!_pickerMode)
+                Flexible(
+                  child: ProHeroTag(_fixedBranch ?? '—',
+                      icon: Icons.storefront_outlined),
+                ),
+              const Spacer(),
+              ProHeroTag(status, tone: tone),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            _prettyDay(_date),
+            style: const TextStyle(
+              fontSize: 20,
+              height: 1.25,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.45,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final c in [
+                ('Yesterday', _shiftIso(_todayIso(), -1)),
+                ('Today', _todayIso()),
+                if (_type == 'plan') ('Tomorrow', _shiftIso(_todayIso(), 1)),
+              ])
+                MisDeepChip(
+                  label: c.$1,
+                  selected: _date == c.$2,
+                  onTap: () => _setDate(c.$2),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _group(String title, Color color, List<Widget> children) {
@@ -529,16 +540,19 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
         children: [
           Row(
             children: [
-              Container(width: 4, height: 16, color: color),
-              const SizedBox(width: 8),
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.ink)),
+              Container(
+                width: 4,
+                height: 16,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 9),
+              Text(title, style: AppText.section),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           ...children,
         ],
       ),
@@ -553,19 +567,19 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
             Expanded(
                 flex: 3,
                 child: Text(a,
-                    textAlign: TextAlign.center,
+                    textAlign: TextAlign.right,
                     style: const TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
                         color: AppColors.muted))),
             const SizedBox(width: 8),
             Expanded(
                 flex: 3,
                 child: Text(b,
-                    textAlign: TextAlign.center,
+                    textAlign: TextAlign.right,
                     style: const TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
                         color: AppColors.muted))),
           ],
         ),
@@ -579,8 +593,8 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
                 flex: 4,
                 child: Text(label,
                     style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
                         color: AppColors.inkSoft))),
             Expanded(flex: 3, child: _input(k1)),
             const SizedBox(width: 8),
@@ -595,12 +609,8 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.muted)),
-              const SizedBox(height: 4),
+              Text(label, style: AppText.label),
+              const SizedBox(height: 6),
               _input(k),
             ],
           ),
@@ -618,39 +628,15 @@ class _MisDailyPlanScreenState extends ConsumerState<MisDailyPlanScreen> {
         decoration: const InputDecoration(
           hintText: '0',
           isDense: true,
-          contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         ),
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          color: AppColors.ink,
+          fontFeatures: [FontFeature.tabularFigures()],
+        ),
       );
-}
-
-class _DateChip extends StatelessWidget {
-  const _DateChip(
-      {required this.label, required this.active, required this.onTap});
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: active ? AppColors.primary : AppColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(AppRadii.pill),
-          border: Border.all(
-              color: active ? AppColors.primary : AppColors.hairline),
-        ),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: active ? Colors.white : AppColors.inkSoft)),
-      ),
-    );
-  }
 }
 
 class _ModeCard extends StatelessWidget {
@@ -670,81 +656,47 @@ class _ModeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(13),
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(AppRadii.lg),
           border: Border.all(
               color: active ? AppColors.primary : AppColors.hairline,
               width: active ? 1.6 : 1),
+          boxShadow: AppShadows.lifted,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(icon,
-                    size: 18,
-                    color: active ? AppColors.primary : AppColors.muted),
-                const Spacer(),
-                Icon(
-                  done ? Icons.check_circle_rounded : Icons.schedule_rounded,
-                  size: 14,
-                  color: done ? AppColors.success : AppColors.muted,
+                ProIconWell(
+                  icon: icon,
+                  color: active ? AppColors.primary : AppColors.muted,
                 ),
+                const Spacer(),
+                done ? ProPill.ok('Submitted') : ProPill.warn('Pending'),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.2,
                     color: AppColors.ink)),
-            Text(hint,
-                style: const TextStyle(fontSize: 11, color: AppColors.muted)),
-            const SizedBox(height: 4),
-            Text(done ? 'Submitted' : 'Pending',
-                style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w700,
-                    color: done ? AppColors.success : AppColors.warning)),
+            Text(hint, style: AppText.caption),
           ],
         ),
       ),
     );
   }
 }
-
-class _Banner extends StatelessWidget {
-  const _Banner(
-      {required this.icon, required this.color, required this.text});
-  final IconData icon;
-  final Color color;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(text,
-                style: TextStyle(
-                    color: color, fontSize: 12, fontWeight: FontWeight.w600)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-

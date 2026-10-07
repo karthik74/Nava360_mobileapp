@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/report_download.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -67,14 +68,13 @@ class _RentListScreenState extends ConsumerState<RentListScreen> {
     final canManageNotice = user?.hasPermission('ADMIN_RENT_NOTICE_MANAGE') ?? false;
     final canManageUtility = user?.hasPermission('ADMIN_RENT_UTILITY_MANAGE') ?? false;
     final canViewAudit = user?.hasPermission('ADMIN_RENT_AUDIT_VIEW') ?? false;
-    final mq = MediaQuery.of(context);
 
     final tabs = <_RentTab, String>{
       _RentTab.dashboard: 'Dashboard',
       _RentTab.branches: 'Branches',
       _RentTab.payable: 'Payables',
       _RentTab.notices: 'Notices',
-      _RentTab.utility: 'Utility Bills',
+      _RentTab.utility: 'Utility bills',
       _RentTab.reports: 'Reports',
       if (canViewAudit) _RentTab.audit: 'Audit trail',
     };
@@ -124,102 +124,175 @@ class _RentListScreenState extends ConsumerState<RentListScreen> {
         break;
     }
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Rent Management'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        floatingActionButton: fab != null
-            ? FloatingActionButton.extended(
-                onPressed: () => fab!(),
-                icon: Icon(fabIcon),
-                label: Text(fabLabel!),
-              )
-            : null,
-        body: Column(
-          children: [
-            SizedBox(
-              height: 44,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                children: [
-                  for (final entry in tabs.entries)
-                    _TabChip(
-                      label: entry.value,
-                      selected: _tab == entry.key,
-                      onTap: () => setState(() => _tab = entry.key),
-                    ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: switch (_tab) {
-                _RentTab.dashboard => RentDashboardTab(bottomPadding: mq.padding.bottom + 24),
-                _RentTab.reports => RentReportsTab(bottomPadding: mq.padding.bottom + 24),
-                _RentTab.branches => _BranchesTab(
-                    canManage: canManageBranch,
-                    isFullAccess: isFullAccess,
-                    bottomPadding: mq.padding.bottom + 90,
-                  ),
-                _RentTab.payable => _PayableTab(bottomPadding: mq.padding.bottom + 24),
-                _RentTab.notices => _NoticesTab(bottomPadding: mq.padding.bottom + 90),
-                _RentTab.utility => _UtilityTab(bottomPadding: mq.padding.bottom + 90),
-                _RentTab.audit => _AuditTab(bottomPadding: mq.padding.bottom + 24),
-              },
-            ),
-          ],
-        ),
-      ),
+    // Section switcher shown under each tab's hero.
+    final keys = tabs.keys.toList();
+    final nav = ProChipBar(
+      labels: tabs.values.toList(),
+      selected: keys.indexOf(_tab),
+      onSelected: (i) => setState(() => _tab = keys[i]),
+      bleed: 0,
+    );
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Rent management')),
+      floatingActionButton: fab != null
+          ? FloatingActionButton.extended(
+              onPressed: () => fab!(),
+              icon: Icon(fabIcon),
+              label: Text(fabLabel!),
+            )
+          : null,
+      body: switch (_tab) {
+        _RentTab.dashboard => RentDashboardTab(bottomPadding: 24, nav: nav),
+        _RentTab.reports => RentReportsTab(bottomPadding: 24, nav: nav),
+        _RentTab.branches => _BranchesTab(
+            canManage: canManageBranch,
+            isFullAccess: isFullAccess,
+            bottomPadding: 90,
+            nav: nav,
+          ),
+        _RentTab.payable => _PayableTab(bottomPadding: 24, nav: nav),
+        _RentTab.notices => _NoticesTab(bottomPadding: 90, nav: nav),
+        _RentTab.utility => _UtilityTab(bottomPadding: 90, nav: nav),
+        _RentTab.audit => _AuditTab(bottomPadding: 24, nav: nav),
+      },
     );
   }
 }
 
-class _TabChip extends StatelessWidget {
-  const _TabChip({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
+/// Page padding for a tab: [extra] clears the FAB (system inset is added by
+/// [ProPage]).
+EdgeInsets _pagePadding(double extra) => EdgeInsets.fromLTRB(16, 16, 16, extra);
+
+/// Month picker row: previous / next month arrows around a tappable month
+/// label (opens the same date picker as before).
+class _PeriodBar extends StatelessWidget {
+  const _PeriodBar({
+    required this.period,
+    required this.onPick,
+    required this.onChanged,
+    this.trailing,
+  });
+  final DateTime period;
+  final VoidCallback onPick;
+  final ValueChanged<DateTime> onChanged;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected ? AppColors.primary.withOpacity(0.14) : AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            border: Border.all(
-                color: selected ? AppColors.primary.withOpacity(0.4) : AppColors.hairline),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: selected ? AppColors.primary : AppColors.muted,
+    final prev = DateTime(period.year, period.month - 1, 1);
+    final next = DateTime(period.year, period.month + 1, 1);
+    final canPrev = !prev.isBefore(DateTime(2015));
+    final canNext = next.isBefore(DateTime(2036));
+    return Row(
+      children: [
+        Expanded(
+          child: Container(
+            height: 48,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.hairline),
+            ),
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: 'Previous month',
+                  onPressed: canPrev ? () => onChanged(prev) : null,
+                  icon: const Icon(Icons.chevron_left_rounded),
+                ),
+                Expanded(
+                  child: InkWell(
+                    onTap: onPick,
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      height: 40,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.calendar_month_rounded,
+                              size: 16, color: AppColors.primary),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              // Shorter month name when an action shares the row.
+                              DateFormat(trailing == null ? 'MMMM yyyy' : 'MMM yyyy').format(period),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.ink,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Next month',
+                  onPressed: canNext ? () => onChanged(next) : null,
+                  icon: const Icon(Icons.chevron_right_rounded),
+                ),
+              ],
             ),
           ),
         ),
-      ),
+        if (trailing != null) ...[const SizedBox(width: 10), trailing!],
+      ],
     );
   }
+}
+
+/// Small action button used on rent cards.
+Widget _cardButton(String label, VoidCallback? onTap,
+    {bool primary = false, bool danger = false}) {
+  const size = Size(0, 36);
+  const pad = EdgeInsets.symmetric(horizontal: 14);
+  const text = TextStyle(fontSize: 13, fontWeight: FontWeight.w600);
+  final child = Text(label);
+  if (danger) {
+    return FilledButton(
+      onPressed: onTap,
+      style: FilledButton.styleFrom(
+        minimumSize: size,
+        padding: pad,
+        textStyle: text,
+        backgroundColor: AppColors.dangerTint,
+        foregroundColor: AppColors.danger,
+      ),
+      child: child,
+    );
+  }
+  if (primary) {
+    return FilledButton(
+      onPressed: onTap,
+      style: FilledButton.styleFrom(minimumSize: size, padding: pad, textStyle: text),
+      child: child,
+    );
+  }
+  return OutlinedButton(
+    onPressed: onTap,
+    style: OutlinedButton.styleFrom(minimumSize: size, padding: pad, textStyle: text),
+    child: child,
+  );
 }
 
 // ── Branches tab ─────────────────────────────────────────────────────────────
 
 class _BranchesTab extends ConsumerWidget {
-  const _BranchesTab({required this.canManage, required this.isFullAccess, required this.bottomPadding});
+  const _BranchesTab({
+    required this.canManage,
+    required this.isFullAccess,
+    required this.bottomPadding,
+    required this.nav,
+  });
   final bool canManage;
   final bool isFullAccess;
   final double bottomPadding;
+  final Widget nav;
 
   Future<void> _open(BuildContext context, WidgetRef ref, RentBranch b) async {
     final ok = await context.push<bool>('/admin/rent/branches/${b.id}');
@@ -229,161 +302,114 @@ class _BranchesTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(rentBranchesProvider);
-    return RefreshIndicator(
-      color: AppColors.primary,
+    final rows = async.valueOrNull ?? const <RentBranch>[];
+    final active = rows.where((b) => b.active).toList();
+    final monthly = active.fold<double>(0, (s, b) => s + (b.rent ?? 0));
+    return ProPage(
       onRefresh: () async => ref.invalidate(rentBranchesProvider),
-      child: ListView(
-        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
+      padding: _pagePadding(bottomPadding),
+      hero: ProHero(
+        title: 'Branches',
+        subtitle: async.hasValue
+            ? '${rows.length} rent branch${rows.length == 1 ? '' : 'es'} · landlord records'
+            : 'Landlord records',
         children: [
-          if (isFullAccess)
-            ref.watch(rentRateOptionsProvider).maybeWhen(
-                  data: (opts) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: RentRateOptionsCard(
-                      repo: ref.read(rentRepositoryProvider),
-                      options: opts,
-                      onChanged: (_) => ref.invalidate(rentRateOptionsProvider),
-                    ),
-                  ),
-                  orElse: () => const SizedBox.shrink(),
+          ProHeroStats(stats: [
+            ProStat(
+              label: 'Active',
+              value: async.hasValue ? '${active.length}' : '—',
+              sub: 'of ${rows.length}',
+              dot: AppColors.live,
+            ),
+            ProStat(
+              label: 'Inactive',
+              value: async.hasValue ? '${rows.length - active.length}' : '—',
+              sub: 'closed leases',
+              dot: const Color(0xFFB3C0C3),
+            ),
+            ProStat(
+              label: 'Monthly rent',
+              value: async.hasValue ? rentMoney(monthly).split('.').first : '—',
+              sub: 'active branches',
+              dot: const Color(0xFFF2B347),
+            ),
+          ]),
+        ],
+      ),
+      children: [
+        nav,
+        if (isFullAccess)
+          ref.watch(rentRateOptionsProvider).maybeWhen(
+                data: (opts) => RentRateOptionsCard(
+                  repo: ref.read(rentRepositoryProvider),
+                  options: opts,
+                  onChanged: (_) => ref.invalidate(rentRateOptionsProvider),
                 ),
-          async.when(
-            data: (rows) {
-              if (rows.isEmpty) {
-                return const AppEmptyState(
-                  icon: Icons.home_work_rounded,
-                  message: 'No rent branches yet. Tap "Add branch" to create one.',
-                );
-              }
-              return Column(
-                children: [
-                  for (final b in rows)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _BranchCard(
+                orElse: () => const SizedBox.shrink(),
+              ),
+        async.when(
+          data: (rows) {
+            if (rows.isEmpty) {
+              return const ProEmpty(
+                icon: Icons.home_work_rounded,
+                title: 'No rent branches yet',
+                message: 'Tap "Add branch" to create one.',
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ProSectionHeader(title: 'All branches · ${rows.length}', small: true),
+                const SizedBox(height: 8),
+                ProListGroup(
+                  children: [
+                    for (final b in rows)
+                      _BranchRow(
                         branch: b,
                         onTap: canManage ? () => _open(context, ref, b) : null,
                       ),
-                    ),
-                ],
-              );
-            },
-            loading: () => const AppLoadingBlock(height: 160),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(rentBranchesProvider),
-            ),
+                  ],
+                ),
+              ],
+            );
+          },
+          loading: () => const AppLoadingBlock(height: 160),
+          error: (e, _) => AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(rentBranchesProvider),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
 
-class _BranchCard extends StatelessWidget {
-  const _BranchCard({required this.branch, this.onTap});
+class _BranchRow extends StatelessWidget {
+  const _BranchRow({required this.branch, this.onTap});
   final RentBranch branch;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final df = DateFormat('d MMM yyyy');
-    return GlassCard(
-      padding: const EdgeInsets.all(16),
-      shadow: AppShadows.soft,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(9),
-                    border: Border.all(color: AppColors.primary.withOpacity(0.22)),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(rentBranchIcon, color: AppColors.primary, size: 17),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    branch.branchCode != null && branch.branchCode!.isNotEmpty
-                        ? '${branch.branchName} (${branch.branchCode})'
-                        : branch.branchName,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.ink),
-                  ),
-                ),
-                StatusPill(
-                  label: branch.active ? 'Active' : 'Inactive',
-                  color: branch.active ? AppColors.success : AppColors.muted,
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            _row(Icons.person_rounded, branch.ownerName ?? 'No owner on file'),
-            const SizedBox(height: 6),
-            _row(Icons.event_rounded,
-                branch.startDate == null ? 'Start date —' : 'Since ${df.format(branch.startDate!)}'),
-            const Divider(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _totalCol('Rent', branch.rent),
-                _totalCol('Advance', branch.rentAdvance),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('GST',
-                        style: TextStyle(
-                            fontSize: 10.5, fontWeight: FontWeight.w600, color: AppColors.muted)),
-                    const SizedBox(height: 2),
-                    Text(
-                      branch.gstApplicable == null ? '—' : (branch.gstApplicable! ? 'Yes' : 'No'),
-                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.ink),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ],
-        ),
+    final title = branch.branchCode != null && branch.branchCode!.isNotEmpty
+        ? '${branch.branchName} (${branch.branchCode})'
+        : branch.branchName;
+    final gst = branch.gstApplicable == null ? '—' : (branch.gstApplicable! ? 'Yes' : 'No');
+    return ProListRow(
+      leading: ProIconWell(
+        icon: rentBranchIcon,
+        color: branch.active ? AppColors.primary : AppColors.muted,
       ),
+      title: title,
+      subtitle: '${branch.ownerName ?? 'No owner on file'} · '
+          '${branch.startDate == null ? 'Start date —' : 'Since ${df.format(branch.startDate!)}'}',
+      meta: 'Advance ${rentMoney(branch.rentAdvance)} · GST $gst',
+      value: rentMoney(branch.rent),
+      pill: branch.active ? ProPill.ok('Active') : ProPill.neutral('Inactive'),
+      onTap: onTap,
     );
   }
-
-  Widget _row(IconData icon, String text) => Row(
-        children: [
-          Icon(icon, size: 14, color: AppColors.muted),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(text,
-                style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis),
-          ),
-        ],
-      );
-
-  Widget _totalCol(String label, double? value) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 10.5, fontWeight: FontWeight.w600, color: AppColors.muted)),
-          const SizedBox(height: 2),
-          Text(
-            rentMoney(value),
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppColors.ink),
-          ),
-        ],
-      );
 }
 
 // ── Payable tab ──────────────────────────────────────────────────────────────
@@ -394,8 +420,9 @@ DateTime _thisMonth() {
 }
 
 class _PayableTab extends ConsumerStatefulWidget {
-  const _PayableTab({required this.bottomPadding});
+  const _PayableTab({required this.bottomPadding, required this.nav});
   final double bottomPadding;
+  final Widget nav;
 
   @override
   ConsumerState<_PayableTab> createState() => _PayableTabState();
@@ -492,104 +519,153 @@ class _PayableTabState extends ConsumerState<_PayableTab> {
     final canApprove = user?.hasPermission('ADMIN_RENT_PAYABLE_APPROVE') ?? false;
     final canPay = user?.hasPermission('ADMIN_RENT_PAYABLE_PAY') ?? false;
     final async = ref.watch(rentPayableProvider(_periodIso));
-    final dfMonth = DateFormat('MMMM yyyy');
+    final all = async.valueOrNull ?? const <RentPayable>[];
+    int count(bool Function(RentPayable) t) => all.where(t).length;
+    final net = all.fold<double>(0, (s, r) => s + (r.netAmount ?? r.rentAmount));
+    final awaiting = count((r) =>
+        r.status == RentPayableStatus.pending || r.status == RentPayableStatus.submitted);
+    final approved = count((r) => r.status == RentPayableStatus.approved);
+    final paid = count((r) => r.status == RentPayableStatus.paid);
+    final held = count((r) => r.status == RentPayableStatus.held);
+    String v(int n) => async.hasValue ? '$n' : '—';
 
-    return RefreshIndicator(
-      color: AppColors.primary,
+    return ProPage(
       onRefresh: () async => ref.invalidate(rentPayableProvider(_periodIso)),
-      child: ListView(
-        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        padding: EdgeInsets.fromLTRB(16, 12, 16, widget.bottomPadding),
+      padding: _pagePadding(widget.bottomPadding),
+      hero: ProHero(
+        title: 'Payables',
+        subtitle: async.hasValue
+            ? '${DateFormat('MMMM yyyy').format(_period)} · ${rentMoney(net)} net'
+            : 'Monthly rent payable · ${DateFormat('MMMM yyyy').format(_period)}',
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: InkWell(
-                  onTap: _pickPeriod,
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(AppRadii.md),
-                      border: Border.all(color: AppColors.hairline),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.calendar_month_rounded, size: 15, color: AppColors.primary),
-                        const SizedBox(width: 8),
-                        Text(dfMonth.format(_period),
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              if (canManage) ...[
-                const SizedBox(width: 10),
-                FilledButton.tonalIcon(
+          ProHeroStats(stats: [
+            ProStat(label: 'Awaiting', value: v(awaiting), sub: 'pending · submitted', dot: const Color(0xFFF2B347)),
+            ProStat(label: 'Approved', value: v(approved), sub: 'ready to pay', dot: const Color(0xFF9FCBD5)),
+            ProStat(
+              label: 'Paid',
+              value: v(paid),
+              sub: held > 0 ? '$held on hold' : 'this month',
+              dot: AppColors.live,
+            ),
+          ]),
+        ],
+      ),
+      children: [
+        widget.nav,
+        _PeriodBar(
+          period: _period,
+          onPick: _pickPeriod,
+          onChanged: (p) => setState(() => _period = p),
+          trailing: canManage
+              ? FilledButton.tonalIcon(
                   onPressed: _generating ? null : _generate,
+                  style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
                   icon: const Icon(Icons.auto_awesome_rounded, size: 17),
                   label: Text(_generating ? 'Generating…' : 'Generate'),
+                )
+              : null,
+        ),
+        async.when(
+          data: (rows) {
+            final swipeable = rows.any((p) =>
+                (canApprove && p.status == RentPayableStatus.submitted) ||
+                (canManage &&
+                    p.status != RentPayableStatus.held &&
+                    p.status != RentPayableStatus.paid));
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ProSectionHeader(
+                  title: 'Rent payable · ${rows.length}',
+                  small: true,
+                  trailing: TextButton.icon(
+                    onPressed: () => downloadExcelReport(
+                      context,
+                      () => ref.read(rentRepositoryProvider).downloadPayableReport(_periodIso),
+                      'rent-payable-${_periodIso.substring(0, 7)}.xlsx',
+                    ),
+                    icon: const Icon(Icons.download_rounded, size: 18),
+                    label: const Text('Download report'),
+                  ),
                 ),
-              ],
-            ],
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: () => downloadExcelReport(
-                context,
-                () => ref.read(rentRepositoryProvider).downloadPayableReport(_periodIso),
-                'rent-payable-${_periodIso.substring(0, 7)}.xlsx',
-              ),
-              icon: const Icon(Icons.download_rounded, size: 18),
-              label: const Text('Download report'),
-            ),
-          ),
-          async.when(
-            data: (rows) {
-              if (rows.isEmpty) {
-                return const AppEmptyState(
-                  icon: Icons.receipt_long_rounded,
-                  message: 'No rent-payable rows for this period.',
-                );
-              }
-              return Column(
-                children: [
+                const SizedBox(height: 8),
+                if (rows.isEmpty)
+                  const ProEmpty(
+                    icon: Icons.receipt_long_rounded,
+                    title: 'No rent-payable rows for this period',
+                    message: 'Generate this month’s rows to get started.',
+                  )
+                else ...[
+                  if (swipeable) ...[
+                    const ProSwipeHint(text: 'Swipe right to approve, left to hold'),
+                    const SizedBox(height: 10),
+                  ],
                   for (final p in rows)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: _PayableCard(
-                        payable: p,
-                        busy: _busyId == p.id,
-                        canSubmit: canSubmit,
+                      child: _swipeable(
+                        p,
                         canApprove: canApprove,
-                        canPay: canPay,
                         canManage: canManage,
-                        onTap: () => _open(p),
-                        onSubmit: () => _act(p.id, () async {
-                          final repo = ref.read(rentRepositoryProvider);
-                          if (!await confirmGstBeforeSubmit(context, repo, p.branchId)) return;
-                          await repo.submitPayable(p.id);
-                        }),
-                        onApprove: () => _act(p.id, () => ref.read(rentRepositoryProvider).approvePayable(p.id)),
-                        onMarkPaid: () => _markPaid(p),
-                        onHold: () => _hold(p),
-                        onReleaseHold: () =>
-                            _act(p.id, () => ref.read(rentRepositoryProvider).releasePayableHold(p.id)),
+                        child: _PayableCard(
+                          payable: p,
+                          busy: _busyId == p.id,
+                          canSubmit: canSubmit,
+                          canApprove: canApprove,
+                          canPay: canPay,
+                          canManage: canManage,
+                          onTap: () => _open(p),
+                          onSubmit: () => _submit(p),
+                          onApprove: () => _approve(p),
+                          onMarkPaid: () => _markPaid(p),
+                          onHold: () => _hold(p),
+                          onReleaseHold: () =>
+                              _act(p.id, () => ref.read(rentRepositoryProvider).releasePayableHold(p.id)),
+                        ),
                       ),
                     ),
                 ],
-              );
-            },
-            loading: () => const AppLoadingBlock(height: 160),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(rentPayableProvider(_periodIso)),
-            ),
+              ],
+            );
+          },
+          loading: () => const AppLoadingBlock(height: 160),
+          error: (e, _) => AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(rentPayableProvider(_periodIso)),
           ),
-        ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _submit(RentPayable p) => _act(p.id, () async {
+        final repo = ref.read(rentRepositoryProvider);
+        if (!await confirmGstBeforeSubmit(context, repo, p.branchId)) return;
+        await repo.submitPayable(p.id);
+      });
+
+  Future<void> _approve(RentPayable p) =>
+      _act(p.id, () => ref.read(rentRepositoryProvider).approvePayable(p.id));
+
+  /// Swipe right = approve (submitted rows), swipe left = hold — the same
+  /// handlers as the card's buttons, gated the same way.
+  Widget _swipeable(RentPayable p,
+      {required bool canApprove, required bool canManage, required Widget child}) {
+    final busy = _busyId == p.id;
+    final approve = !busy && canApprove && p.status == RentPayableStatus.submitted;
+    final hold = !busy &&
+        canManage &&
+        p.status != RentPayableStatus.held &&
+        p.status != RentPayableStatus.paid;
+    if (!approve && !hold) return child;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: ProSwipeDecision(
+        onApprove: approve ? () => _approve(p) : null,
+        onReject: hold ? () => _hold(p) : null,
+        rejectLabel: 'Hold',
+        rejectIcon: Icons.pause_circle_outline_rounded,
+        child: child,
       ),
     );
   }
@@ -629,74 +705,94 @@ class _PayableCard extends StatelessWidget {
     final tone = rentPayableStatusTone(payable.status);
     final actions = <Widget>[
       if (canSubmit && payable.status == RentPayableStatus.pending)
-        _chipButton('Submit', onSubmit, busy),
+        _cardButton('Submit', busy ? null : onSubmit),
       if (canApprove && payable.status == RentPayableStatus.submitted)
-        _chipButton('Approve', onApprove, busy),
+        _cardButton('Approve', busy ? null : onApprove, primary: true),
       if (canPay && payable.status == RentPayableStatus.approved)
-        _chipButton('Mark paid', onMarkPaid, busy, primary: true),
+        _cardButton('Mark paid', busy ? null : onMarkPaid, primary: true),
       if (canManage && payable.status == RentPayableStatus.held)
-        _chipButton('Release hold', onReleaseHold, busy),
+        _cardButton('Release hold', busy ? null : onReleaseHold),
       if (canManage &&
           payable.status != RentPayableStatus.held &&
           payable.status != RentPayableStatus.paid)
-        _chipButton('Hold', onHold, busy, danger: true),
+        _cardButton('Hold', busy ? null : onHold, danger: true),
     ];
 
-    return GlassCard(
-      padding: const EdgeInsets.all(16),
-      shadow: AppShadows.soft,
-      child: InkWell(
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppRadii.lg),
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(payable.branchName,
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.ink)),
-                ),
-                StatusPill(label: tone.label, color: tone.color),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(rentMoney(payable.rentAmount),
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink)),
-            if (payable.status == RentPayableStatus.held && payable.holdReason != null) ...[
-              const SizedBox(height: 4),
-              Text('Hold: ${payable.holdReason}',
-                  style: const TextStyle(fontSize: 11.5, color: AppColors.danger)),
-            ],
-            if (payable.status == RentPayableStatus.paid && payable.paidUtr != null) ...[
-              const SizedBox(height: 4),
-              Text('UTR: ${payable.paidUtr}',
-                  style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-            ],
-            if (actions.isNotEmpty) ...[
-              const Divider(height: 20),
-              Wrap(spacing: 8, runSpacing: 8, children: actions),
-            ],
-          ],
-        ),
+        side: const BorderSide(color: AppColors.hairline),
       ),
-    );
-  }
-
-  Widget _chipButton(String label, VoidCallback onTap, bool busy,
-      {bool primary = false, bool danger = false}) {
-    return SizedBox(
-      height: 32,
-      child: FilledButton(
-        onPressed: busy ? null : onTap,
-        style: FilledButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          backgroundColor: danger ? AppColors.danger : (primary ? AppColors.primary : AppColors.surface),
-          foregroundColor: danger || primary ? Colors.white : AppColors.ink,
-          side: danger || primary ? null : const BorderSide(color: AppColors.hairline),
-          textStyle: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  ProIconWell(icon: Icons.receipt_long_rounded, color: tone.color),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(payable.branchName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w500,
+                                letterSpacing: -0.15,
+                                color: AppColors.ink)),
+                        Text(
+                          payable.netAmount != null && payable.netAmount != payable.rentAmount
+                              ? 'Rent ${rentMoney(payable.rentAmount)} · net ${rentMoney(payable.netAmount)}'
+                              : 'Monthly rent',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppText.caption.merge(AppText.number),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(rentMoney(payable.rentAmount),
+                          style: AppText.number.copyWith(
+                              fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.ink)),
+                      const SizedBox(height: 4),
+                      rentTonePill(tone),
+                    ],
+                  ),
+                ],
+              ),
+              if (payable.status == RentPayableStatus.held && payable.holdReason != null) ...[
+                const SizedBox(height: 10),
+                ProNote('Hold: ${payable.holdReason}', tone: ProNoteTone.bad),
+              ],
+              if (payable.status == RentPayableStatus.paid && payable.paidUtr != null) ...[
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.only(left: 46),
+                  child: Text('UTR: ${payable.paidUtr}',
+                      style: AppText.caption.merge(AppText.number)),
+                ),
+              ],
+              if (actions.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+                Wrap(spacing: 8, runSpacing: 8, children: actions),
+              ],
+            ],
+          ),
         ),
-        child: Text(label),
       ),
     );
   }
@@ -705,80 +801,112 @@ class _PayableCard extends StatelessWidget {
 // ── Notices tab ──────────────────────────────────────────────────────────────
 
 class _NoticesTab extends ConsumerWidget {
-  const _NoticesTab({required this.bottomPadding});
+  const _NoticesTab({required this.bottomPadding, required this.nav});
   final double bottomPadding;
+  final Widget nav;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(rentNoticesProvider);
     final df = DateFormat('d MMM yyyy');
-    return RefreshIndicator(
-      color: AppColors.primary,
+    final all = async.valueOrNull ?? const <RentNotice>[];
+    final now = DateTime.now();
+    final thisMonth = all
+        .where((n) => n.issuedOn != null && n.issuedOn!.year == now.year && n.issuedOn!.month == now.month)
+        .length;
+    final holds = all.where((n) => n.holdRent).length;
+    String v(int n) => async.hasValue ? '$n' : '—';
+    return ProPage(
       onRefresh: () async => ref.invalidate(rentNoticesProvider),
-      child: ListView(
-        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
+      padding: _pagePadding(bottomPadding),
+      hero: ProHero(
+        title: 'Notices',
+        subtitle: 'Notices issued to branches',
         children: [
-          async.when(
-            data: (rows) {
-              if (rows.isEmpty) {
-                return const AppEmptyState(
-                  icon: Icons.campaign_rounded,
-                  message: 'No notices issued yet.',
-                );
-              }
-              return GlassCard(
-                padding: EdgeInsets.zero,
-                shadow: AppShadows.soft,
-                child: Column(
+          ProHeroStats(stats: [
+            ProStat(label: 'Issued', value: v(all.length), sub: 'all time', dot: Colors.white),
+            ProStat(label: 'This month', value: v(thisMonth), sub: DateFormat('MMM yyyy').format(now), dot: AppColors.live),
+            ProStat(label: 'Hold rent', value: v(holds), sub: 'rent withheld', dot: const Color(0xFFE5484D)),
+          ]),
+        ],
+      ),
+      children: [
+        nav,
+        async.when(
+          data: (rows) {
+            if (rows.isEmpty) {
+              return const ProEmpty(
+                icon: Icons.campaign_rounded,
+                title: 'No notices issued yet',
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ProSectionHeader(title: 'All notices · ${rows.length}', small: true),
+                const SizedBox(height: 8),
+                ProListGroup(
                   children: [
-                    for (int i = 0; i < rows.length; i++) ...[
-                      if (i > 0) const Divider(height: 1),
+                    for (final n in rows)
                       Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        child: Column(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                        child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(rows[i].subject,
-                                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800)),
-                                ),
-                                if (rows[i].holdRent)
-                                  const StatusPill(label: 'Holds rent', color: AppColors.danger),
-                              ],
+                            ProIconWell(
+                              icon: Icons.campaign_rounded,
+                              color: n.holdRent ? AppColors.danger : AppColors.primary,
                             ),
-                            const SizedBox(height: 3),
-                            Text(rows[i].branchName,
-                                style: const TextStyle(
-                                    fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.ink)),
-                            const SizedBox(height: 2),
-                            Text(
-                              '${rows[i].issuedOn == null ? '—' : df.format(rows[i].issuedOn!)} · ${rows[i].issuedBy ?? 'system'}',
-                              style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                        child: Text(n.subject,
+                                            style: const TextStyle(
+                                                fontSize: 15,
+                                                height: 1.33,
+                                                fontWeight: FontWeight.w500,
+                                                color: AppColors.ink)),
+                                      ),
+                                      if (n.holdRent) ...[
+                                        const SizedBox(width: 8),
+                                        ProPill.bad('Holds rent'),
+                                      ],
+                                    ],
+                                  ),
+                                  Text(
+                                    '${n.branchName} · ${n.issuedOn == null ? '—' : df.format(n.issuedOn!)} · ${n.issuedBy ?? 'system'}',
+                                    style: AppText.caption,
+                                  ),
+                                  if (n.body != null && n.body!.isNotEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    Text(n.body!,
+                                        style: const TextStyle(
+                                            fontSize: 13.5, height: 1.45, color: AppColors.inkSoft)),
+                                  ],
+                                ],
+                              ),
                             ),
-                            if (rows[i].body != null && rows[i].body!.isNotEmpty) ...[
-                              const SizedBox(height: 6),
-                              Text(rows[i].body!,
-                                  style: const TextStyle(fontSize: 12, color: AppColors.inkSoft)),
-                            ],
                           ],
                         ),
                       ),
-                    ],
                   ],
                 ),
-              );
-            },
-            loading: () => const AppLoadingBlock(height: 200),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(rentNoticesProvider),
-            ),
+              ],
+            );
+          },
+          loading: () => const AppLoadingBlock(height: 200),
+          error: (e, _) => AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(rentNoticesProvider),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -786,8 +914,9 @@ class _NoticesTab extends ConsumerWidget {
 // ── Utility bills tab ────────────────────────────────────────────────────────
 
 class _UtilityTab extends ConsumerStatefulWidget {
-  const _UtilityTab({required this.bottomPadding});
+  const _UtilityTab({required this.bottomPadding, required this.nav});
   final double bottomPadding;
+  final Widget nav;
 
   @override
   ConsumerState<_UtilityTab> createState() => _UtilityTabState();
@@ -893,165 +1022,230 @@ class _UtilityTabState extends ConsumerState<_UtilityTab> {
     final user = ref.watch(authUserProvider);
     final isFullAccess = user?.hasPermission('DATA_SCOPE_ALL') ?? false;
     final async = ref.watch(rentUtilityBillsProvider(_periodIso));
-    final dfMonth = DateFormat('MMMM yyyy');
     final dfDay = DateFormat('d MMM');
+    final all = async.valueOrNull ?? const <RentUtilityBill>[];
+    final pending = all.where((b) => b.status == 'PENDING').length;
+    final approvedUnpaid = all.where((b) => b.status == 'APPROVED' && b.paidAt == null).length;
+    final paid = all.where((b) => b.status == 'APPROVED' && b.paidAt != null).length;
+    final total = all.fold<double>(0, (s, b) => s + (b.amount ?? 0));
+    String v(int n) => async.hasValue ? '$n' : '—';
 
-    return RefreshIndicator(
-      color: AppColors.primary,
+    return ProPage(
       onRefresh: () async => ref.invalidate(rentUtilityBillsProvider(_periodIso)),
-      child: ListView(
-        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        padding: EdgeInsets.fromLTRB(16, 12, 16, widget.bottomPadding),
+      padding: _pagePadding(widget.bottomPadding),
+      hero: ProHero(
+        title: 'Utility bills',
+        subtitle: async.hasValue
+            ? '${DateFormat('MMMM yyyy').format(_period)} · ${rentMoney(total)} billed'
+            : 'Electricity and internet bills by branch',
         children: [
-          InkWell(
-            onTap: _pickPeriod,
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                border: Border.all(color: AppColors.hairline),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.calendar_month_rounded, size: 15, color: AppColors.primary),
-                  const SizedBox(width: 8),
-                  Text(dfMonth.format(_period), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: () {
-                final last = DateTime(_period.year, _period.month + 1, 0);
-                downloadExcelReport(
-                  context,
-                  () => ref.read(rentRepositoryProvider).downloadUtilityReport(isoPeriod(_period), isoPeriod(last)),
-                  'utility-bills-${_periodIso.substring(0, 7)}.xlsx',
-                );
-              },
-              icon: const Icon(Icons.download_rounded, size: 18),
-              label: const Text('Download report'),
-            ),
-          ),
-          async.when(
-            data: (rows) {
-              if (rows.isEmpty) {
-                return const AppEmptyState(
-                  icon: Icons.bolt_rounded,
-                  message: 'No utility bills for this period.',
-                );
-              }
-              return Column(
-                children: [
+          ProHeroStats(stats: [
+            ProStat(label: 'Pending', value: v(pending), sub: 'awaiting review', dot: const Color(0xFFF2B347)),
+            ProStat(label: 'Approved', value: v(approvedUnpaid), sub: 'not yet paid', dot: const Color(0xFF9FCBD5)),
+            ProStat(label: 'Paid', value: v(paid), sub: 'this period', dot: AppColors.live),
+          ]),
+        ],
+      ),
+      children: [
+        widget.nav,
+        _PeriodBar(
+          period: _period,
+          onPick: _pickPeriod,
+          onChanged: (p) => setState(() => _period = p),
+        ),
+        async.when(
+          data: (rows) {
+            final swipeable = isFullAccess && rows.any((b) => b.status == 'PENDING');
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ProSectionHeader(
+                  title: 'Bills · ${rows.length}',
+                  small: true,
+                  trailing: TextButton.icon(
+                    onPressed: () {
+                      final last = DateTime(_period.year, _period.month + 1, 0);
+                      downloadExcelReport(
+                        context,
+                        () => ref.read(rentRepositoryProvider).downloadUtilityReport(isoPeriod(_period), isoPeriod(last)),
+                        'utility-bills-${_periodIso.substring(0, 7)}.xlsx',
+                      );
+                    },
+                    icon: const Icon(Icons.download_rounded, size: 18),
+                    label: const Text('Download report'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (rows.isEmpty)
+                  const ProEmpty(
+                    icon: Icons.bolt_rounded,
+                    title: 'No utility bills for this period',
+                    message: 'Bills filed for this month show up here.',
+                  )
+                else ...[
+                  if (swipeable) ...[
+                    const ProSwipeHint(),
+                    const SizedBox(height: 10),
+                  ],
                   for (final b in rows)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: GlassCard(
-                        padding: const EdgeInsets.all(14),
-                        shadow: AppShadows.soft,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(rentUtilityKindIcon(b.kind), size: 16, color: AppColors.primary),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text('${b.branchName} · ${rentUtilityKindLabel(b.kind)}',
-                                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800)),
-                                ),
-                                StatusPill(
-                                  label: b.status == 'APPROVED' ? (b.paidAt != null ? 'Paid' : 'Approved') : (b.status == 'REJECTED' ? 'Rejected' : 'Pending'),
-                                  color: b.status == 'REJECTED'
-                                      ? AppColors.danger
-                                      : b.status == 'APPROVED'
-                                          ? AppColors.success
-                                          : AppColors.muted,
-                                ),
-                                IconButton(
-                                  visualDensity: VisualDensity.compact,
-                                  tooltip: "View / edit",
-                                  icon: const Icon(Icons.edit_outlined, size: 18),
-                                  onPressed: () => _open(b),
-                                ),
-                              ],
-                            ),
-                            if (b.kind == RentUtilityKind.internet && b.periodEnd != null && isoPeriod(b.periodEnd!) != b.period) ...[
-                              const SizedBox(height: 4),
-                              Text('Covers ${DateFormat('MMM yyyy').format(DateTime.tryParse(b.period) ?? _period)} – ${DateFormat('MMM yyyy').format(b.periodEnd!)}',
-                                  style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                            ],
-                            if (b.status == 'REJECTED' && (b.rejectionReason ?? '').isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Text('Rejected: ${b.rejectionReason}', style: const TextStyle(fontSize: 11.5, color: AppColors.danger)),
-                            ],
-                            if (b.uploadedBy != null) ...[
-                              const SizedBox(height: 4),
-                              Text('Filed by ${b.uploadedBy}', style: const TextStyle(fontSize: 11, color: AppColors.muted)),
-                            ],
-                            const SizedBox(height: 8),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(rentMoney(b.amount),
-                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
-                                Text(b.dueDate == null ? 'No due date' : 'Due ${dfDay.format(b.dueDate!)}',
-                                    style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                              ],
-                            ),
-                            if (isFullAccess && b.status == 'PENDING') ...[
-                              const SizedBox(height: 10),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: [
-                                  OutlinedButton(
-                                    onPressed: () => _reject(b),
-                                    child: const Text('Reject', style: TextStyle(fontSize: 11.5)),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  FilledButton(
-                                    onPressed: () => _approve(b),
-                                    child: const Text('Approve', style: TextStyle(fontSize: 11.5)),
-                                  ),
-                                ],
-                              ),
-                            ] else if (isFullAccess && b.status == 'APPROVED') ...[
-                              const SizedBox(height: 10),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: SizedBox(
-                                  height: 32,
-                                  child: b.paidAt == null
-                                      ? FilledButton.tonal(
-                                          onPressed: () => _markPaid(b),
-                                          child: const Text('Mark paid', style: TextStyle(fontSize: 11.5)),
-                                        )
-                                      : TextButton(
-                                          onPressed: () => _markUnpaid(b),
-                                          child: const Text('Mark unpaid', style: TextStyle(fontSize: 11.5)),
-                                        ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
+                      child: _swipeBill(
+                        b,
+                        enabled: isFullAccess && b.status == 'PENDING',
+                        child: _billCard(b, isFullAccess, dfDay),
                       ),
                     ),
                 ],
-              );
-            },
-            loading: () => const AppLoadingBlock(height: 160),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(rentUtilityBillsProvider(_periodIso)),
-            ),
+              ],
+            );
+          },
+          loading: () => const AppLoadingBlock(height: 160),
+          error: (e, _) => AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(rentUtilityBillsProvider(_periodIso)),
           ),
-        ],
+        ),
+      ],
+    );
+  }
+
+  Widget _swipeBill(RentUtilityBill b, {required bool enabled, required Widget child}) {
+    if (!enabled) return child;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: ProSwipeDecision(
+        onApprove: () => _approve(b),
+        onReject: () => _reject(b),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _billCard(RentUtilityBill b, bool isFullAccess, DateFormat dfDay) {
+    final StatusTone tone = b.status == 'APPROVED'
+        ? StatusTone(AppColors.success, b.paidAt != null ? 'Paid' : 'Approved')
+        : b.status == 'REJECTED'
+            ? const StatusTone(AppColors.danger, 'Rejected')
+            : const StatusTone(AppColors.muted, 'Pending');
+    final meta = [
+      b.dueDate == null ? 'No due date' : 'Due ${dfDay.format(b.dueDate!)}',
+      if (b.uploadedBy != null) 'filed by ${b.uploadedBy}',
+    ].join(' · ');
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        side: const BorderSide(color: AppColors.hairline),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _open(b),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  ProIconWell(
+                    icon: rentUtilityKindIcon(b.kind),
+                    color: b.kind == RentUtilityKind.internet ? AppColors.info : const Color(0xFF9A5B00),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${b.branchName} · ${rentUtilityKindLabel(b.kind)}',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 15,
+                                height: 1.33,
+                                fontWeight: FontWeight.w500,
+                                color: AppColors.ink)),
+                        Text(meta, style: AppText.caption),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(rentMoney(b.amount),
+                          style: AppText.number.copyWith(
+                              fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.ink)),
+                      const SizedBox(height: 4),
+                      rentTonePill(tone),
+                    ],
+                  ),
+                ],
+              ),
+              if (b.kind == RentUtilityKind.internet && b.periodEnd != null && isoPeriod(b.periodEnd!) != b.period) ...[
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.only(left: 46),
+                  child: Text(
+                      'Covers ${DateFormat('MMM yyyy').format(DateTime.tryParse(b.period) ?? _period)} – ${DateFormat('MMM yyyy').format(b.periodEnd!)}',
+                      style: AppText.caption),
+                ),
+              ],
+              if (b.status == 'REJECTED' && (b.rejectionReason ?? '').isNotEmpty) ...[
+                const SizedBox(height: 10),
+                ProNote('Rejected: ${b.rejectionReason}', tone: ProNoteTone.bad),
+              ],
+              if (isFullAccess && b.status == 'PENDING') ...[
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => _open(b),
+                      icon: const Icon(Icons.edit_outlined, size: 16),
+                      label: const Text('View / edit'),
+                    ),
+                    const Spacer(),
+                    _cardButton('Reject', () => _reject(b), danger: true),
+                    const SizedBox(width: 8),
+                    _cardButton('Approve', () => _approve(b), primary: true),
+                  ],
+                ),
+              ] else if (isFullAccess && b.status == 'APPROVED') ...[
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => _open(b),
+                      icon: const Icon(Icons.edit_outlined, size: 16),
+                      label: const Text('View / edit'),
+                    ),
+                    const Spacer(),
+                    b.paidAt == null
+                        ? _cardButton('Mark paid', () => _markPaid(b), primary: true)
+                        : TextButton(
+                            onPressed: () => _markUnpaid(b),
+                            child: const Text('Mark unpaid'),
+                          ),
+                  ],
+                ),
+              ] else ...[
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: () => _open(b),
+                    icon: const Icon(Icons.edit_outlined, size: 16),
+                    label: const Text('View / edit'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1060,49 +1254,59 @@ class _UtilityTabState extends ConsumerState<_UtilityTab> {
 // ── Audit trail tab ──────────────────────────────────────────────────────────
 
 class _AuditTab extends ConsumerWidget {
-  const _AuditTab({required this.bottomPadding});
+  const _AuditTab({required this.bottomPadding, required this.nav});
   final double bottomPadding;
+  final Widget nav;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(rentAuditTrailProvider);
     final df = DateFormat('d MMM yyyy, HH:mm');
-    return RefreshIndicator(
-      color: AppColors.primary,
+    final all = async.valueOrNull ?? const <RentAuditLog>[];
+    int count(String label) => all.where((e) => rentAuditActionTone(e.action).label == label).length;
+    String v(int n) => async.hasValue ? '$n' : '—';
+    return ProPage(
       onRefresh: () async => ref.invalidate(rentAuditTrailProvider),
-      child: ListView(
-        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
+      padding: _pagePadding(bottomPadding),
+      hero: ProHero(
+        title: 'Audit trail',
+        subtitle: 'Every change, with who and when',
         children: [
-          async.when(
-            data: (rows) {
-              if (rows.isEmpty) {
-                return const AppEmptyState(
-                  icon: Icons.history_rounded,
-                  message: 'No audit activity yet.',
-                );
-              }
-              return GlassCard(
-                padding: EdgeInsets.zero,
-                shadow: AppShadows.soft,
-                child: Column(
-                  children: [
-                    for (int i = 0; i < rows.length; i++) ...[
-                      if (i > 0) const Divider(height: 1),
-                      _AuditRow(entry: rows[i], df: df),
-                    ],
-                  ],
-                ),
-              );
-            },
-            loading: () => const AppLoadingBlock(height: 200),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(rentAuditTrailProvider),
-            ),
-          ),
+          ProHeroStats(stats: [
+            ProStat(label: 'Created', value: v(count('Created')), dot: AppColors.live),
+            ProStat(label: 'Updated', value: v(count('Updated')), dot: const Color(0xFF9FCBD5)),
+            ProStat(label: 'Deleted', value: v(count('Deleted')), dot: const Color(0xFFE5484D)),
+          ]),
         ],
       ),
+      children: [
+        nav,
+        async.when(
+          data: (rows) {
+            if (rows.isEmpty) {
+              return const ProEmpty(
+                icon: Icons.history_rounded,
+                title: 'No audit activity yet',
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ProSectionHeader(title: 'Recent activity · ${rows.length}', small: true),
+                const SizedBox(height: 8),
+                ProListGroup(
+                  children: [for (final e in rows) _AuditRow(entry: e, df: df)],
+                ),
+              ],
+            );
+          },
+          loading: () => const AppLoadingBlock(height: 200),
+          error: (e, _) => AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(rentAuditTrailProvider),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1115,32 +1319,21 @@ class _AuditRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tone = rentAuditActionTone(entry.action);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-      child: Row(
-        children: [
-          StatusPill(label: tone.label, color: tone.color),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${entry.entityType} #${entry.entityId ?? '—'}',
-                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  entry.createdAt == null
-                      ? (entry.actorName ?? 'system')
-                      : '${df.format(entry.createdAt!)} · ${entry.actorName ?? 'system'}',
-                  style: const TextStyle(fontSize: 11, color: AppColors.muted),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    final icon = switch (tone.label) {
+      'Created' => Icons.add_circle_outline_rounded,
+      'Updated' => Icons.edit_outlined,
+      'Deleted' => Icons.delete_outline_rounded,
+      _ => Icons.history_rounded,
+    };
+    return ProListRow(
+      dense: true,
+      leading: ProIconWell(icon: icon, color: tone.color),
+      title: '${entry.entityType} #${entry.entityId ?? '—'}',
+      subtitle: entry.createdAt == null
+          ? (entry.actorName ?? 'system')
+          : '${df.format(entry.createdAt!)} · ${entry.actorName ?? 'system'}',
+      pill: rentTonePill(tone),
+      chevron: false,
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../core/pro_ui.dart';
 import '../../../core/theme.dart';
 import '../../files/file_repository.dart';
 import 'video_qa_recorder_screen.dart';
@@ -155,16 +156,21 @@ class _VideoQaReviewScreenState extends ConsumerState<VideoQaReviewScreen> {
   Widget build(BuildContext context) {
     final player = _player;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: widget.title,
+        subtitle: 'Watch it back, then send it',
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
           if (player != null && player.value.isInitialized)
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadii.lg),
                   child: AspectRatio(
                     aspectRatio: player.value.aspectRatio,
                     child: Stack(
@@ -185,66 +191,88 @@ class _VideoQaReviewScreenState extends ConsumerState<VideoQaReviewScreen> {
                     ),
                   ),
                 ),
-                VideoProgressIndicator(player, allowScrubbing: true),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: VideoProgressIndicator(
+                    player,
+                    allowScrubbing: true,
+                    colors: VideoProgressColors(
+                      playedColor: AppColors.primary,
+                      bufferedColor: AppColors.hairline,
+                      backgroundColor: AppColors.hairlineSoft,
+                    ),
+                  ),
+                ),
               ],
             )
           else
-            const SizedBox(
+            Container(
               height: 180,
-              child: Center(child: CircularProgressIndicator()),
+              decoration: BoxDecoration(
+                color: AppColors.deep,
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+              ),
+              child: const Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              ),
             ),
 
           const SizedBox(height: 10),
-          Text(
-            '${_clock(widget.take.durationSec)} · ${_size(_bytes)}',
-            style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
+          Row(
+            children: [
+              ProPill.neutral(_clock(widget.take.durationSec)),
+              if (_bytes != null) ...[
+                const SizedBox(width: 8),
+                Text(_size(_bytes), style: AppText.caption),
+              ],
+            ],
           ),
 
-          const SizedBox(height: 16),
-          const Text('Questions asked',
-              style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 6),
-          for (final m in widget.take.marks)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: InkWell(
-                // Tapping a question jumps to the answer, the same way the web
-                // review screen does with the stored offsets.
-                onTap: player == null || !player.value.isInitialized
-                    ? null
-                    : () {
-                        player.seekTo(Duration(seconds: m.startSec));
-                        player.play();
-                      },
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: 44,
-                      child: Text(_clock(m.startSec),
-                          style: const TextStyle(
-                              color: AppColors.muted, fontSize: 12)),
+          const SizedBox(height: 18),
+          const ProSectionHeader(title: 'Questions asked', small: true),
+          const SizedBox(height: 10),
+          ProListGroup(
+            dividerIndent: 70,
+            children: [
+              for (final m in widget.take.marks)
+                ProListRow(
+                  // Tapping a question jumps to the answer, the same way the web
+                  // review screen does with the stored offsets.
+                  onTap: player == null || !player.value.isInitialized
+                      ? null
+                      : () {
+                          player.seekTo(Duration(seconds: m.startSec));
+                          player.play();
+                        },
+                  chevron: false,
+                  leading: SizedBox(
+                    width: 46,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: ProPill.neutral(_clock(m.startSec)),
                     ),
-                    Expanded(child: Text(m.text, style: const TextStyle(fontSize: 13.5))),
-                  ],
+                  ),
+                  title: m.text,
+                  titleMaxLines: 3,
                 ),
-              ),
-            ),
+            ],
+          ),
 
           if (_error != null) ...[
             const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.danger.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(_error!,
-                  style: const TextStyle(color: AppColors.danger, fontSize: 12.5)),
-            ),
+            ProNote(_error!, tone: ProNoteTone.bad),
           ],
-
-          const SizedBox(height: 20),
+        ],
+      ),
+      bottomNavigationBar: ProBottomBar(
+        top: widget.allowRetake
+            ? OutlinedButton.icon(
+                onPressed: _busy ? null : () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Record again'),
+              )
+            : null,
+        children: [
           FilledButton.icon(
             onPressed: _busy ? null : _submit,
             icon: _busy
@@ -256,14 +284,6 @@ class _VideoQaReviewScreenState extends ConsumerState<VideoQaReviewScreen> {
                 : const Icon(Icons.cloud_upload_outlined, size: 18),
             label: Text(_busy ? (_status ?? 'Working…') : (_error == null ? 'Use this recording' : 'Try again')),
           ),
-          if (widget.allowRetake) ...[
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _busy ? null : () => Navigator.of(context).pop(),
-              icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('Record again'),
-            ),
-          ],
         ],
       ),
     );

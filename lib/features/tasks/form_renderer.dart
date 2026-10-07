@@ -7,11 +7,13 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/env.dart';
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../files/file_repository.dart';
 import 'form_field_widgets.dart';
 import 'task_models.dart';
+import 'task_status_ui.dart' show TaskSheetHeader, kTaskSheetShape;
 import 'video_qa/video_qa_field.dart';
 
 /// Resolves a stored relative file url (`/api/files/{id}`) to an absolute URL.
@@ -32,6 +34,7 @@ class FormRenderer extends StatelessWidget {
     this.readOnly = false,
     this.errors = const {},
     this.ownerFillsAssigned = false,
+    this.sectionCards = false,
   });
 
   final FormSchema schema;
@@ -45,29 +48,134 @@ class FormRenderer extends StatelessWidget {
   /// the assigner and must fill those fields themselves.
   final bool ownerFillsAssigned;
 
+  /// Lay the form out as white cards, one per `section` field (numbered),
+  /// instead of a flat column. Use on a canvas background; leave off when the
+  /// form already sits inside a card.
+  final bool sectionCards;
+
+  Widget _block(FormFieldDef f) => _FieldBlock(
+        field: f,
+        value: values[f.name],
+        onChanged: (v) => onChanged(f.name, v),
+        readOnly: readOnly,
+        ownerFillsAssigned: ownerFillsAssigned,
+        error: errors[f.name],
+      );
+
   @override
   Widget build(BuildContext context) {
     final visible = schema.fields.where((f) => isFieldVisible(f, values)).toList();
     if (visible.isEmpty) {
-      return Text(
+      const empty = Text(
         'This task has no form fields.',
-        style: TextStyle(color: Theme.of(context).hintColor),
+        style: TextStyle(fontSize: 14, color: AppColors.muted),
       );
+      return sectionCards
+          ? const GlassCard(child: empty)
+          : empty;
+    }
+    if (!sectionCards) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < visible.length; i++) ...[
+            if (i > 0) const SizedBox(height: 16),
+            _block(visible[i]),
+          ],
+        ],
+      );
+    }
+
+    // One card per section: a `section` field opens a new card and becomes its
+    // numbered header; fields before the first section share an untitled card.
+    final groups = <({FormFieldDef? head, int number, List<FormFieldDef> fields})>[];
+    var sections = 0;
+    for (final f in visible) {
+      if (f.type == FieldType.section) {
+        sections++;
+        groups.add((head: f, number: sections, fields: <FormFieldDef>[]));
+      } else {
+        if (groups.isEmpty) {
+          groups.add((head: null, number: 0, fields: <FormFieldDef>[]));
+        }
+        groups.last.fields.add(f);
+      }
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final f in visible) ...[
-          _FieldBlock(
-            field: f,
-            value: values[f.name],
-            onChanged: (v) => onChanged(f.name, v),
-            readOnly: readOnly,
-            ownerFillsAssigned: ownerFillsAssigned,
-            error: errors[f.name],
+        for (var g = 0; g < groups.length; g++) ...[
+          if (g > 0) const SizedBox(height: 14),
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (groups[g].head != null) ...[
+                  _SectionHead(
+                    number: groups[g].number,
+                    title: groups[g].head!.label,
+                    help: groups[g].head!.helpText,
+                  ),
+                  if (groups[g].fields.isNotEmpty) const SizedBox(height: 16),
+                ],
+                for (var i = 0; i < groups[g].fields.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 16),
+                  _block(groups[g].fields[i]),
+                ],
+              ],
+            ),
           ),
-          const SizedBox(height: 16),
         ],
+      ],
+    );
+  }
+}
+
+/// Numbered card header for a form section.
+class _SectionHead extends StatelessWidget {
+  const _SectionHead({required this.number, required this.title, this.help});
+  final int number;
+  final String title;
+  final String? help;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 26,
+          height: 26,
+          margin: const EdgeInsets.only(top: 1),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            '$number',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.primary,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: AppText.section),
+              if (help != null && help!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: Text(help!, style: AppText.caption),
+                ),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -183,40 +291,17 @@ class _FieldBlock extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: RichText(
-                    text: TextSpan(
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
-                      ),
-                      children: [
-                        TextSpan(text: field.label),
-                        if (field.required && !lockedAssigned && !field.readOnly)
-                          const TextSpan(
-                            text: ' *',
-                            style: TextStyle(color: Colors.red),
-                          ),
-                      ],
-                    ),
+                  child: _FieldLabel(
+                    label: field.label,
+                    required:
+                        field.required && !lockedAssigned && !field.readOnly,
                   ),
                 ),
                 if (lockedAssigned)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF6366F1).withOpacity(0.10),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: const Text(
-                      'Provided',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF4F46E5),
-                        letterSpacing: 0.3,
-                      ),
-                    ),
+                  const ProPill(
+                    'Provided',
+                    color: AppColors.pink,
+                    background: Color(0xFFF0EBF7),
                   ),
               ],
             ),
@@ -226,15 +311,15 @@ class _FieldBlock extends StatelessWidget {
           // note; nothing to type, nothing validated, nothing submitted.
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: Colors.grey.shade100,
-              border: Border.all(color: Colors.grey.shade300),
-              borderRadius: BorderRadius.circular(8),
+              color: AppColors.surfaceAlt,
+              border: Border.all(color: AppColors.hairline),
+              borderRadius: BorderRadius.circular(AppRadii.md),
             ),
             child: Text(
               (field.placeholder ?? '').trim().isEmpty ? '—' : field.placeholder!.trim(),
-              style: const TextStyle(fontSize: 13.5, color: Colors.black87, height: 1.4),
+              style: const TextStyle(fontSize: 14, color: AppColors.inkSoft, height: 1.4),
             ),
           )
         else
@@ -246,24 +331,80 @@ class _FieldBlock extends StatelessWidget {
           ),
         if (field.helpText != null && field.helpText!.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              field.helpText!,
-              style: TextStyle(fontSize: 11, color: Theme.of(context).hintColor),
-            ),
+            padding: const EdgeInsets.only(top: 5),
+            child: Text(field.helpText!, style: AppText.caption),
           ),
         if (error != null)
           Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              error!,
-              style: TextStyle(
-                fontSize: 11,
-                color: Theme.of(context).colorScheme.error,
-              ),
+            padding: const EdgeInsets.only(top: 5),
+            child: Row(
+              children: [
+                const Icon(Icons.error_outline_rounded,
+                    size: 14, color: AppColors.danger),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    error!,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.danger,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Field label in the [ProField] style (label above the input, red asterisk).
+class _FieldLabel extends StatelessWidget {
+  const _FieldLabel({required this.label, required this.required});
+  final String label;
+  final bool required;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text.rich(
+      TextSpan(children: [
+        TextSpan(text: label),
+        if (required)
+          const TextSpan(
+            text: ' *',
+            style: TextStyle(color: AppColors.danger),
+          ),
+      ]),
+      style: AppText.label,
+    );
+  }
+}
+
+/// Hairline box holding a list of radio / checkbox options, with dividers.
+class _OptionBox extends StatelessWidget {
+  const _OptionBox({required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    if (children.isEmpty) return const SizedBox.shrink();
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0) const Divider(height: 1, color: AppColors.hairlineSoft),
+            children[i],
+          ],
+        ],
+      ),
     );
   }
 }
@@ -302,7 +443,6 @@ class _FieldInput extends StatelessWidget {
               : const [TitleCaseTextFormatter()],
           decoration: InputDecoration(
             hintText: field.placeholder,
-            border: const OutlineInputBorder(),
             isDense: true,
           ),
           maxLength: field.maxLength,
@@ -319,7 +459,6 @@ class _FieldInput extends StatelessWidget {
           inputFormatters: const [TitleCaseTextFormatter()],
           decoration: InputDecoration(
             hintText: field.placeholder,
-            border: const OutlineInputBorder(),
           ),
           maxLength: field.maxLength,
           onChanged: (s) => onChanged(s),
@@ -332,7 +471,6 @@ class _FieldInput extends StatelessWidget {
           keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
           decoration: InputDecoration(
             hintText: field.placeholder,
-            border: const OutlineInputBorder(),
             isDense: true,
           ),
           onChanged: (s) {
@@ -351,7 +489,6 @@ class _FieldInput extends StatelessWidget {
           maxLength: field.maxLength ?? 15,
           decoration: InputDecoration(
             hintText: field.placeholder ?? '10-digit mobile number',
-            border: const OutlineInputBorder(),
             isDense: true,
           ),
           onChanged: (s) => onChanged(s),
@@ -395,14 +532,13 @@ class _FieldInput extends StatelessWidget {
         );
 
       case FieldType.radio:
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        return _OptionBox(
           children: [
             for (final o in field.options)
               RadioListTile<String>(
-                contentPadding: EdgeInsets.zero,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 6),
                 dense: true,
-                title: Text(o),
+                title: Text(o, style: const TextStyle(fontSize: 14.5)),
                 value: o,
                 groupValue: _asString().isEmpty ? null : _asString(),
                 onChanged: readOnly ? null : (v) => onChanged(v),
@@ -416,47 +552,44 @@ class _FieldInput extends StatelessWidget {
             ? (value as List).cast<String>().toSet()
             : <String>{};
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: RichText(
-                text: TextSpan(
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _FieldLabel(
+                        label: field.label, required: field.required),
                   ),
-                  children: [
-                    TextSpan(text: field.label),
-                    if (field.required)
-                      const TextSpan(
-                        text: ' *',
-                        style: TextStyle(color: Colors.red),
-                      ),
-                  ],
-                ),
+                  if (selected.isNotEmpty)
+                    ProPill.neutral('${selected.length} selected'),
+                ],
               ),
             ),
-            for (final o in field.options)
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: Text(o),
-                value: selected.contains(o),
-                onChanged: readOnly
-                    ? null
-                    : (v) {
-                        final next = {...selected};
-                        if (v == true) {
-                          next.add(o);
-                        } else {
-                          next.remove(o);
-                        }
-                        onChanged(next.toList());
-                      },
-              ),
+            _OptionBox(
+              children: [
+                for (final o in field.options)
+                  CheckboxListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 6),
+                    dense: true,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: Text(o, style: const TextStyle(fontSize: 14.5)),
+                    value: selected.contains(o),
+                    onChanged: readOnly
+                        ? null
+                        : (v) {
+                            final next = {...selected};
+                            if (v == true) {
+                              next.add(o);
+                            } else {
+                              next.remove(o);
+                            }
+                            onChanged(next.toList());
+                          },
+                  ),
+              ],
+            ),
           ],
         );
 
@@ -541,7 +674,6 @@ class _FieldInput extends StatelessWidget {
           keyboardType: TextInputType.url,
           decoration: InputDecoration(
             hintText: field.placeholder ?? 'https://',
-            border: const OutlineInputBorder(),
             isDense: true,
           ),
           onChanged: (s) => onChanged(s),
@@ -554,7 +686,6 @@ class _FieldInput extends StatelessWidget {
           obscureText: true,
           decoration: InputDecoration(
             hintText: field.placeholder,
-            border: const OutlineInputBorder(),
             isDense: true,
           ),
           maxLength: field.maxLength,
@@ -570,7 +701,6 @@ class _FieldInput extends StatelessWidget {
           maxLength: field.maxLength ?? 6,
           style: const TextStyle(letterSpacing: 6, fontSize: 18),
           decoration: const InputDecoration(
-            border: OutlineInputBorder(),
             isDense: true,
           ),
           onChanged: (s) => onChanged(s),
@@ -663,7 +793,6 @@ class _FieldInput extends StatelessWidget {
             readOnly: readOnly,
             decoration: InputDecoration(
               hintText: field.placeholder ?? 'Enter ${field.label.toLowerCase()}',
-              border: const OutlineInputBorder(),
               isDense: true,
             ),
             onChanged: (s) => onChanged(s),
@@ -687,7 +816,6 @@ class _FieldInput extends StatelessWidget {
           decoration: InputDecoration(
             hintText: field.placeholder ?? 'Search ${field.label.toLowerCase()}',
             prefixIcon: const Icon(Icons.search_rounded, size: 18),
-            border: const OutlineInputBorder(),
             isDense: true,
           ),
           onChanged: (s) => onChanged(s),
@@ -790,7 +918,6 @@ class _FieldInput extends StatelessWidget {
                       : 11),
           decoration: InputDecoration(
             hintText: field.placeholder,
-            border: const OutlineInputBorder(),
             isDense: true,
           ),
           onChanged: (s) => onChanged(s),
@@ -805,7 +932,6 @@ class _FieldInput extends StatelessWidget {
           maxLength: 12,
           decoration: InputDecoration(
             hintText: field.placeholder ?? '12 digits',
-            border: const OutlineInputBorder(),
             isDense: true,
           ),
           onChanged: (s) => onChanged(s),
@@ -820,7 +946,6 @@ class _FieldInput extends StatelessWidget {
           maxLength: field.maxLength ?? 20,
           decoration: InputDecoration(
             hintText: field.placeholder ?? 'Account number',
-            border: const OutlineInputBorder(),
             isDense: true,
           ),
           onChanged: (s) => onChanged(s),
@@ -1087,38 +1212,63 @@ class _FileFieldState extends ConsumerState<_FileField> {
     final action = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      shape: kTaskSheetShape,
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (allowCamera)
-              ListTile(
-                leading: Icon(widget.video
-                    ? Icons.videocam_outlined
-                    : Icons.photo_camera_outlined),
-                title: Text(widget.video ? 'Record a video' : 'Take a photo'),
-                onTap: () => Navigator.pop(ctx, 'camera'),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TaskSheetHeader(
+                title: widget.video
+                    ? 'Add a video'
+                    : _mediaOnly
+                        ? (widget.multi ? 'Add photos' : 'Add a photo')
+                        : (widget.multi ? 'Add files' : 'Add a file'),
               ),
-            if (allowGallery)
-              ListTile(
-                leading: Icon(widget.video
-                    ? Icons.video_library_outlined
-                    : Icons.photo_library_outlined),
-                title: Text(widget.video
-                    ? 'Choose a video'
-                    : (widget.multi ? 'Choose photos' : 'Choose a photo')),
-                onTap: () => Navigator.pop(ctx, 'gallery'),
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: ProListGroup(
+                  children: [
+                    if (allowCamera)
+                      ProListRow(
+                        leading: ProIconWell(
+                          icon: widget.video
+                              ? Icons.videocam_outlined
+                              : Icons.photo_camera_outlined,
+                          color: AppColors.primary,
+                        ),
+                        title: widget.video ? 'Record a video' : 'Take a photo',
+                        onTap: () => Navigator.pop(ctx, 'camera'),
+                      ),
+                    if (allowGallery)
+                      ProListRow(
+                        leading: ProIconWell(
+                          icon: widget.video
+                              ? Icons.video_library_outlined
+                              : Icons.photo_library_outlined,
+                          color: AppColors.info,
+                        ),
+                        title: widget.video
+                            ? 'Choose a video'
+                            : (widget.multi ? 'Choose photos' : 'Choose a photo'),
+                        onTap: () => Navigator.pop(ctx, 'gallery'),
+                      ),
+                    if (!_mediaOnly)
+                      ProListRow(
+                        leading: const ProIconWell(
+                          icon: Icons.attach_file_rounded,
+                          color: AppColors.pink,
+                        ),
+                        title: widget.multi ? 'Attach files' : 'Attach a file',
+                        onTap: () => Navigator.pop(ctx, 'file'),
+                      ),
+                  ],
+                ),
               ),
-            if (!_mediaOnly)
-              ListTile(
-                leading: const Icon(Icons.attach_file_rounded),
-                title: Text(widget.multi ? 'Attach files' : 'Attach a file'),
-                onTap: () => Navigator.pop(ctx, 'file'),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1156,6 +1306,15 @@ class _FileFieldState extends ConsumerState<_FileField> {
     return empty ? (widget.multi ? 'Choose photos' : 'Choose photo') : 'Choose more';
   }
 
+  /// Drop-zone icon for an empty field.
+  IconData get _dropIcon {
+    if (!_mediaOnly) return Icons.upload_file_rounded;
+    if (widget.mediaSource == MediaSource.both) {
+      return widget.video ? Icons.videocam_outlined : Icons.add_a_photo_outlined;
+    }
+    return _addIcon;
+  }
+
   @override
   Widget build(BuildContext context) {
     final files = _files;
@@ -1175,27 +1334,119 @@ class _FileFieldState extends ConsumerState<_FileField> {
                 ),
             ],
           ),
-        if (files.isNotEmpty) const SizedBox(height: 8),
+        if (files.isNotEmpty) const SizedBox(height: 10),
         if (canAdd)
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _showAddSheet,
-            icon: _busy
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Icon(_addIcon, size: 18),
-            label: Text(_busy ? 'Uploading…' : _addLabel(files.isEmpty)),
-          )
+          files.isEmpty
+              ? _DropZone(
+                  icon: _dropIcon,
+                  label: _busy ? 'Uploading…' : _addLabel(true),
+                  busy: _busy,
+                  onTap: _busy ? null : _showAddSheet,
+                )
+              : OutlinedButton.icon(
+                  onPressed: _busy ? null : _showAddSheet,
+                  icon: _busy
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(_addIcon, size: 18),
+                  label: Text(_busy ? 'Uploading…' : _addLabel(false)),
+                )
         else if (files.isEmpty)
-          Text(
+          const Text(
             'No attachment.',
-            style: TextStyle(color: Theme.of(context).hintColor, fontSize: 12.5),
+            style: TextStyle(color: AppColors.muted, fontSize: 13.5),
           ),
       ],
     );
   }
+}
+
+/// Dashed tap target shown while a file / photo / video field is empty.
+class _DropZone extends StatelessWidget {
+  const _DropZone({
+    required this.icon,
+    required this.label,
+    required this.busy,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String label;
+  final bool busy;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: Material(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: CustomPaint(
+            painter: _DashedBoxPainter(),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+              child: Column(
+                children: [
+                  if (busy)
+                    const SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: Padding(
+                        padding: EdgeInsets.all(9),
+                        child: CircularProgressIndicator(strokeWidth: 2.2),
+                      ),
+                    )
+                  else
+                    ProIconWell(icon: icon, color: AppColors.primary, size: 40),
+                  const SizedBox(height: 8),
+                  Text(
+                    label,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashedBoxPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rrect = RRect.fromRectAndRadius(
+      (Offset.zero & size).deflate(0.5),
+      const Radius.circular(14),
+    );
+    final path = Path()..addRRect(rrect);
+    final paint = Paint()
+      ..color = const Color(0xFFC6D3D6)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    for (final metric in path.computeMetrics()) {
+      double d = 0;
+      while (d < metric.length) {
+        canvas.drawPath(metric.extractPath(d, d + 6), paint);
+        d += 10;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _FilePreview extends StatelessWidget {
@@ -1222,32 +1473,35 @@ class _FilePreview extends StatelessWidget {
           width: 92,
           height: 92,
           decoration: BoxDecoration(
-            color: Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.grey.shade300),
+            color: AppColors.surfaceAlt,
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            border: Border.all(color: AppColors.hairline),
           ),
           clipBehavior: Clip.antiAlias,
           child: _isImage && url.isNotEmpty
               ? Image.network(
                   absoluteFileUrl(url),
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) =>
-                      const Icon(Icons.broken_image_outlined, color: Colors.grey),
+                  errorBuilder: (_, __, ___) => const Icon(
+                      Icons.broken_image_outlined,
+                      color: AppColors.faint),
                 )
               : Padding(
                   padding: const EdgeInsets.all(6),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.insert_drive_file_outlined,
-                          size: 26, color: AppColors.muted),
-                      const SizedBox(height: 4),
+                      const ProIconWell(
+                        icon: Icons.insert_drive_file_outlined,
+                        size: 32,
+                      ),
+                      const SizedBox(height: 5),
                       Text(
                         name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(fontSize: 9.5, color: AppColors.muted),
+                        style: const TextStyle(fontSize: 10.5, color: AppColors.muted),
                       ),
                     ],
                   ),
@@ -1257,15 +1511,21 @@ class _FilePreview extends StatelessWidget {
           Positioned(
             top: -6,
             right: -6,
-            child: GestureDetector(
-              onTap: onRemove,
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: AppColors.danger,
-                  shape: BoxShape.circle,
+            child: Semantics(
+              button: true,
+              label: 'Remove',
+              child: GestureDetector(
+                onTap: onRemove,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.ink,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  padding: const EdgeInsets.all(3),
+                  child: const Icon(Icons.close_rounded,
+                      size: 13, color: Colors.white),
                 ),
-                padding: const EdgeInsets.all(2),
-                child: const Icon(Icons.close, size: 14, color: Colors.white),
               ),
             ),
           ),
@@ -1295,9 +1555,11 @@ class _Dropdown extends StatelessWidget {
       value: items.contains(value) ? value : null,
       isExpanded: true,
       decoration: const InputDecoration(
-        border: OutlineInputBorder(),
         isDense: true,
       ),
+      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: AppColors.muted),
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      dropdownColor: AppColors.surface,
       hint: Text(placeholder),
       items: items
           .map((o) => DropdownMenuItem(value: o, child: Text(o)))
@@ -1346,7 +1608,6 @@ class _NumberField extends StatelessWidget {
         hintText: hint,
         prefixText: prefix,
         suffixText: suffix,
-        border: const OutlineInputBorder(),
         isDense: true,
         counterText: maxLength == null ? null : '',
       ),
@@ -1355,6 +1616,45 @@ class _NumberField extends StatelessWidget {
         final n = num.tryParse(s);
         onChanged(n ?? s);
       },
+    );
+  }
+}
+
+/// Tap-to-pick box shared by the date, time, date-time and month fields.
+class _PickerBox extends StatelessWidget {
+  const _PickerBox({
+    required this.text,
+    required this.placeholder,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String text;
+  final String placeholder;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadii.md),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          isDense: true,
+          suffixIcon: Icon(icon, size: 19),
+        ),
+        child: Text(
+          text.isEmpty ? placeholder : text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 15,
+            color: text.isEmpty ? AppColors.faint : AppColors.ink,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1395,21 +1695,11 @@ class _DateTimeField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final shown = value.isEmpty ? '' : value.replaceFirst('T', ' ');
-    return InkWell(
+    return _PickerBox(
+      text: shown,
+      placeholder: 'Select date & time',
+      icon: Icons.event_rounded,
       onTap: () => _pick(context),
-      child: InputDecorator(
-        decoration: const InputDecoration(
-          border: OutlineInputBorder(),
-          isDense: true,
-          suffixIcon: Icon(Icons.event_rounded, size: 18),
-        ),
-        child: Text(
-          shown.isEmpty ? 'Select date & time' : shown,
-          style: TextStyle(
-            color: shown.isEmpty ? Theme.of(context).hintColor : null,
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1475,21 +1765,11 @@ class _MonthField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return _PickerBox(
+      text: value,
+      placeholder: 'Select month',
+      icon: Icons.calendar_month_rounded,
       onTap: () => _pick(context),
-      child: InputDecorator(
-        decoration: const InputDecoration(
-          border: OutlineInputBorder(),
-          isDense: true,
-          suffixIcon: Icon(Icons.calendar_month_rounded, size: 18),
-        ),
-        child: Text(
-          value.isEmpty ? 'Select month' : value,
-          style: TextStyle(
-            color: value.isEmpty ? Theme.of(context).hintColor : null,
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1521,21 +1801,11 @@ class _DateField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return _PickerBox(
+      text: value,
+      placeholder: 'Select date',
+      icon: Icons.calendar_today_rounded,
       onTap: () => _pick(context),
-      child: InputDecorator(
-        decoration: const InputDecoration(
-          border: OutlineInputBorder(),
-          isDense: true,
-          suffixIcon: Icon(Icons.calendar_today, size: 18),
-        ),
-        child: Text(
-          value.isEmpty ? 'Select date' : value,
-          style: TextStyle(
-            color: value.isEmpty ? Theme.of(context).hintColor : null,
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1572,21 +1842,11 @@ class _TimeField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    return _PickerBox(
+      text: value,
+      placeholder: 'Select time',
+      icon: Icons.schedule_rounded,
       onTap: () => _pick(context),
-      child: InputDecorator(
-        decoration: const InputDecoration(
-          border: OutlineInputBorder(),
-          isDense: true,
-          suffixIcon: Icon(Icons.schedule, size: 18),
-        ),
-        child: Text(
-          value.isEmpty ? 'Select time' : value,
-          style: TextStyle(
-            color: value.isEmpty ? Theme.of(context).hintColor : null,
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1688,14 +1948,15 @@ class _GpsFieldState extends State<_GpsField> {
     if (widget.readOnly) {
       return Row(
         children: [
-          Icon(Icons.place_rounded, size: 18, color: AppColors.muted),
+          const Icon(Icons.place_rounded, size: 18, color: AppColors.muted),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               captured ? widget.value : 'Not captured',
               style: TextStyle(
-                fontSize: 13.5,
+                fontSize: 14,
                 color: captured ? AppColors.ink : AppColors.muted,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ),
@@ -1708,16 +1969,24 @@ class _GpsFieldState extends State<_GpsField> {
       children: [
         if (captured) ...[
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.06),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppColors.primary.withOpacity(0.25)),
+              color: AppColors.successTint,
+              borderRadius: BorderRadius.circular(AppRadii.md),
             ),
             child: Row(
               children: [
-                Icon(Icons.place_rounded, size: 18, color: AppColors.primary),
-                const SizedBox(width: 8),
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: const BoxDecoration(
+                    color: AppColors.success,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.place_rounded,
+                      size: 16, color: Colors.white),
+                ),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1725,13 +1994,16 @@ class _GpsFieldState extends State<_GpsField> {
                       Text(
                         widget.value,
                         style: const TextStyle(
-                            fontSize: 13.5, fontWeight: FontWeight.w600),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.ink,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
                       ),
                       if (_accuracy != null)
                         Text(
                           'Accurate to about ${_accuracy!.round()} m',
-                          style:
-                              TextStyle(fontSize: 11.5, color: AppColors.muted),
+                          style: AppText.caption,
                         ),
                     ],
                   ),
@@ -1739,7 +2011,7 @@ class _GpsFieldState extends State<_GpsField> {
                 IconButton(
                   tooltip: 'Clear',
                   visualDensity: VisualDensity.compact,
-                  icon: Icon(Icons.close_rounded,
+                  icon: const Icon(Icons.close_rounded,
                       size: 18, color: AppColors.muted),
                   onPressed: _busy
                       ? null
@@ -1777,7 +2049,7 @@ class _GpsFieldState extends State<_GpsField> {
           const SizedBox(height: 6),
           Text(
             _error!,
-            style: TextStyle(fontSize: 11.5, color: AppColors.danger),
+            style: const TextStyle(fontSize: 12.5, color: AppColors.danger),
           ),
         ],
       ],

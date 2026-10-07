@@ -67,10 +67,7 @@ Future<void> showCheckOutRequiredDialog(BuildContext context) async {
     builder: (ctx) => AlertDialog(
       backgroundColor: AppColors.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.lg)),
-      title: const Text(
-        'Check out first',
-        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-      ),
+      title: const Text('Check out first'),
       content: const Text(
         'You are still checked in for today. Check out before signing out, so '
         'your day is recorded with the right working hours.',

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'policies_models.dart';
@@ -43,12 +44,15 @@ class PolicyDetailScreen extends ConsumerWidget {
         ),
         data: (policy) {
           if (policy == null || policy.versionId == null) {
-            return const Padding(
-              padding: EdgeInsets.all(16),
-              child: AppEmptyState(
-                icon: Icons.lock_outline_rounded,
-                message: 'This policy is not available to you.',
-              ),
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: const [
+                ProEmpty(
+                  icon: Icons.lock_outline_rounded,
+                  title: 'Not available',
+                  message: 'This policy is not available to you.',
+                ),
+              ],
             );
           }
           return _PolicyViewer(policy: policy);
@@ -123,79 +127,114 @@ class _PolicyViewerState extends ConsumerState<_PolicyViewer> {
   @override
   Widget build(BuildContext context) {
     final df = DateFormat('d MMM yyyy');
+    final p = widget.policy;
+    final meta = [
+      p.category ?? 'General',
+      if (p.versionNumber != null) 'v${p.versionNumber}',
+      if (p.effectiveDate != null) 'Effective ${df.format(p.effectiveDate!)}',
+    ].join(' · ');
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                widget.policy.title,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                [
-                  widget.policy.category ?? 'General',
-                  if (widget.policy.versionNumber != null) 'v${widget.policy.versionNumber}',
-                  if (widget.policy.effectiveDate != null)
-                    'Effective ${df.format(widget.policy.effectiveDate!)}',
-                ].join(' · '),
-                style: const TextStyle(fontSize: 12, color: AppColors.muted),
-              ),
-            ],
-          ),
+        ProHero(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 18),
+          children: [
+            ProHeroIdentity(
+              name: p.title,
+              role: meta,
+              icon: Icons.picture_as_pdf_rounded,
+              tags: [
+                _read
+                    ? const ProHeroTag('Read', tone: ProTagTone.ok, icon: Icons.check_rounded)
+                    : const ProHeroTag('Action needed', tone: ProTagTone.warn),
+                if (p.publishedAt != null) ProHeroTag('Published ${df.format(p.publishedAt!)}'),
+              ],
+            ),
+          ],
         ),
         Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _error != null
-                  ? Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: AppErrorPanel(message: _error!, onRetry: () {
-                        setState(() {
-                          _loading = true;
-                          _error = null;
-                        });
-                        _load();
-                      }),
-                    )
-                  : PDFView(
-                      filePath: _pdfPath,
-                      enableSwipe: true,
-                      swipeHorizontal: false,
-                      autoSpacing: true,
-                      pageFling: true,
-                    ),
-        ),
-        SafeArea(
-          top: false,
           child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: _read
-                ? Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.verified_rounded, color: AppColors.success, size: 18),
-                      const SizedBox(width: 6),
-                      Text(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(AppRadii.lg),
+                border: Border.all(color: AppColors.hairline),
+                boxShadow: AppShadows.card,
+              ),
+              padding: const EdgeInsets.all(6),
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                      ? Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              AppErrorPanel(message: _error!, onRetry: () {
+                                setState(() {
+                                  _loading = true;
+                                  _error = null;
+                                });
+                                _load();
+                              }),
+                            ],
+                          ),
+                        )
+                      : PDFView(
+                          filePath: _pdfPath,
+                          enableSwipe: true,
+                          swipeHorizontal: false,
+                          autoSpacing: true,
+                          pageFling: true,
+                        ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        ProBottomBar(
+          children: [
+            if (_read)
+              Container(
+                height: 48,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  color: AppColors.successTint,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.verified_rounded, color: AppColors.success, size: 18),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
                         widget.policy.acknowledgedAt != null
                             ? 'Acknowledged on ${df.format(widget.policy.acknowledgedAt!)}'
                             : 'Acknowledged',
-                        style: const TextStyle(color: AppColors.success, fontWeight: FontWeight.w700),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.success,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
                       ),
-                    ],
-                  )
-                : SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: (_loading || _error != null || _acking) ? null : _acknowledge,
-                      icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
-                      label: Text(_acking ? 'Submitting…' : 'I have read and understood this policy'),
                     ),
-                  ),
-          ),
+                  ],
+                ),
+              )
+            else
+              FilledButton.icon(
+                onPressed: (_loading || _error != null || _acking) ? null : _acknowledge,
+                icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
+                label: Text(
+                  _acking ? 'Submitting…' : 'I have read and understood this policy',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+          ],
         ),
       ],
     );

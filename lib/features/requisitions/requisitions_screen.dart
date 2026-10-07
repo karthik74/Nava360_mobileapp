@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'requisition_models.dart';
@@ -22,6 +23,13 @@ class _RequisitionsScreenState extends ConsumerState<RequisitionsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Both views stay live (as with the old IndexedStack), so both load.
+    final dashAsync = ref.watch(requisitionDashboardProvider);
+    final listAsync = ref.watch(myRequisitionsProvider);
+    final d = dashAsync.asData?.value;
+
+    String n(int? v) => v == null ? '—' : '$v';
+
     return Scaffold(
       appBar: AppBar(title: const Text('Job requisitions')),
       floatingActionButton: FloatingActionButton.extended(
@@ -32,150 +40,178 @@ class _RequisitionsScreenState extends ConsumerState<RequisitionsScreen> {
             ref.invalidate(requisitionDashboardProvider);
           }
         },
-        backgroundColor: AppColors.primary,
-        foregroundColor: Colors.white,
         icon: const Icon(Icons.add_rounded),
         label: const Text('New requisition'),
       ),
-      body: GlassBackdrop(
-        child: SafeArea(
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: _SegmentBar(
-                  value: _tab,
-                  labels: const ['Summary', 'List'],
-                  onChanged: (v) => setState(() => _tab = v),
-                ),
-              ),
-              Expanded(
-                child: IndexedStack(
-                  index: _tab,
-                  children: const [_SummaryView(), _ListView()],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Pill segmented control (Summary / List).
-class _SegmentBar extends StatelessWidget {
-  const _SegmentBar({
-    required this.value,
-    required this.labels,
-    required this.onChanged,
-  });
-  final int value;
-  final List<String> labels;
-  final ValueChanged<int> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: AppColors.hairline),
-      ),
-      child: Row(
-        children: [
-          for (var i = 0; i < labels.length; i++)
-            Expanded(
-              child: InkWell(
-                borderRadius: BorderRadius.circular(AppRadii.pill),
-                onTap: () => onChanged(i),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  padding: const EdgeInsets.symmetric(vertical: 9),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: value == i ? AppColors.primary : Colors.transparent,
-                    borderRadius: BorderRadius.circular(AppRadii.pill),
-                  ),
-                  child: Text(
-                    labels[i],
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: value == i ? Colors.white : AppColors.inkSoft,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// List tab
-// ─────────────────────────────────────────────────────────────────────
-
-class _ListView extends ConsumerWidget {
-  const _ListView();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(myRequisitionsProvider);
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: () async => ref.invalidate(myRequisitionsProvider),
-      child: async.when(
-        loading: () => ListView(
-          children: const [
-            SizedBox(height: 120),
-            Center(child: CircularProgressIndicator()),
-          ],
-        ),
-        error: (e, _) => ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
+      body: ProPage(
+        onRefresh: () async => _tab == 0
+            ? ref.invalidate(requisitionDashboardProvider)
+            : ref.invalidate(myRequisitionsProvider),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+        hero: ProHero(
+          title: 'Job requisitions',
+          subtitle: d == null
+              ? null
+              : '${d.scopeLabel} · ${d.totalRequisitions} '
+                  'requisition${d.totalRequisitions == 1 ? '' : 's'}',
           children: [
-            const SizedBox(height: 8),
-            AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(myRequisitionsProvider),
+            ProHeroSegmented(
+              labels: const ['Summary', 'List'],
+              icons: const [Icons.insights_rounded, Icons.view_list_rounded],
+              selected: _tab,
+              onChanged: (v) => setState(() => _tab = v),
             ),
+            ProHeroStats(stats: [
+              ProStat(label: 'Open pos.', value: n(d?.openPositions), dot: AppColors.live),
+              ProStat(
+                  label: 'Filled',
+                  value: n(d?.filledPositions),
+                  dot: const Color(0xFF7FB0EC)),
+              ProStat(
+                  label: 'Remaining',
+                  value: n(d?.remainingPositions),
+                  dot: const Color(0xFFF2B347)),
+              ProStat(
+                  label: 'Overdue',
+                  value: n(d?.overdueCount),
+                  dot: const Color(0xFFE5484D)),
+            ]),
           ],
+        ),
+        children: _tab == 0
+            ? _summaryChildren(dashAsync)
+            : _listChildren(listAsync),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // List tab
+  // ─────────────────────────────────────────────────────────────────────
+
+  List<Widget> _listChildren(AsyncValue<List<RequisitionSummary>> async) {
+    return [
+      async.when(
+        loading: () => const AppLoadingBlock(height: 160),
+        error: (e, _) => AppErrorPanel(
+          message: e.toString(),
+          onRetry: () => ref.invalidate(myRequisitionsProvider),
         ),
         data: (items) {
           if (items.isEmpty) {
-            return ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16),
-              children: const [
-                SizedBox(height: 60),
-                AppEmptyState(
-                  icon: Icons.work_outline_rounded,
-                  message: 'No requisitions yet.\nTap "New requisition" to '
-                      'raise one.',
-                ),
-              ],
+            return const ProEmpty(
+              icon: Icons.work_outline_rounded,
+              title: 'No requisitions yet',
+              message: 'Tap "New requisition" to raise one.',
             );
           }
-          return ListView.separated(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-            itemCount: items.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) => _RequisitionCard(item: items[i]),
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ProSectionHeader(title: 'Your requisitions · ${items.length}', small: true),
+              const SizedBox(height: 10),
+              ProListGroup(
+                children: [for (final r in items) _RequisitionRow(item: r)],
+              ),
+            ],
           );
         },
       ),
+    ];
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Summary tab
+  // ─────────────────────────────────────────────────────────────────────
+
+  List<Widget> _summaryChildren(AsyncValue<RequisitionDashboard> async) {
+    return async.when(
+      loading: () => const [AppLoadingBlock(height: 160)],
+      error: (e, _) => [
+        AppErrorPanel(
+          message: e.toString(),
+          onRetry: () => ref.invalidate(requisitionDashboardProvider),
+        ),
+      ],
+      data: (d) {
+        if (d.totalRequisitions == 0) {
+          return const [
+            ProEmpty(
+              icon: Icons.insights_rounded,
+              title: 'No requisitions to summarise yet.',
+            ),
+          ];
+        }
+        return [
+          _Section(
+            title: 'By status',
+            trailing: '${d.totalRequisitions} total',
+            child: _StatusStrip(d: d),
+          ),
+          _Section(title: 'Hiring pipeline', child: _PipelineCard(d: d)),
+          if (d.priorityCounts.values.any((v) => v > 0))
+            _Section(title: 'By priority', child: _PriorityCard(d: d)),
+          if (d.byDesignation.isNotEmpty)
+            _Section(
+              title: 'By designation',
+              trailing: '${d.byDesignation.length}',
+              child: ProListGroup(
+                children: [for (final g in d.byDesignation) _DesignationRow(g: g)],
+              ),
+            ),
+          if (d.byBranch.isNotEmpty)
+            _Section(
+              title: 'By branch',
+              trailing: '${d.byBranch.length}',
+              child: ProListGroup(
+                children: [for (final b in d.byBranch) _BranchRow(b: b)],
+              ),
+            ),
+          if (d.attention.isNotEmpty)
+            _Section(
+              title: 'Needs attention',
+              trailing: '${d.attention.length}',
+              child: ProListGroup(
+                children: [for (final r in d.attention) _RequisitionRow(item: r)],
+              ),
+            ),
+        ];
+      },
     );
   }
 }
 
-class _RequisitionCard extends StatelessWidget {
-  const _RequisitionCard({required this.item});
+/// Section title (with an optional count on the right) above its content.
+class _Section extends StatelessWidget {
+  const _Section({required this.title, required this.child, this.trailing});
+  final String title;
+  final String? trailing;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ProSectionHeader(
+          title: title,
+          trailing: trailing == null
+              ? null
+              : Text(trailing!,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.muted)),
+        ),
+        const SizedBox(height: 10),
+        child,
+      ],
+    );
+  }
+}
+
+/// One requisition: status-tinted icon, title, meta, priority / experience /
+/// target-date chips and the status pill.
+class _RequisitionRow extends StatelessWidget {
+  const _RequisitionRow({required this.item});
   final RequisitionSummary item;
 
   @override
@@ -192,350 +228,63 @@ class _RequisitionCard extends StatelessWidget {
         item.branchLabel!,
     ].join(' · ');
 
-    return GlassCard(
-      child: Column(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
+          ProIconWell(icon: Icons.work_outline_rounded, color: tone.color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
                   item.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 15,
-                    fontWeight: FontWeight.w800,
+                    height: 1.33,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: -0.15,
                     color: AppColors.ink,
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              StatusPill(label: tone.label, color: tone.color),
-            ],
-          ),
-          if (meta.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              meta,
-              style: const TextStyle(
-                fontSize: 12.5,
-                color: AppColors.muted,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              if (item.priority != null) ...[
-                StatusPill(
-                  label: item.priority!.label,
-                  color: item.priority!.color,
-                  icon: Icons.flag_rounded,
-                ),
-                const SizedBox(width: 8),
-              ],
-              if (item.experienceLevel != null)
-                StatusPill(
-                  label: item.experienceLevel!.label,
-                  color: AppColors.accent,
-                  icon: Icons.trending_up_rounded,
-                ),
-              const Spacer(),
-              if (item.targetDate != null)
-                Text(
-                  'Target ${item.targetDate}',
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    color: AppColors.muted,
-                    fontWeight: FontWeight.w600,
+                if (meta.isNotEmpty)
+                  Text(meta,
+                      maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+                if (item.priority != null ||
+                    item.experienceLevel != null ||
+                    item.targetDate != null) ...[
+                  const SizedBox(height: 7),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      if (item.priority != null)
+                        ProPill(item.priority!.label, color: item.priority!.color, dot: true),
+                      if (item.experienceLevel != null)
+                        ProPill(item.experienceLevel!.label, color: AppColors.accent),
+                      if (item.targetDate != null)
+                        ProPill.neutral('Target ${item.targetDate}'),
+                    ],
                   ),
-                ),
-            ],
+                ],
+              ],
+            ),
           ),
+          const SizedBox(width: 10),
+          ProPill(tone.label, color: tone.color),
         ],
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// Summary tab
-// ─────────────────────────────────────────────────────────────────────
-
-class _SummaryView extends ConsumerWidget {
-  const _SummaryView();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(requisitionDashboardProvider);
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: () async => ref.invalidate(requisitionDashboardProvider),
-      child: async.when(
-        loading: () => ListView(
-          children: const [
-            SizedBox(height: 120),
-            Center(child: CircularProgressIndicator()),
-          ],
-        ),
-        error: (e, _) => ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.all(16),
-          children: [
-            const SizedBox(height: 8),
-            AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(requisitionDashboardProvider),
-            ),
-          ],
-        ),
-        data: (d) {
-          if (d.totalRequisitions == 0) {
-            return ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16),
-              children: const [
-                SizedBox(height: 60),
-                AppEmptyState(
-                  icon: Icons.insights_rounded,
-                  message: 'No requisitions to summarise yet.',
-                ),
-              ],
-            );
-          }
-          return ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-            children: [
-              _HeroCard(d: d),
-              const SizedBox(height: 18),
-              const _SectionTitle('By status'),
-              const SizedBox(height: 10),
-              _StatusGrid(d: d),
-              const SizedBox(height: 18),
-              const _SectionTitle('Hiring pipeline'),
-              const SizedBox(height: 10),
-              _PipelineCard(d: d),
-              if (d.priorityCounts.values.any((v) => v > 0)) ...[
-                const SizedBox(height: 18),
-                const _SectionTitle('By priority'),
-                const SizedBox(height: 10),
-                _PriorityCard(d: d),
-              ],
-              if (d.byDesignation.isNotEmpty) ...[
-                const SizedBox(height: 18),
-                _SectionTitle('By designation',
-                    trailing: '${d.byDesignation.length}'),
-                const SizedBox(height: 10),
-                for (final g in d.byDesignation)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: _DesignationRow(g: g),
-                  ),
-              ],
-              if (d.byBranch.isNotEmpty) ...[
-                const SizedBox(height: 18),
-                _SectionTitle('By branch', trailing: '${d.byBranch.length}'),
-                const SizedBox(height: 10),
-                for (final b in d.byBranch)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: _BranchRow(b: b),
-                  ),
-              ],
-              if (d.attention.isNotEmpty) ...[
-                const SizedBox(height: 18),
-                _SectionTitle('Needs attention',
-                    trailing: '${d.attention.length}'),
-                const SizedBox(height: 10),
-                for (final r in d.attention)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _RequisitionCard(item: r),
-                  ),
-              ],
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.title, {this.trailing});
-  final String title;
-  final String? trailing;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w800,
-            color: AppColors.ink,
-          ),
-        ),
-        if (trailing != null) ...[
-          const SizedBox(width: 6),
-          Text(
-            trailing!,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: AppColors.muted,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-/// Hero KPI card — total requisitions + positions/overdue at a glance.
-class _HeroCard extends StatelessWidget {
-  const _HeroCard({required this.d});
-  final RequisitionDashboard d;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: AppColors.heroGradient,
-        borderRadius: BorderRadius.circular(AppRadii.xl),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withOpacity(0.32),
-            blurRadius: 26,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${d.totalRequisitions} '
-              'requisition${d.totalRequisitions == 1 ? '' : 's'}',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.3,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              d.scopeLabel,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.85),
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: _HeroStat(
-                    label: 'Open pos.',
-                    value: d.openPositions,
-                    color: const Color(0xFF34D399),
-                  ),
-                ),
-                _heroDivider(),
-                Expanded(
-                  child: _HeroStat(
-                    label: 'Filled',
-                    value: d.filledPositions,
-                    color: const Color(0xFF60A5FA),
-                  ),
-                ),
-                _heroDivider(),
-                Expanded(
-                  child: _HeroStat(
-                    label: 'Remaining',
-                    value: d.remainingPositions,
-                    color: const Color(0xFFFBBF24),
-                  ),
-                ),
-                _heroDivider(),
-                Expanded(
-                  child: _HeroStat(
-                    label: 'Overdue',
-                    value: d.overdueCount,
-                    color: const Color(0xFFF87171),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _heroDivider() =>
-      Container(width: 1, height: 28, color: Colors.white.withOpacity(0.18));
-}
-
-class _HeroStat extends StatelessWidget {
-  const _HeroStat({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-  final String label;
-  final int value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 5,
-              height: 5,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 5),
-            Text(
-              '$value',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 1),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.75),
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.2,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// 2×2 grid of status counts (Draft / Open / On hold / Closed).
-class _StatusGrid extends StatelessWidget {
-  const _StatusGrid({required this.d});
+/// Status counts (Open / On hold / Draft / Closed) as a KPI strip.
+class _StatusStrip extends StatelessWidget {
+  const _StatusStrip({required this.d});
   final RequisitionDashboard d;
 
   static const _statuses = [
@@ -547,60 +296,14 @@ class _StatusGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (var i = 0; i < _statuses.length; i++) ...[
-          Expanded(
-            child: _CountTile(
-              label: _statuses[i].$2,
-              value: d.statusCounts[_statuses[i].$1] ?? 0,
-              color: _statuses[i].$3,
-            ),
-          ),
-          if (i != _statuses.length - 1) const SizedBox(width: 8),
-        ],
-      ],
-    );
-  }
-}
-
-class _CountTile extends StatelessWidget {
-  const _CountTile({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-  final String label;
-  final int value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      child: Column(
-        children: [
-          Text(
-            '$value',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              color: color,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.muted,
-            ),
-          ),
-        ],
-      ),
-    );
+    return ProKpiStrip(cells: [
+      for (final s in _statuses)
+        ProKpi(
+          value: '${d.statusCounts[s.$1] ?? 0}',
+          label: s.$2,
+          valueColor: s.$3,
+        ),
+    ]);
   }
 }
 
@@ -652,16 +355,13 @@ class _PipelineCard extends StatelessWidget {
             ],
           ),
           if (stages.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: 6,
+              runSpacing: 6,
               children: [
                 for (final s in stages)
-                  StatusPill(
-                    label: '${s.$2}  ${d.pipeline[s.$1]}',
-                    color: AppColors.inkSoft,
-                  ),
+                  ProPill.neutral('${s.$2}  ${d.pipeline[s.$1]}'),
               ],
             ),
           ],
@@ -687,27 +387,23 @@ class _InlineStat extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 20, color: color),
-        const SizedBox(width: 8),
+        ProIconWell(icon: icon, color: color),
+        const SizedBox(width: 10),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               '$value',
               style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-                color: AppColors.ink,
-              ),
-            ),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 11,
+                fontSize: 19,
+                height: 1.2,
                 fontWeight: FontWeight.w600,
-                color: AppColors.muted,
+                letterSpacing: -0.3,
+                color: AppColors.ink,
+                fontFeatures: [FontFeature.tabularFigures()],
               ),
             ),
+            Text(label, style: AppText.caption),
           ],
         ),
       ],
@@ -729,7 +425,7 @@ class _PriorityCard extends StatelessWidget {
       child: Column(
         children: [
           for (var i = 0; i < _order.length; i++) ...[
-            if (i != 0) const SizedBox(height: 10),
+            if (i != 0) const SizedBox(height: 12),
             _PriorityBar(
               wire: _order[i],
               count: d.priorityCounts[_order[i]] ?? 0,
@@ -761,37 +457,28 @@ class _PriorityBar extends StatelessWidget {
     return Row(
       children: [
         SizedBox(
-          width: 64,
+          width: 70,
           child: Text(
             label,
             style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
+              fontSize: 13.5,
+              fontWeight: FontWeight.w500,
               color: AppColors.inkSoft,
             ),
           ),
         ),
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            child: LinearProgressIndicator(
-              value: fraction,
-              minHeight: 8,
-              backgroundColor: AppColors.surfaceAlt,
-              valueColor: AlwaysStoppedAnimation<Color>(color),
-            ),
-          ),
-        ),
+        Expanded(child: ProBar(value: fraction, color: color, height: 8)),
         const SizedBox(width: 10),
         SizedBox(
-          width: 24,
+          width: 28,
           child: Text(
             '$count',
             textAlign: TextAlign.right,
             style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w800,
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
               color: AppColors.ink,
+              fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
         ),
@@ -807,49 +494,11 @@ class _DesignationRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.all(12),
-      child: Row(
-        children: [
-          Icon(Icons.badge_outlined, size: 18, color: AppColors.primary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              g.designation,
-              style: const TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w700,
-                color: AppColors.ink,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '${g.requisitions} '
-                'req${g.requisitions == 1 ? '' : 's'}',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink,
-                ),
-              ),
-              Text(
-                '${g.openPositions} open pos.',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: AppColors.muted,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+    return ProListRow(
+      leading: ProIconWell(icon: Icons.badge_outlined, color: AppColors.primary),
+      title: g.designation,
+      value: '${g.requisitions} req${g.requisitions == 1 ? '' : 's'}',
+      pill: ProPill.neutral('${g.openPositions} open pos.'),
     );
   }
 }
@@ -861,67 +510,12 @@ class _BranchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.all(12),
-      child: Row(
-        children: [
-          Icon(Icons.apartment_rounded, size: 18, color: AppColors.primary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  b.name,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (b.hierarchy.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    b.hierarchy,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.muted,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '${b.requisitions} '
-                'req${b.requisitions == 1 ? '' : 's'}',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink,
-                ),
-              ),
-              Text(
-                '${b.openPositions} open pos.',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: AppColors.muted,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+    return ProListRow(
+      leading: ProIconWell(icon: Icons.apartment_rounded, color: AppColors.primary),
+      title: b.name,
+      subtitle: b.hierarchy.isNotEmpty ? b.hierarchy : null,
+      value: '${b.requisitions} req${b.requisitions == 1 ? '' : 's'}',
+      pill: ProPill.neutral('${b.openPositions} open pos.'),
     );
   }
 }

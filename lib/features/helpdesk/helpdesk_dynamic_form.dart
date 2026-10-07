@@ -70,22 +70,27 @@ class HelpdeskDynamicForm extends StatelessWidget {
   Widget build(BuildContext context) {
     final visible = fields.where((f) => hdFieldVisible(f, values)).toList();
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final f in visible) ...[
-          Padding(
-            padding: const EdgeInsets.only(top: 4, bottom: 4),
-            child: Text('${f.label}${f.required ? ' *' : ''}',
-                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
+        for (var i = 0; i < visible.length; i++) ...[
+          if (i > 0) const SizedBox(height: 14),
+          Text.rich(
+            TextSpan(children: [
+              TextSpan(text: visible[i].label),
+              if (visible[i].required)
+                const TextSpan(text: ' *', style: TextStyle(color: AppColors.danger)),
+            ]),
+            style: AppText.label,
           ),
-          _input(context, f),
-          if (f.helpText != null && f.helpText!.isNotEmpty)
-            Padding(padding: const EdgeInsets.only(top: 2),
-                child: Text(f.helpText!, style: const TextStyle(fontSize: 11, color: AppColors.muted))),
-          if (errors[f.key] != null)
-            Padding(padding: const EdgeInsets.only(top: 2),
-                child: Text(errors[f.key]!, style: const TextStyle(fontSize: 11, color: AppColors.danger))),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
+          _input(context, visible[i]),
+          if (visible[i].helpText != null && visible[i].helpText!.isNotEmpty)
+            Padding(padding: const EdgeInsets.only(top: 5),
+                child: Text(visible[i].helpText!, style: AppText.caption)),
+          if (errors[visible[i].key] != null)
+            Padding(padding: const EdgeInsets.only(top: 5),
+                child: Text(errors[visible[i].key]!,
+                    style: const TextStyle(fontSize: 12.5, color: AppColors.danger))),
         ],
       ],
     );
@@ -171,10 +176,23 @@ class HelpdeskDynamicForm extends StatelessWidget {
       case 'file':
       case 'image':
         return Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(AppRadii.md), border: Border.all(color: AppColors.hairline)),
-          child: Text('Use the ticket attachments to add ${f.type == 'image' ? 'images' : 'files'}.',
-              style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceAlt,
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            border: Border.all(color: AppColors.hairline),
+          ),
+          child: Row(
+            children: [
+              Icon(f.type == 'image' ? Icons.image_outlined : Icons.attach_file_rounded,
+                  size: 18, color: AppColors.muted),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('Use the ticket attachments to add ${f.type == 'image' ? 'images' : 'files'}.',
+                    style: AppText.caption),
+              ),
+            ],
+          ),
         );
       default:
         return _text(f, str, titleCase: true);
@@ -211,7 +229,7 @@ class _DateField extends StatelessWidget {
       child: InputDecorator(
         decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_rounded, size: 18)),
         child: Text(value.isEmpty ? 'Select date' : value,
-            style: TextStyle(color: value.isEmpty ? AppColors.muted : AppColors.ink)),
+            style: TextStyle(fontSize: 15, color: value.isEmpty ? AppColors.faint : AppColors.ink)),
       ),
     );
   }

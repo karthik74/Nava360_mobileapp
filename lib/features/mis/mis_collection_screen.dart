@@ -3,10 +3,11 @@
 //  region → division → area → branch → officer drill-down, product filter and an
 //  Accounts/Amount switch. Ports CollectionScreen.tsx.
 //
-//  Structure, matching the web top to bottom:
-//    scope chip · date · Accounts/Amount · product · breadcrumb
+//  Structure, top to bottom:
+//    deep hero: title + drill path · scope tag · product · Accounts/Amount ·
+//      the Regular Demand vs Collection headline (Demand / Collection / FTOD /
+//      Coll %) · date picker straddling the hero edge
 //    Demand-vs-collection chart + Collection-by-DPD donut
-//    Regular Demand vs Collection (Demand / Collection / FTOD / Coll %)
 //    DPD Buckets matrix
 //    Mode of Collection
 //    the per-unit drill table
@@ -18,13 +19,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_auth.dart';
 import 'mis_charts.dart';
 import 'mis_collection_widgets.dart';
 import 'mis_format.dart';
-import 'mis_matrix_table.dart';
 import 'mis_models.dart';
 import 'mis_repository.dart';
 import 'mis_widgets.dart';
@@ -113,10 +114,12 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
     final datesAsync = ref.watch(misCollectionDatesProvider);
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('Collection')),
+      appBar: AppBar(title: const Text('MIS')),
       body: datesAsync.when(
-        loading: () => const AppLoadingBlock(height: 240),
+        loading: () => const Padding(
+          padding: EdgeInsets.all(16),
+          child: AppLoadingBlock(height: 240),
+        ),
         error: (e, _) => Padding(
           padding: const EdgeInsets.all(16),
           child: AppErrorPanel(
@@ -154,77 +157,86 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
     final metric = summaryHasAmounts ? _metric : MisMetric.count;
     final tier = ref.watch(misSessionProvider)?.scope?.tier;
 
-    return RefreshIndicator(
-      color: AppColors.primary,
+    final productSwitch = MisDeepSegmented<String>(
+      options: _products,
+      value: _product,
+      onChanged: (v) => setState(() => _product = v),
+    );
+
+    return ProPage(
       onRefresh: () async {
         ref.invalidate(misCollectionSummaryProvider(q));
         ref.invalidate(misCollectionListProvider(q));
       },
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(
-            16, 12, 16, MediaQuery.of(context).padding.bottom + 24),
-        children: [
-          if (tier != null && tier.isNotEmpty && tier != 'all') ...[
-            Align(
-              alignment: Alignment.centerLeft,
-              child: MisScopeChip(tier: tier),
-            ),
-            const SizedBox(height: 10),
-          ],
-          MisDatePicker(
+      hero: ProHero(
+        titleWidget: MisDeepTitle(title: 'Collection', crumbs: _crumbs()),
+        overlap: MisLiftedField(
+          child: MisDatePicker(
             value: activeDate,
             available: dates,
             onChanged: (v) => setState(() => _date = v),
           ),
-          const SizedBox(height: 12),
-          // Accounts vs Amount — shown ONLY when this date carries rupees. No
-          // extra request: both ride on the responses the screen already makes.
-          if (summaryHasAmounts) ...[
+        ),
+        children: [
+          if (tier != null && tier.isNotEmpty && tier != 'all')
             Align(
               alignment: Alignment.centerLeft,
-              child: MisSegmented<MisMetric>(
-                options: const [
-                  (MisMetric.count, 'Accounts'),
-                  (MisMetric.amount, '₹ Amount'),
-                ],
-                value: metric,
-                onChanged: (v) => setState(() => _metric = v),
-              ),
+              child: MisScopeChip(tier: tier),
             ),
-            const SizedBox(height: 10),
-          ],
-          Align(
-            alignment: Alignment.centerLeft,
-            child: MisSegmented<String>(
-              options: _products,
-              value: _product,
-              onChanged: (v) => setState(() => _product = v),
-            ),
-          ),
-          const SizedBox(height: 12),
-          MisBreadcrumb(crumbs: _crumbs()),
-          const SizedBox(height: 14),
-          summaryAsync.when(
-            loading: () => const AppLoadingBlock(height: 180),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(misCollectionSummaryProvider(q)),
-            ),
-            data: (s) => _summary(s, metric, q, showGrid),
-          ),
-          if (showGrid) ...[
-            const SizedBox(height: 18),
-            MisSectionTitle(_levelHeader[q.level]!),
-            _grid(q, metric),
-          ],
+          // Accounts vs Amount — shown ONLY when this date carries rupees. No
+          // extra request: both ride on the responses the screen already makes.
+          if (summaryHasAmounts)
+            Row(
+              children: [
+                Expanded(flex: 13, child: productSwitch),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 11,
+                  child: MisDeepSegmented<MisMetric>(
+                    options: const [
+                      (MisMetric.count, 'Accounts'),
+                      (MisMetric.amount, '₹ Amount'),
+                    ],
+                    value: metric,
+                    onChanged: (v) => setState(() => _metric = v),
+                  ),
+                ),
+              ],
+            )
+          else
+            productSwitch,
+          MisRegularHeroStats(summary: summary, metric: metric),
         ],
       ),
+      children: [
+        summaryAsync.when(
+          loading: () => const AppLoadingBlock(height: 180),
+          error: (e, _) => AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(misCollectionSummaryProvider(q)),
+          ),
+          data: (s) => _summary(s, metric, q, showGrid),
+        ),
+        if (showGrid)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 8),
+              ProSectionHeader(
+                title: 'By ${_levelHeader[q.level]!.toLowerCase()}',
+                subtitle: 'Tap a row to drill down.',
+              ),
+              const SizedBox(height: 10),
+              _grid(q, metric),
+            ],
+          ),
+      ],
     );
   }
 
   /// Everything driven by `/collection/summary`, in the web's order: the two
-  /// charts, the Regular headline card, the DPD matrix, then Mode of Collection.
+  /// charts, the DPD matrix, then Mode of Collection. (The Regular headline
+  /// sits in the hero.)
   Widget _summary(
     CollectionSummary s,
     MisMetric metric,
@@ -242,27 +254,20 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
     ];
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (showCharts) ...[
           _demandVsCollectionChart(q, metric),
           if (donut.any((x) => x.value > 0)) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             GlassCard(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    'Collection ${isAmount ? "amount" : "accounts"} by DPD bucket',
-                    style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.ink),
-                  ),
-                  const SizedBox(height: 2),
-                  const Text(
-                    'Slice size = share of total collection',
-                    style: TextStyle(fontSize: 10.5, color: AppColors.muted),
+                  ProSectionHeader(
+                    title: 'Collection by DPD bucket',
+                    subtitle: '${isAmount ? 'Amount' : 'Accounts'} · slice '
+                        'size = share of total collection',
                   ),
                   const SizedBox(height: 12),
                   MisDonutChart(data: donut, money: isAmount),
@@ -270,12 +275,10 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
               ),
             ),
           ],
-          const SizedBox(height: 16),
+          const SizedBox(height: 22),
         ],
-        MisRegularCollectionCard(summary: s, metric: metric),
-        const SizedBox(height: 16),
         MisBucketMatrix(summary: s, metric: metric),
-        const SizedBox(height: 16),
+        const SizedBox(height: 22),
         // Mode of Collection — live from /collection/summary's `modes`, scoped
         // and drilled by the same filters as everything above. Renders nothing
         // when no channel file has been uploaded for this date.
@@ -294,15 +297,12 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
     final m = isAmount ? MisMetric.amount : MisMetric.count;
     return GlassCard(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Demand vs collection ${isAmount ? "amount" : "accounts"} by '
-            '${level == 'employee' ? 'officer' : level}',
-            style: const TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w700,
-                color: AppColors.ink),
+          ProSectionHeader(
+            title: 'Demand vs collection',
+            subtitle: '${isAmount ? 'Amount' : 'Accounts'} by '
+                '${level == 'employee' ? 'officer' : level}',
           ),
           const SizedBox(height: 12),
           MisGroupedBarChart(
@@ -314,9 +314,9 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
                 ]),
             ],
             seriesNames: const ['Demand', 'Collection'],
-            seriesColors: const [
-              MisPalette.seriesDemand,
-              MisPalette.seriesCollection,
+            seriesColors: [
+              Color.lerp(AppColors.primary, Colors.white, 0.68)!,
+              AppColors.primary,
             ],
             money: isAmount,
           ),
@@ -346,7 +346,12 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
         onRetry: () => ref.invalidate(misCollectionListProvider(q)),
       ),
       data: (rows) {
-        if (rows.isEmpty) return const MisInlineEmpty('No data at this level.');
+        if (rows.isEmpty) {
+          return const ProEmpty(
+            icon: Icons.table_rows_outlined,
+            title: 'No data at this level.',
+          );
+        }
 
         // The by-<level> feed can lack amounts even when /summary has them, so
         // the drill table keeps showing counts instead of a page of ₹0.00 Cr —
@@ -368,15 +373,18 @@ class _MisCollectionScreenState extends ConsumerState<MisCollectionScreen> {
                         : null;
 
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (metric == MisMetric.amount && !rowsHaveAmounts)
-              MisWarnBanner(
+            if (metric == MisMetric.amount && !rowsHaveAmounts) ...[
+              ProNote(
                 'The /collection/by-${q.level} feed returned no demand_amt / '
                 'collection_amt for this date, so the table below stays on '
                 'Accounts. Re-sync this date to load its rupee figures. The '
                 'bucket table above is unaffected.',
+                tone: ProNoteTone.warn,
               ),
+              const SizedBox(height: 12),
+            ],
             MisCollectionUnitTable(
               rows: rows,
               levelLabel: _levelHeader[q.level]!,

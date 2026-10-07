@@ -1,11 +1,10 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api_client.dart';
 import '../../core/approvals.dart';
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -77,6 +76,51 @@ final _myBalanceProvider =
   return ref.watch(leaveRepositoryProvider).getBalance(user!.employeeId!);
 });
 
+/// Hero dot colours / list icon colours for balance categories (by position).
+const _balanceDots = <Color>[
+  Color(0xFF8CC63F),
+  Color(0xFF6FB8F0),
+  Color(0xFFF2B347),
+  Color(0xFFA78BFA),
+  Color(0xFFEF8A8A),
+];
+
+Color _balanceInk(int i) {
+  switch (i % 5) {
+    case 0:
+      return AppColors.success;
+    case 1:
+      return AppColors.info;
+    case 2:
+      return AppColors.warning;
+    case 3:
+      return AppColors.pink;
+    default:
+      return AppColors.danger;
+  }
+}
+
+String _balanceText(LeaveBalance b) =>
+    b.balanceDays == null ? '∞' : fmtLeaveDays(b.balanceDays);
+
+String _allowanceText(LeaveBalance b) =>
+    b.allowanceDays == null ? '∞' : '${b.allowanceDays}';
+
+/// Status pill for a leave request (same labels as before).
+Widget _leavePill(String status) {
+  final tone = StatusTone.forLeave(status);
+  switch (status) {
+    case 'APPROVED':
+      return ProPill.ok(tone.label);
+    case 'REJECTED':
+      return ProPill.bad(tone.label);
+    case 'CANCELLED':
+      return ProPill.neutral(tone.label);
+    default:
+      return ProPill.warn(tone.label);
+  }
+}
+
 class LeavesScreen extends ConsumerWidget {
   const LeavesScreen({super.key});
 
@@ -86,119 +130,198 @@ class LeavesScreen extends ConsumerWidget {
     final leaves = ref.watch(_myLeavesProvider);
     final pendingMyApproval = ref.watch(leavesPendingMyApprovalProvider);
 
-    final mq = MediaQuery.of(context);
+    final balances = balance.valueOrNull?.balances ?? const <LeaveBalance>[];
+    final finite = balances
+        .where((b) => b.allowanceDays != null && b.balanceDays != null)
+        .toList();
+    final totalLeft = finite.fold<double>(0, (a, b) => a + b.balanceDays!);
+    final totalAllowance =
+        finite.fold<double>(0, (a, b) => a + b.allowanceDays!);
+    final totalUsed = finite.fold<double>(0, (a, b) => a + b.usedDays);
+
+    final myRows = leaves.valueOrNull;
+    final pendingCount = myRows?.where((r) => r.status == 'PENDING').length;
+    final approvedCount = myRows?.where((r) => r.status == 'APPROVED').length;
+    final approvalRows = pendingMyApproval.valueOrNull;
+
+    final String subtitle;
+    if (finite.isNotEmpty) {
+      subtitle =
+          '${fmtLeaveDays(totalLeft)} of ${fmtLeaveDays(totalAllowance)} days left';
+    } else {
+      subtitle = 'Balances, requests & approvals';
+    }
+
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: RefreshIndicator(
-        color: AppColors.primary,
-        backgroundColor: Colors.white.withOpacity(0.92),
+      body: ProPage(
+        topInset: MediaQuery.of(context).padding.top,
+        clearNav: true,
+        gap: 22,
         onRefresh: () async {
           ref.invalidate(_myBalanceProvider);
           ref.invalidate(_myLeavesProvider);
           ref.invalidate(leavesPendingMyApprovalProvider);
         },
-        child: ListView(
-          physics: const BouncingScrollPhysics(
-            parent: AlwaysScrollableScrollPhysics(),
-          ),
-          padding: EdgeInsets.fromLTRB(
-            16,
-            mq.padding.top + AppChrome.appBarHeight + 12,
-            16,
-            mq.padding.bottom + AppChrome.bottomNavHeight + 20,
-          ),
-          children: [
-            _ApplyForLeaveButton(
+        hero: ProHero(
+          title: 'Leaves',
+          subtitle: subtitle,
+          actions: [
+            ProHeroIconButton(
+              icon: Icons.add_rounded,
+              tooltip: 'Apply for leave',
               onTap: () => _openRequest(context, ref),
             ),
-            // Approval-engine queue: leaves waiting on ME as a configured
-            // chain approver (chain approvers aren't necessarily managers, so
-            // it lives on the employee-facing screen — hidden when empty,
-            // exactly like the web's PendingApprovalsPanel).
-            ...pendingMyApproval.maybeWhen(
-              data: (rows) => rows.isEmpty
-                  ? const <Widget>[]
-                  : [
-                      const SizedBox(height: 22),
-                      const AppSectionHeader(
-                        title: 'Pending my approval',
-                        subtitle: 'Leave requests waiting on you',
-                        onDark: false,
-                      ),
-                      const SizedBox(height: 12),
-                      for (final r in rows)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _ApprovalQueueTile(r: r),
-                        ),
-                    ],
-              orElse: () => const <Widget>[],
-            ),
-            const SizedBox(height: 22),
-            const AppSectionHeader(
-              title: 'Leave balance',
-              subtitle: 'Days available for each category',
-              onDark: false,
-            ),
-            const SizedBox(height: 12),
+          ],
+          overlap: ProKpiStrip(
+            cells: [
+              ProKpi(
+                value: pendingCount?.toString() ?? '—',
+                label: 'My requests pending',
+              ),
+              ProKpi(
+                value: approvalRows?.length.toString() ?? '—',
+                label: 'Waiting for my approval',
+                valueColor: (approvalRows?.isNotEmpty ?? false)
+                    ? AppColors.warning
+                    : null,
+              ),
+              ProKpi(
+                value: approvedCount?.toString() ?? '—',
+                label: 'Approved',
+              ),
+            ],
+          ),
+          children: [
             balance.when(
-              data: (b) {
-                if (b == null || b.balances.isEmpty) {
-                  return const AppEmptyState(
-                    icon: Icons.beach_access_rounded,
-                    message: 'No balance configured yet.',
-                  );
-                }
-                return SizedBox(
-                  height: 108,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    itemCount: b.balances.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 10),
-                    itemBuilder: (_, i) => _BalanceCard(b: b.balances[i]),
-                  ),
-                );
-              },
-              loading: () => const AppLoadingBlock(height: 130),
-              error: (e, _) => AppErrorPanel(
+              data: (b) => (b == null || b.balances.isEmpty)
+                  ? const _HeroLine(
+                      icon: Icons.beach_access_rounded,
+                      text: 'No balance configured yet.',
+                    )
+                  : ProHeroStats(
+                      stats: [
+                        for (var i = 0; i < b.balances.length && i < 3; i++)
+                          ProStat(
+                            label: b.balances[i].leaveTypeLabel,
+                            value: _balanceText(b.balances[i]),
+                            sub:
+                                '${fmtLeaveDays(b.balances[i].usedDays)} used of ${_allowanceText(b.balances[i])}',
+                            dot: _balanceDots[i % _balanceDots.length],
+                          ),
+                      ],
+                    ),
+              loading: () => const _HeroLine(
+                icon: Icons.hourglass_empty_rounded,
+                text: 'Loading your balance…',
+              ),
+              error: (_, __) => const _HeroLine(
+                icon: Icons.error_outline_rounded,
+                text: 'Could not load your balance.',
+              ),
+            ),
+            if (finite.isNotEmpty && totalAllowance > 0)
+              _HeroUsageBar(used: totalUsed, left: totalLeft),
+          ],
+        ),
+        children: [
+          SizedBox(
+            height: 48,
+            child: FilledButton.icon(
+              onPressed: () => _openRequest(context, ref),
+              icon: const Icon(Icons.add_rounded, size: 20),
+              label: const Text('Apply for leave'),
+            ),
+          ),
+          // Approval-engine queue: leaves waiting on ME as a configured
+          // chain approver (chain approvers aren't necessarily managers, so
+          // it lives on the employee-facing screen — hidden when empty,
+          // exactly like the web's PendingApprovalsPanel).
+          ...pendingMyApproval.maybeWhen(
+            data: (rows) => rows.isEmpty
+                ? const <Widget>[]
+                : [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        ProSectionHeader(
+                          title: 'Pending my approval · ${rows.length}',
+                          subtitle: 'Leave requests waiting on you',
+                        ),
+                        const SizedBox(height: 8),
+                        const ProSwipeHint(),
+                        const SizedBox(height: 10),
+                        for (var i = 0; i < rows.length; i++) ...[
+                          if (i > 0) const SizedBox(height: 10),
+                          _ApprovalQueueTile(r: rows[i]),
+                        ],
+                      ],
+                    ),
+                  ],
+            orElse: () => const <Widget>[],
+          ),
+          // Every category (the hero shows the first three).
+          ...balance.when(
+            data: (b) => (b == null || b.balances.length <= 3)
+                ? const <Widget>[]
+                : [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const ProSectionHeader(
+                          title: 'Leave balance',
+                          subtitle: 'Days available for each category',
+                        ),
+                        const SizedBox(height: 10),
+                        ProListGroup(
+                          children: [
+                            for (var i = 0; i < b.balances.length; i++)
+                              _BalanceRow(b: b.balances[i], index: i),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+            loading: () => const <Widget>[],
+            error: (e, _) => [
+              AppErrorPanel(
                 message: e.toString(),
                 onRetry: () => ref.invalidate(_myBalanceProvider),
               ),
-            ),
-            const SizedBox(height: 28),
-            const AppSectionHeader(
-              title: 'My requests',
-              subtitle: 'Track the status of your leaves',
-              onDark: false,
-            ),
-            const SizedBox(height: 12),
-            leaves.when(
-              data: (rows) {
-                if (rows.isEmpty) {
-                  return const AppEmptyState(
-                    icon: Icons.event_note_rounded,
-                    message: 'No leave requests yet. Tap the button above to create one.',
-                  );
-                }
-                return Column(
-                  children: [
-                    for (final r in rows)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _LeaveTile(r: r),
-                      ),
-                  ],
-                );
-              },
-              loading: () => const AppLoadingBlock(height: 130),
-              error: (e, _) => AppErrorPanel(
-                message: e.toString(),
-                onRetry: () => ref.invalidate(_myLeavesProvider),
+            ],
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ProSectionHeader(
+                title: myRows == null || myRows.isEmpty
+                    ? 'My requests'
+                    : 'My requests · ${myRows.length}',
+                subtitle: 'Track the status of your leaves',
               ),
-            ),
-          ],
-        ),
+              const SizedBox(height: 10),
+              leaves.when(
+                data: (rows) {
+                  if (rows.isEmpty) {
+                    return const ProEmpty(
+                      icon: Icons.event_note_rounded,
+                      title: 'No leave requests yet',
+                      message: 'Tap the button above to create one.',
+                    );
+                  }
+                  return ProListGroup(
+                    children: [for (final r in rows) _LeaveTile(r: r)],
+                  );
+                },
+                loading: () => const AppLoadingBlock(height: 130),
+                error: (e, _) => AppErrorPanel(
+                  message: e.toString(),
+                  onRetry: () => ref.invalidate(_myLeavesProvider),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -220,131 +343,103 @@ class LeavesScreen extends ConsumerWidget {
   }
 }
 
-class _BalanceCard extends StatelessWidget {
-  const _BalanceCard({required this.b});
-  final LeaveBalance b;
-
-  static const _palettes = <Gradient>[
-    LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-    ),
-    LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [Color(0xFF10B981), Color(0xFF34D399)],
-    ),
-    LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [Color(0xFFF59E0B), Color(0xFFFBBF24)],
-    ),
-    LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [Color(0xFFEC4899), Color(0xFFF472B6)],
-    ),
-    LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: [Color(0xFF3B82F6), Color(0xFF60A5FA)],
-    ),
-  ];
+/// One-line message on the deep hero (empty / loading / error balance).
+class _HeroLine extends StatelessWidget {
+  const _HeroLine({required this.icon, required this.text});
+  final IconData icon;
+  final String text;
 
   @override
   Widget build(BuildContext context) {
-    final idx = b.leaveTypeLabel.hashCode.abs() % _palettes.length;
-    final gradient = _palettes[idx];
-    final balanceText = b.balanceDays == null ? '∞' : fmtLeaveDays(b.balanceDays);
-    final allowanceText = b.allowanceDays == null ? '∞' : '${b.allowanceDays}';
-
     return Container(
-      width: 168,
-      padding: const EdgeInsets.all(13),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
       decoration: BoxDecoration(
-        gradient: gradient,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        boxShadow: [
-          BoxShadow(
-            color: (gradient.colors.first).withOpacity(0.28),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        color: Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(
-                width: 26,
-                height: 26,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.22),
-                  borderRadius: BorderRadius.circular(7),
-                ),
-                child: const Icon(
-                  Icons.calendar_month_rounded,
-                  color: Colors.white,
-                  size: 14,
-                ),
-              ),
-              const Spacer(),
-              Flexible(
-                child: Text(
-                  b.leaveTypeLabel.toUpperCase(),
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                balanceText,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.5,
-                  height: 1,
-                ),
-              ),
-              const SizedBox(width: 3),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 3),
-                child: Text(
-                  'days',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.85),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${fmtLeaveDays(b.usedDays)} used · $allowanceText total',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.85),
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
+          Icon(icon, size: 17, color: Colors.white70),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(fontSize: 13, color: Color(0xE0FFFFFF)),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Used vs left across the limited categories.
+class _HeroUsageBar extends StatelessWidget {
+  const _HeroUsageBar({required this.used, required this.left});
+  final double used;
+  final double left;
+
+  @override
+  Widget build(BuildContext context) {
+    const usedColor = Color(0xFFF2B347);
+    final style = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w500,
+      color: Colors.white.withOpacity(0.72),
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ProStackBar(
+          parts: [
+            MapEntry(used, usedColor),
+            MapEntry(left, AppColors.live),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration:
+                  const BoxDecoration(color: usedColor, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Text('${fmtLeaveDays(used)} used', style: style),
+            const Spacer(),
+            Container(
+              width: 7,
+              height: 7,
+              decoration: const BoxDecoration(
+                  color: AppColors.live, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Text('${fmtLeaveDays(left)} left', style: style),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _BalanceRow extends StatelessWidget {
+  const _BalanceRow({required this.b, required this.index});
+  final LeaveBalance b;
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    return ProListRow(
+      leading: ProIconWell(
+        icon: _leaveTypeIcon(b.leaveTypeCode),
+        color: _balanceInk(index),
+      ),
+      title: b.leaveTypeLabel,
+      subtitle: '${fmtLeaveDays(b.usedDays)} used · ${_allowanceText(b)} total',
+      value: '${_balanceText(b)} days',
     );
   }
 }
@@ -358,7 +453,7 @@ String _humanLeaveType(String t) {
 }
 
 /// One leave waiting on the signed-in user as a configured chain approver —
-/// requester, dates, live chain, and Approve / Reject actions.
+/// requester, dates, live chain, and Approve / Reject actions (buttons or swipe).
 class _ApprovalQueueTile extends ConsumerStatefulWidget {
   const _ApprovalQueueTile({required this.r});
   final LeaveRequest r;
@@ -399,51 +494,56 @@ class _ApprovalQueueTileState extends ConsumerState<_ApprovalQueueTile> {
   @override
   Widget build(BuildContext context) {
     final r = widget.r;
+    final name = r.employeeName ?? 'Employee #${r.employeeId}';
     final steps = ref.watch(leaveApprovalStepsProvider(r.id));
-    return GlassCard(
+    final card = GlassCard(
       padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
+              ProAvatar(name: name, size: 40),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      r.employeeName ?? 'Employee #${r.employeeId}',
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        height: 1.33,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.15,
                         color: AppColors.ink,
                       ),
                     ),
-                    const SizedBox(height: 1),
                     Text(
                       '${_humanLeaveType(r.leaveType)} · ${r.daysLabel} · ${r.fromDate} → ${r.toDate}',
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.muted,
-                        fontWeight: FontWeight.w500,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.caption.copyWith(
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                   ],
                 ),
               ),
-              StatusPill(
-                  label: 'Awaiting you', color: AppColors.warning),
+              const SizedBox(width: 8),
+              ProPill.warn('Awaiting you'),
             ],
           ),
           if (r.reason != null && r.reason!.trim().isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Text(
-              r.reason!.trim(),
+              '“${r.reason!.trim()}”',
               style: const TextStyle(
-                fontSize: 11.5,
+                fontSize: 13.5,
+                height: 1.45,
                 color: AppColors.inkSoft,
-                fontStyle: FontStyle.italic,
               ),
             ),
           ],
@@ -460,25 +560,35 @@ class _ApprovalQueueTileState extends ConsumerState<_ApprovalQueueTile> {
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.dangerTint,
+                    foregroundColor: AppColors.danger,
+                  ),
                   onPressed: _busy ? null : () => _review('REJECTED'),
-                  icon: const Icon(Icons.close_rounded,
-                      size: 16, color: AppColors.danger),
-                  label: const Text('Reject',
-                      style: TextStyle(color: AppColors.danger)),
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  label: const Text('Reject'),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: FilledButton.icon(
                   onPressed: _busy ? null : () => _review('APPROVED'),
-                  icon: const Icon(Icons.check_rounded, size: 16),
+                  icon: const Icon(Icons.check_rounded, size: 18),
                   label: const Text('Approve'),
                 ),
               ),
             ],
           ),
         ],
+      ),
+    );
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: ProSwipeDecision(
+        onApprove: _busy ? null : () => _review('APPROVED'),
+        onReject: _busy ? null : () => _review('REJECTED'),
+        child: card,
       ),
     );
   }
@@ -502,11 +612,7 @@ class _LeaveTileState extends ConsumerState<_LeaveTile> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.lg)),
-        title: const Text('Withdraw this request?',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        title: const Text('Withdraw this request?'),
         content: const Text(
           'Your leave request will be cancelled and removed from your '
           'approver\'s queue. You can apply again if you change your mind.',
@@ -517,7 +623,10 @@ class _LeaveTileState extends ConsumerState<_LeaveTile> {
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Keep it')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.dangerTint,
+              foregroundColor: AppColors.danger,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Withdraw'),
           ),
@@ -556,170 +665,87 @@ class _LeaveTileState extends ConsumerState<_LeaveTile> {
     final steps = r.status == 'PENDING'
         ? ref.watch(leaveApprovalStepsProvider(r.id))
         : null;
-    return GlassCard(
-      padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: tone.color.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(color: tone.color.withOpacity(0.22)),
-                ),
-                alignment: Alignment.center,
-                child: Icon(Icons.beach_access_rounded,
-                    color: tone.color, size: 17),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _humanType(r.leaveType),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      '${r.daysLabel} · ${r.fromDate} → ${r.toDate}',
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.muted,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              StatusPill(label: tone.label, color: tone.color),
-            ],
+    final hasReason = r.reason != null && r.reason!.isNotEmpty;
+    final isPending = r.status == 'PENDING';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ProListRow(
+          leading: ProIconWell(
+            icon: _leaveTypeIcon(r.leaveType),
+            color: tone.color,
           ),
-          if (r.reason != null && r.reason!.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.45),
-                borderRadius: BorderRadius.circular(AppRadii.sm),
-                border: Border.all(color: Colors.white.withOpacity(0.55)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.format_quote_rounded,
-                      size: 13, color: AppColors.muted),
-                  const SizedBox(width: 5),
-                  Expanded(
-                    child: Text(
-                      r.reason!,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.inkSoft,
-                        fontStyle: FontStyle.italic,
+          title: _humanType(r.leaveType),
+          subtitle: '${r.daysLabel} · ${r.fromDate} → ${r.toDate}',
+          pill: _leavePill(r.status),
+        ),
+        if (hasReason || steps != null || isPending)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(58, 0, 12, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (hasReason)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.only(top: 1),
+                        child: Icon(Icons.format_quote_rounded,
+                            size: 15, color: AppColors.faint),
                       ),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          r.reason!,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            height: 1.4,
+                            color: AppColors.inkSoft,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                if (steps != null)
+                  steps.maybeWhen(
+                    data: (s) => s.isEmpty
+                        ? const SizedBox.shrink()
+                        : Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: ApprovalChainInline(steps: s),
+                          ),
+                    orElse: () => const SizedBox.shrink(),
+                  ),
+                // Only an untouched request can be withdrawn. Once it is approved or
+                // rejected the decision is the approver's to undo, not the employee's.
+                if (isPending) ...[
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.danger,
+                      minimumSize: const Size(0, 38),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
                     ),
+                    onPressed: _busy ? null : _withdraw,
+                    icon: _busy
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.undo_rounded, size: 16),
+                    label: Text(_busy ? 'Withdrawing…' : 'Withdraw request'),
                   ),
                 ],
-              ),
+              ],
             ),
-          ],
-          if (steps != null)
-            steps.maybeWhen(
-              data: (s) => s.isEmpty
-                  ? const SizedBox.shrink()
-                  : Padding(
-                      padding: const EdgeInsets.only(top: 10),
-                      child: ApprovalChainInline(steps: s),
-                    ),
-              orElse: () => const SizedBox.shrink(),
-            ),
-          // Only an untouched request can be withdrawn. Once it is approved or
-          // rejected the decision is the approver's to undo, not the employee's.
-          if (r.status == 'PENDING') ...[
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _busy ? null : _withdraw,
-                icon: _busy
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.undo_rounded,
-                        size: 16, color: AppColors.danger),
-                label: Text(
-                  _busy ? 'Withdrawing…' : 'Withdraw request',
-                  style: const TextStyle(color: AppColors.danger),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
+          ),
+      ],
     );
   }
 
   String _humanType(String t) => _humanLeaveType(t);
-}
-
-class _ApplyForLeaveButton extends StatelessWidget {
-  const _ApplyForLeaveButton({required this.onTap});
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: AppColors.heroGradient,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withOpacity(0.34),
-            blurRadius: 26,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            alignment: Alignment.center,
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.add_rounded, color: Colors.white, size: 19),
-                SizedBox(width: 8),
-                Text(
-                  'Apply for leave',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class _RequestSheet extends ConsumerStatefulWidget {
@@ -806,272 +832,233 @@ class _RequestSheetState extends ConsumerState<_RequestSheet> {
   @override
   Widget build(BuildContext context) {
     final df = DateFormat('EEE, d MMM y');
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-        child: Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.86),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        border: Border(
-          top: BorderSide(color: Colors.white.withOpacity(0.7), width: 1),
+    final mq = MediaQuery.of(context);
+    return Padding(
+      padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: (mq.size.height - mq.viewInsets.bottom) * 0.92,
         ),
-      ),
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 12,
-        bottom: MediaQuery.of(context).viewInsets.bottom +
-            MediaQuery.of(context).padding.bottom +
-            20,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.hairline,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
-          const SizedBox(height: 20),
-          const Text(
-            'Request leave',
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              color: AppColors.ink,
-              letterSpacing: 0,
-            ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Pick a category and dates that work for you.',
-            style: TextStyle(
-              fontSize: 13,
-              color: AppColors.muted,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 20),
-          const Text(
-            'Type',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: AppColors.ink,
-            ),
-          ),
-          const SizedBox(height: 8),
-          ref.watch(_leaveTypeOptionsProvider(widget.employeeId)).when(
-                loading: () => const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 10),
-                  child: SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
-                error: (e, _) => Text(
-                  'Could not load leave types: $e',
-                  style: const TextStyle(color: AppColors.danger, fontSize: 12),
-                ),
-                data: (opts) {
-                  if (opts.isEmpty) {
-                    return const Text(
-                      'No leave types are available for your account.',
-                      style: TextStyle(color: AppColors.muted, fontSize: 12.5),
-                    );
-                  }
-                  // Default to the first allowed type once options arrive.
-                  if (!opts.any((o) => o.code == _type)) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted && !opts.any((o) => o.code == _type)) {
-                        setState(() => _type = opts.first.code);
-                      }
-                    });
-                  }
-                  return Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final o in opts)
-                        _TypeChip(
-                          label: o.label,
-                          icon: _leaveTypeIcon(o.code),
-                          selected: _type == o.code,
-                          onTap: () => setState(() => _type = o.code),
-                        ),
-                    ],
-                  );
-                },
-              ),
-          const SizedBox(height: 18),
-          Row(
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
-                child: _DateField(
-                  label: 'From',
-                  value: df.format(_from),
-                  onTap: () => _pick(isFrom: true),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _DateField(
-                  label: 'To',
-                  value: df.format(_to),
-                  onTap: () => _pick(isFrom: false),
-                ),
-              ),
-            ],
-          ),
-          if (_singleDay) ...[
-            const SizedBox(height: 14),
-            const Text(
-              'Duration',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: AppColors.ink,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _TypeChip(
-                  label: 'Full day',
-                  icon: Icons.today_rounded,
-                  selected: _half == null,
-                  onTap: () => setState(() => _half = null),
-                ),
-                _TypeChip(
-                  label: 'First half',
-                  icon: Icons.wb_twilight_rounded,
-                  selected: _half == 'FIRST_HALF',
-                  onTap: () => setState(() => _half = 'FIRST_HALF'),
-                ),
-                _TypeChip(
-                  label: 'Second half',
-                  icon: Icons.nights_stay_rounded,
-                  selected: _half == 'SECOND_HALF',
-                  onTap: () => setState(() => _half = 'SECOND_HALF'),
-                ),
-              ],
-            ),
-            if (_half != null) ...[
-              const SizedBox(height: 6),
-              const Text(
-                'A half-day leave counts 0.5 day against your balance.',
-                style: TextStyle(fontSize: 11.5, color: AppColors.muted),
-              ),
-            ],
-          ],
-          const SizedBox(height: 14),
-          const Text(
-            'Reason',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: AppColors.ink,
-            ),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _reason,
-            maxLines: 3,
-            textCapitalization: TextCapitalization.words,
-            inputFormatters: const [TitleCaseTextFormatter()],
-            decoration: const InputDecoration(
-              hintText: 'Why are you taking these days?',
-            ),
-          ),
-          if (_err != null) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppColors.danger.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(AppRadii.sm),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.error_outline_rounded,
-                      size: 16, color: AppColors.danger),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _err!,
-                      style: const TextStyle(
-                        color: AppColors.danger,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFC6D3D6),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
                       ),
                     ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Request leave',
+                      style: TextStyle(
+                        fontSize: 19,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.4,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'Pick a category and dates that work for you.',
+                      style: AppText.caption,
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      ProField(
+                        label: 'Leave type',
+                        required: true,
+                        child: ref
+                            .watch(_leaveTypeOptionsProvider(widget.employeeId))
+                            .when(
+                              loading: () => const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 10),
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child:
+                                        CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                ),
+                              ),
+                              error: (e, _) => Text(
+                                'Could not load leave types: $e',
+                                style: const TextStyle(
+                                    color: AppColors.danger, fontSize: 12.5),
+                              ),
+                              data: (opts) {
+                                if (opts.isEmpty) {
+                                  return const Text(
+                                    'No leave types are available for your account.',
+                                    style: TextStyle(
+                                        color: AppColors.muted, fontSize: 13),
+                                  );
+                                }
+                                // Default to the first allowed type once options arrive.
+                                if (!opts.any((o) => o.code == _type)) {
+                                  WidgetsBinding.instance
+                                      .addPostFrameCallback((_) {
+                                    if (mounted &&
+                                        !opts.any((o) => o.code == _type)) {
+                                      setState(() => _type = opts.first.code);
+                                    }
+                                  });
+                                }
+                                return Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    for (final o in opts)
+                                      _TypeChip(
+                                        label: o.label,
+                                        icon: _leaveTypeIcon(o.code),
+                                        selected: _type == o.code,
+                                        onTap: () =>
+                                            setState(() => _type = o.code),
+                                      ),
+                                  ],
+                                );
+                              },
+                            ),
+                      ),
+                      const SizedBox(height: 18),
+                      ProField(
+                        label: 'Dates',
+                        required: true,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _DateField(
+                                label: 'From',
+                                value: df.format(_from),
+                                onTap: () => _pick(isFrom: true),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: _DateField(
+                                label: 'To',
+                                value: df.format(_to),
+                                onTap: () => _pick(isFrom: false),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_singleDay) ...[
+                        const SizedBox(height: 18),
+                        ProField(
+                          label: 'Duration',
+                          helper: _half != null
+                              ? 'A half-day leave counts 0.5 day against your balance.'
+                              : null,
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _TypeChip(
+                                label: 'Full day',
+                                icon: Icons.today_rounded,
+                                selected: _half == null,
+                                onTap: () => setState(() => _half = null),
+                              ),
+                              _TypeChip(
+                                label: 'First half',
+                                icon: Icons.wb_twilight_rounded,
+                                selected: _half == 'FIRST_HALF',
+                                onTap: () =>
+                                    setState(() => _half = 'FIRST_HALF'),
+                              ),
+                              _TypeChip(
+                                label: 'Second half',
+                                icon: Icons.nights_stay_rounded,
+                                selected: _half == 'SECOND_HALF',
+                                onTap: () =>
+                                    setState(() => _half = 'SECOND_HALF'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 18),
+                      ProField(
+                        label: 'Reason',
+                        required: true,
+                        child: TextField(
+                          controller: _reason,
+                          maxLines: 3,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: const [TitleCaseTextFormatter()],
+                          decoration: const InputDecoration(
+                            hintText: 'Why are you taking these days?',
+                          ),
+                        ),
+                      ),
+                      if (_err != null) ...[
+                        const SizedBox(height: 12),
+                        ProNote(_err!, tone: ProNoteTone.bad),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              ProBottomBar(
+                children: [
+                  OutlinedButton(
+                    onPressed:
+                        _submitting ? null : () => Navigator.of(context).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: _submitting ? null : _submit,
+                    child: _submitting
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.4,
+                              valueColor: AlwaysStoppedAnimation(Colors.white),
+                            ),
+                          )
+                        : const Text('Submit request'),
                   ),
                 ],
               ),
-            ),
-          ],
-          const SizedBox(height: 18),
-          Container(
-            decoration: BoxDecoration(
-              gradient: AppColors.heroGradient,
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.primary.withOpacity(0.35),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: _submitting ? null : _submit,
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  alignment: Alignment.center,
-                  child: _submitting
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.4,
-                            valueColor: AlwaysStoppedAnimation(Colors.white),
-                          ),
-                        )
-                      : const Text(
-                          'Submit request',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.2,
-                          ),
-                        ),
-                ),
-              ),
-            ),
+            ],
           ),
-        ],
-      ),
         ),
       ),
     );
   }
 }
 
+/// Selectable chip (ink when selected) for leave type / duration.
 class _TypeChip extends StatelessWidget {
   const _TypeChip({
     required this.label,
@@ -1086,39 +1073,43 @@ class _TypeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadii.pill),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.primary.withOpacity(0.10) : AppColors.bg,
+    return Semantics(
+      button: true,
+      selected: selected,
+      child: Material(
+        color: selected ? AppColors.ink : AppColors.surface,
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.pill),
-          border: Border.all(
-            color: selected ? AppColors.primary : AppColors.hairline,
-            width: selected ? 1.4 : 1,
+          side: BorderSide(
+            color: selected ? AppColors.ink : const Color(0xFFDBE3E5),
           ),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 14,
-              color: selected ? AppColors.primary : AppColors.inkSoft,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 15,
+                  color: selected ? Colors.white : AppColors.inkSoft,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    color: selected ? Colors.white : AppColors.inkSoft,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: selected ? AppColors.primary : AppColors.inkSoft,
-                letterSpacing: 0.3,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -1137,48 +1128,52 @@ class _DateField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadii.md),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: AppColors.bg,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: Border.all(color: AppColors.hairline),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.calendar_today_rounded,
-                size: 16, color: AppColors.primary),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.muted,
-                      letterSpacing: 0.3,
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        side: const BorderSide(color: Color(0xFFD9E2E4)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Icon(Icons.calendar_today_rounded,
+                  size: 16, color: AppColors.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.muted,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    value,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.ink,
+                    const SizedBox(height: 1),
+                    Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import 'assistant_controller.dart';
 import 'assistant_language.dart';
@@ -55,33 +56,38 @@ class _AssistantVoiceSheetState extends ConsumerState<AssistantVoiceSheet> {
 
     final listening = voice.phase == VoicePhase.listening;
     final confirming = voice.phase == VoicePhase.confirming;
+    final hasError = voice.error != null && !listening;
 
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.only(
         left: 20,
         right: 20,
-        top: 18,
-        bottom: MediaQuery.of(context).padding.bottom + 18,
+        top: 10,
+        bottom: MediaQuery.of(context).padding.bottom +
+            MediaQuery.of(context).viewInsets.bottom +
+            20,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          const _Handle(),
+          const SizedBox(height: 14),
           // Language chips — switching restarts nothing mid-flight; it applies
           // to the next listen.
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
+            clipBehavior: Clip.none,
             child: Row(
               children: [
                 for (final l in kAssistantLanguages)
                   Padding(
-                    padding: const EdgeInsets.only(right: 6),
+                    padding: const EdgeInsets.only(right: 8),
                     child: ChoiceChip(
-                      label: Text(l.label,
-                          style: const TextStyle(fontSize: 11.5)),
+                      label: Text(l.label),
                       selected: settings.language == l.code,
                       onSelected: (_) => ref
                           .read(assistantVoiceSettingsProvider.notifier)
@@ -94,14 +100,18 @@ class _AssistantVoiceSheetState extends ConsumerState<AssistantVoiceSheet> {
           const SizedBox(height: 18),
 
           if (confirming) ...[
-            const Text(
-              'Did I hear that right?',
-              style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Did I hear that right?',
+                style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.35,
+                    color: AppColors.ink),
+              ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             TextField(
               controller: _editCtrl,
               maxLines: 3,
@@ -110,12 +120,12 @@ class _AssistantVoiceSheetState extends ConsumerState<AssistantVoiceSheet> {
               decoration: const InputDecoration(
                   helperText: 'Edit if needed, then send.'),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    icon: const Icon(Icons.mic_rounded, size: 16),
+                    icon: const Icon(Icons.mic_rounded, size: 18),
                     label: const Text('Try again'),
                     onPressed: () {
                       ref
@@ -130,7 +140,7 @@ class _AssistantVoiceSheetState extends ConsumerState<AssistantVoiceSheet> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: FilledButton.icon(
-                    icon: const Icon(Icons.send_rounded, size: 16),
+                    icon: const Icon(Icons.send_rounded, size: 18),
                     label: const Text('Send'),
                     onPressed: () => ref
                         .read(assistantVoiceControllerProvider.notifier)
@@ -149,28 +159,40 @@ class _AssistantVoiceSheetState extends ConsumerState<AssistantVoiceSheet> {
                 listening ? notifier.stopListening() : notifier.startListening();
               },
             ),
-            const SizedBox(height: 14),
-            Text(
-              listening
-                  ? (voice.partialText.isEmpty
-                      ? 'Listening…'
-                      : voice.partialText)
-                  : (voice.error ?? 'Tap the mic and speak'),
-              textAlign: TextAlign.center,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: voice.partialText.isEmpty ? 12.5 : 14,
-                fontWeight: voice.partialText.isEmpty
-                    ? FontWeight.w500
-                    : FontWeight.w700,
-                color: voice.error != null && !listening
-                    ? AppColors.danger
-                    : (voice.partialText.isEmpty
-                        ? AppColors.muted
-                        : AppColors.ink),
+            const SizedBox(height: 12),
+            if (listening && voice.partialText.isEmpty)
+              const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ProPulseDot(color: AppColors.live),
+                  SizedBox(width: 6),
+                  Text(
+                    'Listening…',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.muted,
+                    ),
+                  ),
+                ],
+              )
+            else
+              Text(
+                listening
+                    ? voice.partialText
+                    : (voice.error ?? 'Tap the mic and speak'),
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: listening ? 16 : 14,
+                  height: 1.4,
+                  fontWeight: listening ? FontWeight.w600 : FontWeight.w500,
+                  color: hasError
+                      ? AppColors.danger
+                      : (listening ? AppColors.ink : AppColors.muted),
+                ),
               ),
-            ),
             const SizedBox(height: 10),
             TextButton(
               onPressed: () {
@@ -188,8 +210,8 @@ class _AssistantVoiceSheetState extends ConsumerState<AssistantVoiceSheet> {
   }
 }
 
-/// The animated microphone: a breathing brand-gradient orb with up to three
-/// sound-reactive ripple rings while listening.
+/// The animated microphone: a deep brand orb with up to three sound-reactive
+/// ripple rings while listening.
 class _MicOrb extends StatefulWidget {
   const _MicOrb({
     required this.listening,
@@ -224,62 +246,76 @@ class _MicOrbState extends State<_MicOrb> with SingleTickerProviderStateMixin {
       child: GestureDetector(
         onTap: widget.onTap,
         child: SizedBox(
-          width: 148,
-          height: 148,
-        child: AnimatedBuilder(
-          animation: _pulse,
-          builder: (_, __) {
-            final rings = <Widget>[];
-            if (widget.listening) {
-              for (var i = 0; i < 3; i++) {
-                final t = (_pulse.value + i / 3) % 1.0;
-                final boost = 0.5 + widget.soundLevel; // louder → wider rings
-                rings.add(Center(
-                  child: Container(
-                    width: 84 + t * 64 * boost,
-                    height: 84 + t * 64 * boost,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: AppColors.primary.withOpacity(
-                            (1 - t) * 0.35 * (0.6 + widget.soundLevel)),
-                        width: 2,
+          width: 156,
+          height: 156,
+          child: AnimatedBuilder(
+            animation: _pulse,
+            builder: (_, __) {
+              final rings = <Widget>[];
+              if (widget.listening) {
+                for (var i = 0; i < 3; i++) {
+                  final t = (_pulse.value + i / 3) % 1.0;
+                  final boost = 0.5 + widget.soundLevel; // louder → wider rings
+                  rings.add(Center(
+                    child: Container(
+                      width: 92 + t * 64 * boost,
+                      height: 92 + t * 64 * boost,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: AppColors.primary.withValues(
+                              alpha: ((1 - t) * 0.45 * (0.6 + widget.soundLevel))
+                                  .clamp(0.0, 1.0)),
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ));
+                }
+              }
+              return Stack(
+                children: [
+                  ...rings,
+                  Center(
+                    child: AnimatedScale(
+                      scale: widget.listening
+                          ? 1 + widget.soundLevel.clamp(0.0, 1.0) * 0.06
+                          : 1,
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOut,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.deep.withValues(alpha: 0.6),
+                              blurRadius: 30,
+                              spreadRadius: -12,
+                              offset: const Offset(0, 16),
+                            ),
+                          ],
+                        ),
+                        child: ProDeepSurface(
+                          radius: 46,
+                          padding: EdgeInsets.zero,
+                          child: SizedBox(
+                            width: 92,
+                            height: 92,
+                            child: Icon(
+                              widget.listening
+                                  ? Icons.graphic_eq_rounded
+                                  : Icons.mic_rounded,
+                              color: Colors.white,
+                              size: 34,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ));
-              }
-            }
-            return Stack(
-              children: [
-                ...rings,
-                Center(
-                  child: Container(
-                    width: 84,
-                    height: 84,
-                    decoration: BoxDecoration(
-                      gradient: AppColors.heroGradient,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primary.withOpacity(0.35),
-                          blurRadius: widget.listening ? 24 : 12,
-                          spreadRadius: widget.listening ? 4 : 0,
-                        ),
-                      ],
-                    ),
-                    child: Icon(
-                      widget.listening
-                          ? Icons.graphic_eq_rounded
-                          : Icons.mic_rounded,
-                      color: Colors.white,
-                      size: 34,
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -299,60 +335,61 @@ class AssistantVoiceSettingsSheet extends ConsumerWidget {
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.only(
         left: 20,
         right: 20,
-        top: 18,
+        top: 10,
         bottom: MediaQuery.of(context).padding.bottom + 18,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const _Handle(),
+          const SizedBox(height: 14),
           const Text('Voice settings',
               style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.35,
                   color: AppColors.ink)),
-          const SizedBox(height: 8),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Haptic feedback',
-                style: TextStyle(fontSize: 13.5)),
-            subtitle: const Text('Vibrate on voice actions',
-                style: TextStyle(fontSize: 11.5)),
-            value: settings.haptics,
-            onChanged: (v) => notifier.update(settings.copyWith(haptics: v)),
+          const SizedBox(height: 14),
+          GlassCard(
+            padding: const EdgeInsets.fromLTRB(14, 4, 6, 4),
+            child: SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: ProIconWell(
+                  icon: Icons.vibration_rounded, color: AppColors.primary),
+              title: const Text('Haptic feedback'),
+              subtitle: const Text('Vibrate on voice actions'),
+              value: settings.haptics,
+              onChanged: (v) => notifier.update(settings.copyWith(haptics: v)),
+            ),
           ),
-          const SizedBox(height: 4),
-          const Text('Voice input language',
-              style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.inkSoft)),
-          const SizedBox(height: 8),
+          const SizedBox(height: 18),
+          const Text('Voice input language', style: AppText.label),
+          const SizedBox(height: 10),
           Wrap(
-            spacing: 6,
-            runSpacing: 6,
+            spacing: 8,
+            runSpacing: 8,
             children: [
               for (final l in kAssistantLanguages)
                 ChoiceChip(
-                  label:
-                      Text(l.label, style: const TextStyle(fontSize: 11.5)),
+                  label: Text(l.label),
                   selected: settings.language == l.code,
                   onSelected: (_) =>
                       notifier.update(settings.copyWith(language: l.code)),
                 ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 14),
           // Privacy: wipe the entire server-side assistant history.
           Center(
             child: TextButton.icon(
               style: TextButton.styleFrom(foregroundColor: AppColors.danger),
-              icon: const Icon(Icons.delete_forever_rounded, size: 18),
+              icon: const Icon(Icons.delete_outline_rounded, size: 18),
               label: const Text('Clear all chat history'),
               onPressed: () => _clearHistory(context, ref),
             ),
@@ -374,7 +411,9 @@ class AssistantVoiceSettingsSheet extends ConsumerWidget {
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Cancel')),
           FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+              style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.dangerTint,
+                  foregroundColor: AppColors.danger),
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('Delete all')),
         ],
@@ -396,5 +435,24 @@ class AssistantVoiceSettingsSheet extends ConsumerWidget {
             content: Text('Could not clear history. Please try again.')));
       }
     }
+  }
+}
+
+/// 40×5 drag handle for the white bottom sheets.
+class _Handle extends StatelessWidget {
+  const _Handle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        width: 40,
+        height: 5,
+        decoration: BoxDecoration(
+          color: const Color(0xFFC6D3D6),
+          borderRadius: BorderRadius.circular(5),
+        ),
+      ),
+    );
   }
 }

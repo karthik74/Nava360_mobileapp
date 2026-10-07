@@ -1,10 +1,9 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/download_saver.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'payslips_models.dart';
@@ -64,6 +63,15 @@ Future<bool> _downloadAndOpenPayslip(
   }
 }
 
+String _money(double v) => '₹${NumberFormat('#,##,###').format(v)}';
+
+/// "PAID" → "Paid".
+String _statusLabel(String s) {
+  if (s.isEmpty) return s;
+  final t = s.toLowerCase().replaceAll('_', ' ');
+  return '${t[0].toUpperCase()}${t.substring(1)}';
+}
+
 class PayslipsScreen extends ConsumerWidget {
   const PayslipsScreen({super.key});
 
@@ -75,134 +83,154 @@ class PayslipsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final payrolls = ref.watch(myPayrollsProvider);
-    final mq = MediaQuery.of(context);
 
-    double lastNetSalary = 0;
+    PayrollRecord? latest;
     payrolls.whenData((list) {
       if (list.isNotEmpty) {
         final sorted = [...list]..sort((a, b) => (b.year * 12 + b.month).compareTo(a.year * 12 + a.month));
-        lastNetSalary = sorted.first.netSalary;
+        latest = sorted.first;
       }
     });
+    final last = latest;
+    final lastNetSalary = last?.netSalary ?? 0;
+    final totalPayslips = payrolls.when(
+      data: (list) => list.length.toString(),
+      loading: () => '—',
+      error: (_, __) => '0',
+    );
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: PreferredSize(
-          preferredSize:
-              Size.fromHeight(mq.padding.top + AppChrome.appBarHeight),
-          child: ClipRect(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: GlassBlur.chrome,
-                sigmaY: GlassBlur.chrome,
-              ),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.62),
-                  border: Border(
-                    bottom: BorderSide(color: Colors.white.withOpacity(0.5)),
-                  ),
-                ),
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                          onPressed: () => Navigator.pop(context),
-                          color: AppColors.inkSoft,
-                        ),
-                        const SizedBox(width: 4),
-                        const Expanded(
-                          child: Text(
-                            'My Payslips',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.ink,
-                              letterSpacing: -0.2,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+    final Widget heroTitle;
+    if (last == null) {
+      heroTitle = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'My payslips',
+            style: TextStyle(
+              fontSize: 24,
+              height: 1.2,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.65,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            payrolls.isLoading
+                ? 'Loading your salary slips…'
+                : 'Monthly disbursements and deduction ledgers',
+            style: const TextStyle(fontSize: 12.5, color: Colors.white70),
+          ),
+        ],
+      );
+    } else {
+      final monthLabel = '${_monthName(last.month)} ${last.year}';
+      heroTitle = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Last net salary · $monthLabel',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: Colors.white70,
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              _money(lastNetSalary),
+              style: const TextStyle(
+                fontSize: 36,
+                height: 1.15,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -1,
+                color: Colors.white,
+                fontFeatures: [FontFeature.tabularFigures()],
               ),
             ),
           ),
-        ),
-        body: RefreshIndicator(
-          color: AppColors.primary,
-          backgroundColor: Colors.white.withOpacity(0.92),
-          onRefresh: () async => ref.invalidate(myPayrollsProvider),
-          child: ListView(
-            physics: const BouncingScrollPhysics(
-              parent: AlwaysScrollableScrollPhysics(),
-            ),
-            padding: EdgeInsets.fromLTRB(
-              16,
-              12,
-              16,
-              mq.padding.bottom + 20,
-            ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: StatTile(
-                      label: 'Last net salary',
-                      value: payrolls.when(
-                        data: (_) => '₹${NumberFormat('#,##,###').format(lastNetSalary)}',
-                        loading: () => '—',
-                        error: (_, __) => '0',
-                      ),
-                      icon: Icons.payments_rounded,
+              if (last.status.isNotEmpty)
+                ProHeroTag(_statusLabel(last.status),
+                    tone: ProTagTone.ok, icon: Icons.check_rounded),
+              if (last.paymentDate != null)
+                ProHeroTag('Paid on ${last.paymentDate}'),
+              ProHeroTag('$totalPayslips payslips',
+                  icon: Icons.receipt_long_rounded),
+            ],
+          ),
+        ],
+      );
+    }
+
+    final takePct = last == null || last.grossEarnings <= 0
+        ? null
+        : (last.netSalary / last.grossEarnings * 100).round();
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Payslips')),
+      body: ProPage(
+        onRefresh: () async => ref.invalidate(myPayrollsProvider),
+        gap: 22,
+        hero: ProHero(
+          titleWidget: heroTitle,
+          overlap: last == null
+              ? null
+              : ProKpiStrip(
+                  cells: [
+                    ProKpi(value: _money(last.grossEarnings), label: 'Gross earnings'),
+                    ProKpi(
+                      value: _money(last.totalDeductions),
+                      label: 'Deductions',
+                      valueColor: AppColors.danger,
+                    ),
+                    ProKpi(
+                      value: _money(last.netSalary),
+                      label: takePct == null ? 'Net pay' : 'Net pay · $takePct%',
+                      valueColor: AppColors.success,
+                      progress: takePct == null ? null : takePct / 100,
                       color: AppColors.success,
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: StatTile(
-                      label: 'Total payslips',
-                      value: payrolls.when(
-                        data: (list) => list.length.toString(),
-                        loading: () => '—',
-                        error: (_, __) => '0',
-                      ),
-                      icon: Icons.receipt_long_rounded,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              const AppSectionHeader(
-                title: 'Salary Slips',
+                  ],
+                ),
+        ),
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ProSectionHeader(
+                title: payrolls.valueOrNull == null ||
+                        payrolls.valueOrNull!.isEmpty
+                    ? 'Salary slips'
+                    : 'Salary slips · ${payrolls.valueOrNull!.length}',
                 subtitle: 'Monthly disbursements and deduction ledgers',
-                onDark: false,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               payrolls.when(
                 data: (list) {
                   if (list.isEmpty) {
-                    return const AppEmptyState(
+                    return const ProEmpty(
                       icon: Icons.receipt_long_outlined,
-                      message: 'No salary slips processed yet.',
+                      title: 'No salary slips processed yet.',
                     );
                   }
                   final sorted = [...list]
                     ..sort((a, b) => (b.year * 12 + b.month).compareTo(a.year * 12 + a.month));
-                  return Column(
+                  return ProListGroup(
                     children: [
                       for (final p in sorted)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _PayslipCard(payroll: p, monthName: _monthName(p.month)),
-                        ),
+                        _PayslipCard(payroll: p, monthName: _monthName(p.month)),
                     ],
                   );
                 },
@@ -214,7 +242,7 @@ class PayslipsScreen extends ConsumerWidget {
               ),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
@@ -239,185 +267,196 @@ void _showPayslipReceipt(
       useRootNavigator: true,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (ctx) => BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: DraggableScrollableSheet(
-          initialChildSize: 0.85,
-          maxChildSize: 0.95,
-          minChildSize: 0.5,
-          builder: (_, scrollCtrl) => Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(28),
-                topRight: Radius.circular(28),
-              ),
-            ),
-            child: ListView(
-              controller: scrollCtrl,
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 30),
-              children: [
-                Center(
-                  child: Container(
-                    width: 38,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppColors.muted.withOpacity(0.3),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                // Heading
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'SALARY SLIP',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.primary,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '$monthName ${payroll.year}',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.ink,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: AppColors.success.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(AppRadii.pill),
-                        border: Border.all(color: AppColors.success.withOpacity(0.2)),
-                      ),
-                      child: Text(
-                        payroll.status.toUpperCase(),
-                        style: const TextStyle(
-                          color: AppColors.success,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                const Divider(),
-                const SizedBox(height: 14),
-                // Employee Details Row
-                _DetailRow(label: 'Employee Name', value: payroll.employeeName),
-                _DetailRow(label: 'Employee ID', value: payroll.employeeId.toString()),
-                _DetailRow(label: 'Disbursement Date', value: payroll.paymentDate ?? '—'),
-                _DetailRow(label: 'Working Days', value: '${payroll.workingDays} Days'),
-                _DetailRow(label: 'Present Days', value: '${payroll.presentDays} Days'),
-                _DetailRow(label: 'Payable Days', value: '${payroll.payableDays} Days'),
-                const SizedBox(height: 18),
-                const Divider(),
-                const SizedBox(height: 14),
-                // Earnings Ledger Table
-                const Text(
-                  'EARNINGS LEDGER',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.muted,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _LedgerItem(label: 'Basic Salary', value: payroll.basicSalary),
-                _LedgerItem(label: 'HRA & House Allowances', value: payroll.grossEarnings - payroll.basicSalary),
-                _LedgerItem(label: 'Gross Earnings', value: payroll.grossEarnings, isBold: true),
-                const SizedBox(height: 18),
-                // Deductions Ledger Table
-                const Text(
-                  'DEDUCTIONS LEDGER',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.muted,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _LedgerItem(label: 'Taxes & Professional Tax', value: payroll.taxAmount),
-                _LedgerItem(label: 'Provident Fund (PF) & ESI', value: payroll.totalDeductions - payroll.taxAmount),
-                _LedgerItem(label: 'Total Deductions', value: payroll.totalDeductions, isBold: true),
-                const SizedBox(height: 18),
-                const Divider(thickness: 2),
-                const SizedBox(height: 14),
-                // Net Salary Highlight
-                Container(
-                  padding: const EdgeInsets.all(16),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        maxChildSize: 0.95,
+        minChildSize: 0.5,
+        builder: (_, scrollCtrl) => Container(
+          decoration: const BoxDecoration(
+            color: AppColors.bg,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: ListView(
+            controller: scrollCtrl,
+            padding: EdgeInsets.fromLTRB(
+                16, 10, 16, 24 + MediaQuery.of(ctx).padding.bottom),
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 5,
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.04),
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    border: Border.all(color: AppColors.primary.withOpacity(0.12)),
+                    color: const Color(0xFFC6D3D6),
+                    borderRadius: BorderRadius.circular(5),
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Heading
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          const Text('Salary slip', style: AppText.caption),
                           Text(
-                            'NET SALARY PAID',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.primary,
-                              letterSpacing: 0.8,
-                            ),
-                          ),
-                          SizedBox(height: 2),
-                          Text(
-                            'Transferred to your bank account',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: AppColors.muted,
-                              fontWeight: FontWeight.w500,
+                            '$monthName ${payroll.year}',
+                            style: const TextStyle(
+                              fontSize: 19,
+                              height: 1.3,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.4,
+                              color: AppColors.ink,
                             ),
                           ),
                         ],
                       ),
-                      Text(
-                        '₹${NumberFormat('#,##,###').format(payroll.netSalary)}',
-                        style: TextStyle(
-                          color: AppColors.primary,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
+                    ),
+                    if (payroll.status.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: ProPill.ok(_statusLabel(payroll.status)),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              // Net salary highlight
+              ProDeepSurface(
+                radius: 18,
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Net salary paid',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white70,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _money(payroll.netSalary),
+                        style: const TextStyle(
+                          fontSize: 30,
+                          height: 1.2,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -0.8,
+                          color: Colors.white,
+                          fontFeatures: [FontFeature.tabularFigures()],
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 22),
-                // Download action — fetches the PDF and opens the system viewer.
-                Consumer(
-                  builder: (context, ref, _) => _SheetDownloadButton(
-                    onDownload: () => _downloadAndOpenPayslip(
-                      ref,
-                      context,
-                      payroll,
-                      monthName,
                     ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'Transferred to your bank account',
+                      style: TextStyle(fontSize: 12.5, color: Colors.white70),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              // Employee details
+              GlassCard(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const ProSectionHeader(title: 'Details'),
+                    const SizedBox(height: 4),
+                    ProKeyValue(rows: [
+                      MapEntry('Employee name', payroll.employeeName),
+                      MapEntry('Employee ID', payroll.employeeId.toString()),
+                      MapEntry('Disbursement date', payroll.paymentDate ?? '—'),
+                      MapEntry('Working days', '${payroll.workingDays} Days'),
+                      MapEntry('Present days', '${payroll.presentDays} Days'),
+                      MapEntry('Payable days', '${payroll.payableDays} Days'),
+                    ]),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              // Earnings ledger
+              GlassCard(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ProSectionHeader(
+                      title: 'Earnings',
+                      trailing: Text(
+                        _money(payroll.grossEarnings),
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.success,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    ProKeyValue(rows: [
+                      MapEntry('Basic salary', _money(payroll.basicSalary)),
+                      MapEntry('HRA & house allowances',
+                          _money(payroll.grossEarnings - payroll.basicSalary)),
+                      MapEntry('Gross earnings', _money(payroll.grossEarnings)),
+                    ]),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              // Deductions ledger
+              GlassCard(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ProSectionHeader(
+                      title: 'Deductions',
+                      trailing: Text(
+                        _money(payroll.totalDeductions),
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.danger,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    ProKeyValue(rows: [
+                      MapEntry('Taxes & professional tax',
+                          _money(payroll.taxAmount)),
+                      MapEntry('Provident fund (PF) & ESI',
+                          _money(payroll.totalDeductions - payroll.taxAmount)),
+                      MapEntry('Total deductions',
+                          _money(payroll.totalDeductions)),
+                    ]),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+              // Download action — fetches the PDF and opens the system viewer.
+              Consumer(
+                builder: (context, ref, _) => _SheetDownloadButton(
+                  onDownload: () => _downloadAndOpenPayslip(
+                    ref,
+                    context,
+                    payroll,
+                    monthName,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -443,69 +482,27 @@ class _PayslipCardState extends ConsumerState<_PayslipCard> {
   Widget build(BuildContext context) {
     final payroll = widget.payroll;
     final monthName = widget.monthName;
-    return GlassCard(
-      padding: const EdgeInsets.all(16),
-      shadow: AppShadows.soft,
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.primary.withOpacity(0.2)),
-            ),
-            alignment: Alignment.center,
-            child: Icon(Icons.receipt_long_rounded, color: AppColors.primary, size: 20),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '$monthName ${payroll.year}',
-                  style: const TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
+    return ProListRow(
+      leading: ProIconWell(
+        icon: Icons.receipt_long_rounded,
+        color: AppColors.primary,
+      ),
+      title: '$monthName ${payroll.year}',
+      subtitle: 'Net amount: ${_money(payroll.netSalary)}',
+      onTap: () => _showPayslipReceipt(context, payroll, monthName),
+      trailing: IconButton(
+        icon: _busy
+            ? SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation(AppColors.primary),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  'Net amount: ₹${NumberFormat('#,##,###').format(payroll.netSalary)}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.muted,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            icon: _busy
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation(AppColors.primary),
-                    ),
-                  )
-                : Icon(Icons.download_rounded,
-                    color: AppColors.primary, size: 20),
-            onPressed: _busy ? null : _download,
-            tooltip: 'Download PDF',
-          ),
-          IconButton(
-            icon: Icon(Icons.visibility_outlined, color: AppColors.primary, size: 20),
-            onPressed: () =>
-                _showPayslipReceipt(context, payroll, monthName),
-            tooltip: 'View Slip Details',
-          ),
-        ],
+              )
+            : Icon(Icons.download_rounded, color: AppColors.primary, size: 20),
+        onPressed: _busy ? null : _download,
+        tooltip: 'Download PDF',
       ),
     );
   }
@@ -528,14 +525,8 @@ class _SheetDownloadButtonState extends State<_SheetDownloadButton> {
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
+      height: 48,
       child: FilledButton.icon(
-        style: FilledButton.styleFrom(
-          backgroundColor: AppColors.primary,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.md),
-          ),
-        ),
         onPressed: _busy
             ? null
             : () async {
@@ -553,77 +544,7 @@ class _SheetDownloadButtonState extends State<_SheetDownloadButton> {
                 ),
               )
             : const Icon(Icons.download_rounded, size: 20),
-        label: Text(_busy ? 'Downloading…' : 'Download Payslip PDF'),
-      ),
-    );
-  }
-}
-
-class _DetailRow extends StatelessWidget {
-  const _DetailRow({required this.label, required this.value});
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12.5,
-              color: AppColors.muted,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 12.5,
-              color: AppColors.ink,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LedgerItem extends StatelessWidget {
-  const _LedgerItem({required this.label, required this.value, this.isBold = false});
-  final String label;
-  final double value;
-  final bool isBold;
-
-  @override
-  Widget build(BuildContext context) {
-    final formatted = '₹${NumberFormat('#,##,###').format(value)}';
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              color: isBold ? AppColors.ink : AppColors.inkSoft,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
-            ),
-          ),
-          Text(
-            formatted,
-            style: TextStyle(
-              fontSize: 13,
-              color: isBold ? AppColors.ink : AppColors.inkSoft,
-              fontWeight: isBold ? FontWeight.bold : FontWeight.w700,
-            ),
-          ),
-        ],
+        label: Text(_busy ? 'Downloading…' : 'Download payslip PDF'),
       ),
     );
   }

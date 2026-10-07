@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_export.dart';
@@ -35,13 +36,11 @@ String _pct1(double? v) => v == null ? '—' : '${v.toStringAsFixed(1)}%';
 String _pct2(double? v) => v == null ? '—' : '${v.toStringAsFixed(2)}%';
 String _ratio1(double? v) => v == null ? '—' : v.toStringAsFixed(1);
 
-// The circulated PDF is a single sheet of navy-banded tables (BranchReport.css
-// on web) — reproduced here rather than restyled as generic MIS cards, so a
-// figure can be checked against the file it came from without re-reading the
-// layout first. Fixed regardless of the app's (per-company) brand colour —
-// the navy IS the report card's identity.
-const Color _brcNavy = Color(0xFF2F5597); // section bands + column headers
-const Color _brcNavyDeep = Color(0xFF1F3864); // the title bar
+// The sheet reproduces the circulated PDF's table layout (BranchReport.css on
+// web) — same sections, same columns, same figures — so a value can be checked
+// against the file it came from without re-reading the layout first. It wears
+// the app's Pro styling (deep title bar, neutral table headers) rather than the
+// PDF's navy bands.
 
 class MisBranchReportScreen extends ConsumerStatefulWidget {
   const MisBranchReportScreen({super.key});
@@ -68,44 +67,43 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
     final async = ref.watch(misBranchReportProvider(q));
     final data = async.valueOrNull;
     final canExport = data?.portfolio != null;
+    const busy = SizedBox(
+      width: 18,
+      height: 18,
+      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+    );
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: const Text('Branch Report'),
+        title: const Text('Branch report'),
         actions: [
           IconButton(
             tooltip: 'Download the report card as a PNG, exactly as shown',
             onPressed: !canExport || _shooting ? null : () => _downloadImage(data!),
-            icon: _shooting
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.image_outlined),
+            icon: _shooting ? busy : const Icon(Icons.image_outlined),
           ),
           IconButton(
             tooltip: 'Export CSV',
             onPressed:
                 !canExport || _exportingCsv ? null : () => _downloadCsv(data!),
-            icon: _exportingCsv
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.download_rounded),
+            icon: _exportingCsv ? busy : const Icon(Icons.download_rounded),
           ),
+          const SizedBox(width: 4),
         ],
       ),
       body: async.when(
-        loading: () => const AppLoadingBlock(height: 240),
-        error: (e, _) => Padding(
-          padding: const EdgeInsets.all(16),
-          child: AppErrorPanel(
-            message: e.toString(),
-            onRetry: () => ref.invalidate(misBranchReportProvider(q)),
-          ),
+        loading: () => const ProPage(
+          hero: ProHero(title: 'Branch report', subtitle: 'Report card'),
+          children: [AppLoadingBlock(height: 240)],
+        ),
+        error: (e, _) => ProPage(
+          hero: const ProHero(title: 'Branch report', subtitle: 'Report card'),
+          children: [
+            AppErrorPanel(
+              message: e.toString(),
+              onRetry: () => ref.invalidate(misBranchReportProvider(q)),
+            ),
+          ],
         ),
         data: (data) => _body(data, q),
       ),
@@ -209,13 +207,15 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
 
   Widget _body(BranchReportResponse data, BranchReportQuery q) {
     if (data.branches.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
-        child: AppEmptyState(
-          icon: Icons.apartment_rounded,
-          message:
-              "Your account isn't mapped to a branch yet, so there is no report card to show.",
-        ),
+      return const ProPage(
+        hero: ProHero(title: 'Branch report', subtitle: 'Report card'),
+        children: [
+          AppEmptyState(
+            icon: Icons.apartment_rounded,
+            message:
+                "Your account isn't mapped to a branch yet, so there is no report card to show.",
+          ),
+        ],
       );
     }
     final branch = _branch ?? data.branch;
@@ -228,19 +228,13 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
       ..sort((a, b) => b.compareTo(a));
     final currentFy = data.month != null ? misFyStart(data.month!) : null;
 
-    return RefreshIndicator(
-      color: AppColors.primary,
+    return ProPage(
       onRefresh: () async => ref.invalidate(misBranchReportProvider(q)),
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(
-            16, 12, 16, MediaQuery.of(context).padding.bottom + 24),
-        children: [
-          if (data.tier != 'all') ...[
-            Align(alignment: Alignment.centerLeft, child: _scopeChip(data.tier)),
-            const SizedBox(height: 10),
-          ],
-          Row(
+      hero: _hero(data, currentFy),
+      children: [
+        GlassCard(
+          padding: const EdgeInsets.all(12),
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
@@ -268,7 +262,7 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
                 ),
               ),
               if (fyOptions.length > 1) ...[
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 Expanded(
                   flex: 2,
                   child: MisDropdown<int>(
@@ -295,214 +289,264 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
               ],
             ],
           ),
-          const SizedBox(height: 14),
-          if (pf == null)
-            MisInlineEmpty(
-                "${data.branch ?? 'This branch'} has no month-end POS loaded, so the report card can't be drawn.")
-          else ...[
-            Builder(builder: (context) {
-              // The screen itself stays portrait — only the report card
-              // renders as landscape, rotated in place and anchored to the
-              // left edge (not centred), so its tables get a wide-format
-              // layout without the device actually turning. quarterTurns: 3
-              // (not 1) so the Column's first child — the title bar — lands
-              // on the LEFT edge of the rotated card, not the right.
-              //
-              // Pre-rotation width = the portrait screen's HEIGHT (matching
-              // what an actual landscape screen's width would have offered
-              // the tables) and pre-rotation height = the portrait screen's
-              // OWN width (so after the 90° turn the card's rendered width
-              // lands back exactly at the phone's real width). That's still
-              // just a viewport, not a hard cap on the content — the scroll
-              // view lets the full report scroll vertically inside it so
-              // nothing is ever clipped, however long the branch's data.
-              // (No horizontal scroll needed alongside it: every table's
-              // columns are laid out with flex, so they already always fit
-              // this exact width — nesting one here would give the inner
-              // view an unbounded height and crash the whole card.)
-              final size = MediaQuery.of(context).size;
-              return RepaintBoundary(
-                key: _sheetKey,
-                child: Align(
-                  alignment: Alignment.topLeft,
-                  child: RotatedBox(
-                    quarterTurns: 3,
-                    child: SizedBox(
-                      width: size.height,
-                      height: size.width,
-                      child: SingleChildScrollView(
-                        child: Container(
-                          // The capture target needs an opaque background —
-                          // a RepaintBoundary paints transparent otherwise,
-                          // which comes out as a black PNG.
-                          color: AppColors.bg,
-                          child: ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadii.lg),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(AppRadii.lg),
-                      border: Border.all(color: AppColors.hairline),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _titleBar(data),
-                        _band('Portfolio',
-                            note:
-                                'as on ${pf.label} ${pf.month.length >= 4 ? pf.month.substring(0, 4) : ''}'),
-                        Padding(
-                          padding: const EdgeInsets.all(10),
-                          child: _portfolioTable(pf),
-                        ),
-                        _band('Collection Performance',
-                            note:
-                                'last ${data.performance.length} month${data.performance.length == 1 ? '' : 's'}'),
-                        Padding(
-                          padding: const EdgeInsets.all(10),
-                          child: _performanceTable(data.performance),
-                        ),
-                        if (data.projection.isNotEmpty) ...[
-                          _band('BUSINESS', center: 'Projection'),
-                          Padding(
-                            padding: const EdgeInsets.all(10),
-                            child: _projectionTable(data.projection),
+        ),
+        if (pf == null)
+          MisInlineEmpty(
+              "${data.branch ?? 'This branch'} has no month-end POS loaded, so the report card can't be drawn.")
+        else ...[
+          Builder(builder: (context) {
+            // The screen itself stays portrait — only the report card
+            // renders as landscape, rotated in place and anchored to the
+            // left edge (not centred), so its tables get a wide-format
+            // layout without the device actually turning. quarterTurns: 3
+            // (not 1) so the Column's first child — the title bar — lands
+            // on the LEFT edge of the rotated card, not the right.
+            //
+            // Pre-rotation width = the portrait screen's HEIGHT (matching
+            // what an actual landscape screen's width would have offered
+            // the tables) and pre-rotation height = the portrait screen's
+            // OWN width (so after the 90° turn the card's rendered width
+            // lands back exactly at the phone's real width). That's still
+            // just a viewport, not a hard cap on the content — the scroll
+            // view lets the full report scroll vertically inside it so
+            // nothing is ever clipped, however long the branch's data.
+            // (No horizontal scroll needed alongside it: every table's
+            // columns are laid out with flex, so they already always fit
+            // this exact width — nesting one here would give the inner
+            // view an unbounded height and crash the whole card.)
+            final size = MediaQuery.of(context).size;
+            return RepaintBoundary(
+              key: _sheetKey,
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: RotatedBox(
+                  quarterTurns: 3,
+                  child: SizedBox(
+                    width: size.height,
+                    height: size.width,
+                    child: SingleChildScrollView(
+                      child: Container(
+                        // The capture target needs an opaque background —
+                        // a RepaintBoundary paints transparent otherwise,
+                        // which comes out as a black PNG.
+                        color: AppColors.bg,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(AppRadii.lg),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(AppRadii.lg),
+                              border: Border.all(color: AppColors.hairline),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _titleBar(data),
+                                _band('Portfolio',
+                                    note:
+                                        'as on ${pf.label} ${pf.month.length >= 4 ? pf.month.substring(0, 4) : ''}',
+                                    first: true),
+                                _tablePad(_portfolioTable(pf)),
+                                _band('Collection performance',
+                                    note:
+                                        'last ${data.performance.length} month${data.performance.length == 1 ? '' : 's'}'),
+                                _tablePad(_performanceTable(data.performance)),
+                                if (data.projection.isNotEmpty) ...[
+                                  _band('Business', center: 'Projection'),
+                                  _tablePad(_projectionTable(data.projection)),
+                                ],
+                              ],
+                            ),
                           ),
-                        ],
-                      ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-              ),
-                ),
-              ),
-              );
-            }),
-            const SizedBox(height: 18),
-            _important(data),
+            );
+          }),
+          _important(data),
+        ],
+      ],
+    );
+  }
+
+  /// Deep hero: the branch's identity, the share of POS by bucket and the
+  /// three headline shares — all read from the portfolio block already loaded.
+  Widget _hero(BranchReportResponse data, int? currentFy) {
+    final pf = data.portfolio;
+    String share(BrPortfolioCell c) => pf != null && pf.total.amount > 0
+        ? '${(c.amount / pf.total.amount * 100).toStringAsFixed(1)}%'
+        : '—';
+    return ProHero(
+      title: 'Branch report',
+      subtitle: pf != null
+          ? 'Report card · as on ${pf.label} ${pf.month.length >= 4 ? pf.month.substring(0, 4) : ''}'
+          : 'Report card',
+      children: [
+        ProHeroIdentity(
+          name: data.branch ?? '—',
+          role:
+              "BM: ${data.bmName ?? '—'}  ·  FO's: ${data.foCount > 0 ? data.foCount : '—'}",
+          icon: Icons.apartment_rounded,
+          tags: [
+            if (currentFy != null) ProHeroTag(misFyLabel(currentFy)),
+            if (data.tier != 'all')
+              ProHeroTag('${misTierLabel(data.tier)} view',
+                  tone: ProTagTone.warn, icon: Icons.lock_rounded),
           ],
-        ],
-      ),
-    );
-  }
-
-  Widget _scopeChip(String tier) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.warning.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: AppColors.warning.withValues(alpha: 0.32)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.lock_rounded, size: 11, color: AppColors.warning),
-          const SizedBox(width: 5),
-          Text(
-            '${misTierLabel(tier)} view',
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: AppColors.warning,
-            ),
+        ),
+        if (pf != null) ...[
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text('Share of POS',
+                        style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xBDFFFFFF))),
+                  ),
+                  Text(
+                    '${_count(pf.total.accounts)} accounts',
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      color: Color(0x94FFFFFF),
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ProStackBar(parts: [
+                MapEntry(pf.regular.amount, AppColors.live),
+                MapEntry(pf.od1To90.amount, const Color(0xFFF2B347)),
+                MapEntry(pf.npa.amount, const Color(0xFFE5484D)),
+              ]),
+            ],
           ),
+          ProHeroStats(stats: [
+            ProStat(
+              label: 'Regular',
+              value: share(pf.regular),
+              sub: '${_count(pf.regular.accounts)} acc',
+              dot: AppColors.live,
+            ),
+            ProStat(
+              label: '1-90 days',
+              value: share(pf.od1To90),
+              sub: '${_count(pf.od1To90.accounts)} acc',
+              dot: const Color(0xFFF2B347),
+            ),
+            ProStat(
+              label: 'NPA',
+              value: share(pf.npa),
+              sub: '${_count(pf.npa.accounts)} acc',
+              dot: const Color(0xFFE5484D),
+            ),
+          ]),
         ],
-      ),
+      ],
     );
   }
 
-  /// The sheet's title bar — "BRANCH REPORT CARD · <BRANCH> · BM / FO's",
-  /// navy-deep on white, matching `.brc-title` on web exactly. Phones are
-  /// narrow, so it stacks (mirrors the web's own <720px layout).
+  Widget _tablePad(Widget table) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: table,
+      );
+
+  /// The sheet's title bar — report card, branch, BM / FO's — on the deep
+  /// brand surface, so the exported PNG carries its own header.
   Widget _titleBar(BranchReportResponse data) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      color: _brcNavyDeep,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      color: AppColors.deep,
+      child: Row(
         children: [
-          Row(
-            children: [
-              const Icon(Icons.apartment_rounded, size: 16, color: Colors.white),
-              const SizedBox(width: 8),
-              const Text(
-                'BRANCH REPORT CARD',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.8,
-                  color: Colors.white,
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: const Color(0x1FFFFFFF),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0x2EFFFFFF)),
+            ),
+            child: const Icon(Icons.apartment_rounded,
+                size: 20, color: Colors.white),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Branch report card',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white70,
+                  ),
                 ),
-              ),
-            ],
+                Text(
+                  data.branch ?? '—',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    height: 1.3,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.35,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            (data.branch ?? '—').toUpperCase(),
-            style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.6,
-                color: Colors.white),
-          ),
-          const SizedBox(height: 4),
+          const SizedBox(width: 12),
           Text(
             "BM: ${data.bmName ?? '—'}   ·   FO's: ${data.foCount > 0 ? data.foCount : '—'}",
             style: const TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: Colors.white70),
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+              color: Colors.white70,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
           ),
         ],
       ),
     );
   }
 
-  /// One section band — "Portfolio", "Collection Performance", "BUSINESS" —
-  /// navy full width with white bold text, matching `.brc-band` on web. Either
-  /// a right-aligned [note] (Portfolio/Collection Performance) or a
-  /// [center]-aligned caption (BUSINESS · Projection).
-  Widget _band(String title, {String? note, String? center}) {
+  /// One section heading — "Portfolio", "Collection performance",
+  /// "Business · Projection". Either a right-aligned [note] or a [center]
+  /// caption shown as a pill beside the title.
+  Widget _band(String title, {String? note, String? center, bool first = false}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-      color: _brcNavy,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      decoration: first
+          ? null
+          : const BoxDecoration(
+              border: Border(top: BorderSide(color: AppColors.hairlineSoft)),
+            ),
       child: Row(
         children: [
-          Text(
-            title,
-            style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.4,
-                color: Colors.white),
-          ),
-          if (center != null)
-            Expanded(
-              child: Text(
-                center,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.8,
-                    color: Colors.white),
-              ),
-            ),
-          if (note != null) ...[
-            const Spacer(),
+          Text(title, style: AppText.section),
+          if (center != null) ...[
+            const SizedBox(width: 8),
+            ProPill.info(center),
+          ],
+          const Spacer(),
+          if (note != null)
             Text(
               note,
-              style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white70),
+              style: AppText.caption.copyWith(
+                  fontFeatures: const [FontFeature.tabularFigures()]),
             ),
-          ],
         ],
       ),
     );
@@ -511,14 +555,14 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
   Widget _portfolioTable(BranchPortfolio pf) {
     MisCell acc(BrPortfolioCell c) => c.accounts == null
         ? const MisCell.dash()
-        : MisCell(_count(c.accounts), weight: FontWeight.w700);
+        : MisCell(_count(c.accounts), weight: FontWeight.w600);
     MisCell amt(BrPortfolioCell c) => MisCell(_inr(c.amount));
     return MisFlexMatrixTable(
       stubHeader: '',
       groups: const [
         MisGroup('Total POS', 2),
         MisGroup('Regular', 2),
-        MisGroup('1-90 Days', 2),
+        MisGroup('1-90 days', 2),
         MisGroup('NPA', 2),
         MisGroup('Per FO', 2),
       ],
@@ -528,11 +572,9 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
       ],
       stubFlex: 2,
       cellFlex: 2,
-      headerColor: _brcNavy,
-      groupHeaderColor: _brcNavy,
       rows: [
         MisMatrixRow(
-          lead: const MisLead('TOTAL'),
+          lead: const MisLead('Total'),
           kind: MisRowKind.total,
           cells: [
             acc(pf.total),
@@ -573,7 +615,6 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
       headers: [for (final p in perf) header(p)],
       stubFlex: 4,
       cellFlex: 3,
-      headerColor: _brcNavy,
       rows: [
         row('FTOD', (p) => MisCell(_count(p.ftod))),
         row('Regular Collection %',
@@ -604,7 +645,6 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
       headers: [for (final c in cols) c.label],
       stubFlex: 5,
       cellFlex: 3,
-      headerColor: _brcNavy,
       rows: [
         row('a) Opening Active A/c', (c) => accCell(c.openingAcc)),
         row('b) Opening POS', (c) => amtCell(c.openingPos)),
@@ -616,7 +656,7 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
         row('h) Closing POS',
             (c) => c.closingPos == null
                 ? const MisCell.dash()
-                : MisCell(_inr(c.closingPos), weight: FontWeight.w700)),
+                : MisCell(_inr(c.closingPos), weight: FontWeight.w600)),
       ],
     );
   }
@@ -643,33 +683,36 @@ class _MisBranchReportScreenState extends ConsumerState<MisBranchReportScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'IMPORTANT',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.6,
-              color: AppColors.danger,
-            ),
+          const Row(
+            children: [
+              Icon(Icons.error_outline_rounded,
+                  size: 18, color: AppColors.danger),
+              SizedBox(width: 8),
+              Text('Important', style: AppText.section),
+            ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           for (final l in lines)
             Padding(
-              padding: const EdgeInsets.only(bottom: 5),
+              padding: const EdgeInsets.only(bottom: 7),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.only(top: 5),
-                    child: Icon(Icons.circle,
-                        size: 5, color: AppColors.muted),
+                  Container(
+                    width: 5,
+                    height: 5,
+                    margin: const EdgeInsets.only(top: 7),
+                    decoration: const BoxDecoration(
+                      color: AppColors.faint,
+                      shape: BoxShape.circle,
+                    ),
                   ),
-                  const SizedBox(width: 7),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Text(l,
                         style: const TextStyle(
-                            fontSize: 11.5,
-                            height: 1.35,
+                            fontSize: 13,
+                            height: 1.45,
                             color: AppColors.inkSoft)),
                   ),
                 ],

@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -40,7 +41,7 @@ class _TeamTargetApprovalsScreenState
 
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('Target Approvals')),
+      appBar: AppBar(title: const Text('Target approvals')),
       body: empId == null
           ? const Padding(
               padding: EdgeInsets.all(16),
@@ -57,11 +58,19 @@ class _TeamTargetApprovalsScreenState
   Widget _body(int managerEmployeeId) {
     final cyclesAsync = ref.watch(performanceCyclesProvider);
 
+    ProPage simplePage(Widget child) => ProPage(
+          hero: const ProHero(
+            kicker: 'My team',
+            title: 'Target approvals',
+            subtitle: 'Target changes your reports have asked for',
+          ),
+          children: [child],
+        );
+
     return cyclesAsync.when(
-      loading: () => const AppLoadingBlock(),
-      error: (e, _) => Padding(
-        padding: const EdgeInsets.all(16),
-        child: AppErrorPanel(
+      loading: () => simplePage(const AppLoadingBlock()),
+      error: (e, _) => simplePage(
+        AppErrorPanel(
           message: e is ApiException
               ? e.message
               : 'Failed to load performance cycles.',
@@ -70,9 +79,8 @@ class _TeamTargetApprovalsScreenState
       ),
       data: (cycles) {
         if (cycles.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.all(16),
-            child: AppEmptyState(
+          return simplePage(
+            const AppEmptyState(
               icon: Icons.event_busy_rounded,
               message: 'No performance cycles have been set up yet.',
             ),
@@ -82,27 +90,27 @@ class _TeamTargetApprovalsScreenState
         // Default to the active cycle, else the first one the server returned.
         final selectedId = _cycleId ??
             cycles.firstWhere((c) => c.isActive, orElse: () => cycles.first).id;
+        final selected = cycles.firstWhere(
+          (c) => c.id == selectedId,
+          orElse: () => cycles.first,
+        );
 
-        return Column(
-          children: [
-            _CyclePicker(
-              cycles: cycles,
-              selectedId: selectedId,
-              onChanged: (id) => setState(() => _cycleId = id),
-            ),
-            Expanded(
-              child: _PendingList(
-                managerEmployeeId: managerEmployeeId,
-                cycleId: selectedId,
-              ),
-            ),
-          ],
+        return _PendingList(
+          managerEmployeeId: managerEmployeeId,
+          cycleId: selectedId,
+          cycleName: selected.name,
+          picker: _CyclePicker(
+            cycles: cycles,
+            selectedId: selectedId,
+            onChanged: (id) => setState(() => _cycleId = id),
+          ),
         );
       },
     );
   }
 }
 
+/// Raised cycle selector that straddles the hero.
 class _CyclePicker extends StatelessWidget {
   const _CyclePicker({
     required this.cycles,
@@ -115,29 +123,61 @@ class _CyclePicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: DropdownButtonFormField<int>(
-        initialValue: selectedId,
-        isExpanded: true,
-        decoration: const InputDecoration(
-          labelText: 'Performance cycle',
-          border: OutlineInputBorder(),
-          isDense: true,
-        ),
-        items: [
-          for (final c in cycles)
-            DropdownMenuItem(
-              value: c.id,
-              child: Text(
-                c.isActive ? '${c.name} · Active' : c.name,
-                overflow: TextOverflow.ellipsis,
-              ),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 8, 10, 6),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: AppColors.hairline),
+        boxShadow: AppShadows.lifted,
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.event_note_rounded, size: 20, color: AppColors.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Performance cycle',
+                  style: TextStyle(fontSize: 11.5, color: AppColors.muted),
+                ),
+                DropdownButtonHideUnderline(
+                  child: DropdownButton<int>(
+                    value: cycles.any((c) => c.id == selectedId)
+                        ? selectedId
+                        : null,
+                    isExpanded: true,
+                    isDense: true,
+                    borderRadius: BorderRadius.circular(14),
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                        color: AppColors.muted),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.ink,
+                    ),
+                    items: [
+                      for (final c in cycles)
+                        DropdownMenuItem(
+                          value: c.id,
+                          child: Text(
+                            c.isActive ? '${c.name} · Active' : c.name,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) onChanged(v);
+                    },
+                  ),
+                ),
+              ],
             ),
+          ),
         ],
-        onChanged: (v) {
-          if (v != null) onChanged(v);
-        },
       ),
     );
   }
@@ -147,9 +187,13 @@ class _PendingList extends ConsumerWidget {
   const _PendingList({
     required this.managerEmployeeId,
     required this.cycleId,
+    required this.cycleName,
+    required this.picker,
   });
   final int managerEmployeeId;
   final int cycleId;
+  final String cycleName;
+  final Widget picker;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -158,44 +202,49 @@ class _PendingList extends ConsumerWidget {
       cycleId: cycleId,
     );
     final async = ref.watch(teamTargetChangesProvider(query));
+    final n = async.valueOrNull?.length;
 
-    return RefreshIndicator(
+    return ProPage(
       onRefresh: () async => ref.invalidate(teamTargetChangesProvider(query)),
-      child: async.when(
-        loading: () => const AppLoadingBlock(),
-        error: (e, _) => ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            AppErrorPanel(
-              message: e is ApiException
-                  ? e.message
-                  : 'Failed to load pending target changes.',
-              onRetry: () => ref.invalidate(teamTargetChangesProvider(query)),
-            ),
-          ],
-        ),
+      hero: ProHero(
+        kicker: 'My team',
+        title: 'Target approvals',
+        subtitle: n == null
+            ? cycleName
+            : (n == 0
+                ? 'All caught up · $cycleName'
+                : '$n pending change${n == 1 ? '' : 's'} · $cycleName'),
+        overlap: picker,
+      ),
+      children: async.when(
+        loading: () => const [AppLoadingBlock()],
+        error: (e, _) => [
+          AppErrorPanel(
+            message: e is ApiException
+                ? e.message
+                : 'Failed to load pending target changes.',
+            onRetry: () => ref.invalidate(teamTargetChangesProvider(query)),
+          ),
+        ],
         data: (changes) {
           if (changes.isEmpty) {
-            return ListView(
-              padding: const EdgeInsets.all(16),
-              children: const [
-                SizedBox(height: 48),
-                AppEmptyState(
-                  icon: Icons.check_circle_outline_rounded,
-                  message: 'No pending target changes for this cycle.',
-                ),
-              ],
-            );
+            return const [
+              SizedBox(height: 8),
+              AppEmptyState(
+                icon: Icons.check_circle_outline_rounded,
+                message: 'No pending target changes for this cycle.',
+              ),
+            ];
           }
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
-            itemCount: changes.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) => _ChangeCard(
-              change: changes[i],
-              query: query,
+          return [
+            const ProNote(
+              'Changes can only be approved here. If you disagree, leave it '
+              'pending and talk it through — they can amend their own request.',
+              tone: ProNoteTone.info,
             ),
-          );
+            const ProSwipeHint(text: 'Swipe right to approve'),
+            for (final c in changes) _ChangeCard(change: c, query: query),
+          ];
         },
       ),
     );
@@ -265,94 +314,79 @@ class _ChangeCardState extends ConsumerState<_ChangeCard> {
   @override
   Widget build(BuildContext context) {
     final c = widget.change;
+    final name = c.employeeName.isEmpty ? 'Employee' : c.employeeName;
 
-    return Container(
+    final card = GlassCard(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              ProAvatar(name: name, size: 40),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      c.employeeName.isEmpty ? 'Employee' : c.employeeName,
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 15,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.15,
                         color: AppColors.ink,
                       ),
                     ),
                     if (c.employeeCode.isNotEmpty)
-                      Text(
-                        c.employeeCode,
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          color: AppColors.muted,
-                        ),
-                      ),
+                      Text(c.employeeCode, style: AppText.caption),
                   ],
                 ),
               ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceAlt,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  c.measurementType.label,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.inkSoft,
-                  ),
-                ),
-              ),
+              const SizedBox(width: 8),
+              ProPill.neutral(c.measurementType.label),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Text(
             c.kpiName,
             style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
+              fontSize: 14.5,
+              fontWeight: FontWeight.w500,
               color: AppColors.ink,
             ),
           ),
-          Text(
-            '${c.kpaName} → ${c.kraName}',
-            style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
-          ),
+          const SizedBox(height: 1),
+          Text('${c.kpaName} → ${c.kraName}', style: AppText.caption),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _Figure(
-                  label: 'Current',
-                  value: formatTarget(c.targetValue),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _Figure(
+                    label: 'Current',
+                    value: formatTarget(c.targetValue),
+                  ),
                 ),
-              ),
-              const Icon(Icons.arrow_forward_rounded,
-                  size: 16, color: AppColors.muted),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _Figure(
-                  label: 'Requested',
-                  value: formatTarget(c.pendingTargetValue),
-                  highlight: true,
+                const Icon(Icons.arrow_forward_rounded,
+                    size: 16, color: AppColors.muted),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _Figure(
+                    label: 'Requested',
+                    value: formatTarget(c.pendingTargetValue),
+                    highlight: true,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
           const SizedBox(height: 12),
           SizedBox(
@@ -370,6 +404,17 @@ class _ChangeCardState extends ConsumerState<_ChangeCard> {
             ),
           ),
         ],
+      ),
+    );
+
+    // Swipe right to approve — runs the same confirm + approve flow.
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: ProSwipeDecision(
+        onApprove: () async {
+          if (!_busy) await _approve();
+        },
+        child: card,
       ),
     );
   }
@@ -391,21 +436,23 @@ class _Figure extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          label.toUpperCase(),
-          style: const TextStyle(
-            fontSize: 9.5,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.5,
-            color: AppColors.muted,
-          ),
+          label,
+          style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
         ),
         const SizedBox(height: 2),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.w800,
-            color: highlight ? AppColors.primary : AppColors.ink,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 20,
+              height: 1.2,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.4,
+              color: highlight ? AppColors.primary : AppColors.ink,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
         ),
       ],

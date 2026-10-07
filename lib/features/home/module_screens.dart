@@ -4,14 +4,192 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/branding.dart';
 import '../../core/navigation/mobile_menu_config.dart';
+import '../../core/pro_ui.dart';
+import '../../core/theme.dart';
 import '../attendance/sign_out_guard.dart';
 import '../auth/auth_controller.dart';
 
-/// Generic, config-driven module screen: a responsive grid of menu cards for a
-/// [MobileModule]. Cards are sourced from `mobile_menu_config.dart` and filtered
-/// by the signed-in user's permissions / manager status. Tapping a card PUSHES
+// ── Menu presentation helpers ────────────────────────────────────────────────
+//
+// Pure presentation: a one-line description and a section for each menu key.
+// The items themselves (which ones show, their order, routes, flags and
+// permissions) still come only from `menuFor(...)`.
+
+const Map<String, String> _kMenuSubtitles = {
+  'hrms.profile': 'Personal details & documents',
+  'hrms.attendance': 'Daily punches & cycle calendar',
+  'hrms.leaves': 'Balances, requests & approvals',
+  'hrms.tasks': 'Assigned work & due dates',
+  'hrms.nearbyCustomers': 'Customers around you',
+  'hrms.ptpFollowups': 'Promise-to-pay follow-ups',
+  'hrms.interviews': 'Interviews you are part of',
+  'hrms.requisitions': 'Open positions & hiring',
+  'hrms.helpdesk': 'Raise & track tickets',
+  'hrms.travelClaims': 'Claim travel expenses',
+  'hrms.travelPlans': 'Plan upcoming trips',
+  'hrms.purchaseOrders': 'Raise & track purchase orders',
+  'hrms.rentManagement': 'Branch rent & utilities',
+  'hrms.mailRecord': 'Inward & outward mail',
+  'hrms.letterhead': 'Company letter templates',
+  'hrms.itAssets': 'IT asset register',
+  'hrms.announcements': 'Company news & notices',
+  'hrms.policies': 'HR policies & handbooks',
+  'hrms.meetings': 'Upcoming meetings',
+  'hrms.trainings': 'Courses & tests',
+  'hrms.assets': 'Devices issued to you',
+  'hrms.resignation': 'Submit or track your resignation',
+  'hrms.performance': 'Scores & reviews',
+  'hrms.goals': 'Targets for this cycle',
+  'hrms.targetApprovals': 'Review your team\'s targets',
+  'hrms.audit': 'Branch audits & findings',
+  'hrms.taskReviews': 'Review completed tasks',
+  'hrms.npOnboarding': 'Candidate onboarding',
+  'pay.payslips': 'Monthly salary slips',
+  'pay.salary': 'Earnings & deductions',
+  'pay.taxdocs': 'Tax documents for the year',
+  'pay.taxdecl': 'Investment declarations',
+  'pay.pfesi': 'Provident fund & ESI',
+  'more.notifications': 'Alerts & reminders',
+  'more.password': 'Update your sign-in password',
+  'more.support': 'Get help from the team',
+  'more.helpdeskKb': 'Answers to common questions',
+};
+
+class _MenuSection {
+  const _MenuSection(this.label, this.color);
+  final String label;
+  final Color color;
+}
+
+const _kSectionMe = 0;
+const _kSectionField = 1;
+const _kSectionRequests = 2;
+const _kSectionReviews = 3;
+const _kSectionHiring = 4;
+const _kSectionOffice = 5;
+const _kSectionCompany = 6;
+const _kSectionPay = 7;
+const _kSectionSettings = 8;
+const _kSectionOther = 9;
+
+_MenuSection _sectionInfo(int s) {
+  switch (s) {
+    case _kSectionMe:
+      return _MenuSection('Me', AppColors.primary);
+    case _kSectionField:
+      return const _MenuSection('Field work', AppColors.success);
+    case _kSectionRequests:
+      return const _MenuSection('Requests & travel', AppColors.info);
+    case _kSectionReviews:
+      return const _MenuSection('Reviews & approvals', AppColors.warning);
+    case _kSectionHiring:
+      return const _MenuSection('Hiring', AppColors.pink);
+    case _kSectionOffice:
+      return const _MenuSection('Office tools', AppColors.inkSoft);
+    case _kSectionCompany:
+      return _MenuSection('Company', AppColors.primary);
+    case _kSectionPay:
+      return const _MenuSection('Pay', AppColors.success);
+    case _kSectionSettings:
+      return _MenuSection('Settings & support', AppColors.primary);
+    default:
+      return _MenuSection('More', AppColors.primary);
+  }
+}
+
+const Map<String, int> _kMenuSectionOf = {
+  'hrms.profile': _kSectionMe,
+  'hrms.attendance': _kSectionMe,
+  'hrms.leaves': _kSectionMe,
+  'hrms.tasks': _kSectionMe,
+  'hrms.performance': _kSectionMe,
+  'hrms.goals': _kSectionMe,
+  'hrms.meetings': _kSectionMe,
+  'hrms.trainings': _kSectionMe,
+  'hrms.assets': _kSectionMe,
+  'hrms.resignation': _kSectionMe,
+  'hrms.nearbyCustomers': _kSectionField,
+  'hrms.ptpFollowups': _kSectionField,
+  'hrms.ftodCollections': _kSectionField,
+  'hrms.travelClaims': _kSectionRequests,
+  'hrms.travelPlans': _kSectionRequests,
+  'hrms.helpdesk': _kSectionRequests,
+  'hrms.targetApprovals': _kSectionReviews,
+  'hrms.taskReviews': _kSectionReviews,
+  'hrms.audit': _kSectionReviews,
+  'hrms.interviews': _kSectionHiring,
+  'hrms.requisitions': _kSectionHiring,
+  'hrms.npOnboarding': _kSectionHiring,
+  'hrms.purchaseOrders': _kSectionOffice,
+  'hrms.rentManagement': _kSectionOffice,
+  'hrms.mailRecord': _kSectionOffice,
+  'hrms.letterhead': _kSectionOffice,
+  'hrms.itAssets': _kSectionOffice,
+  'hrms.announcements': _kSectionCompany,
+  'hrms.policies': _kSectionCompany,
+};
+
+int _sectionOf(MobileMenuItem item) {
+  final s = _kMenuSectionOf[item.key];
+  if (s != null) return s;
+  if (item.key.startsWith('pay.')) return _kSectionPay;
+  if (item.key.startsWith('more.')) return _kSectionSettings;
+  return _kSectionOther;
+}
+
+/// Groups [items] into sections (stable: items keep their configured order
+/// inside a section).
+List<MapEntry<_MenuSection, List<MobileMenuItem>>> _groupItems(
+    List<MobileMenuItem> items) {
+  final buckets = <int, List<MobileMenuItem>>{};
+  for (final it in items) {
+    buckets.putIfAbsent(_sectionOf(it), () => []).add(it);
+  }
+  final keys = buckets.keys.toList()..sort();
+  return [for (final k in keys) MapEntry(_sectionInfo(k), buckets[k]!)];
+}
+
+/// One menu row: tinted icon well, label, one-line description, chevron.
+class _MenuRow extends StatelessWidget {
+  const _MenuRow({required this.item, required this.color});
+  final MobileMenuItem item;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return ProListRow(
+      leading: ProIconWell(icon: item.icon, color: color),
+      title: item.label,
+      subtitle: _kMenuSubtitles[item.key],
+      onTap: () => context.push(item.route),
+    );
+  }
+}
+
+/// Section label + grouped list.
+class _MenuGroup extends StatelessWidget {
+  const _MenuGroup({required this.label, required this.children});
+  final String label;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ProSectionHeader(title: label, small: true),
+        const SizedBox(height: 8),
+        ProListGroup(children: children),
+      ],
+    );
+  }
+}
+
+/// Generic, config-driven module screen: grouped menu rows for a
+/// [MobileModule]. Items are sourced from `mobile_menu_config.dart` and filtered
+/// by the signed-in user's permissions / manager status. Tapping a row PUSHES
 /// the route, so the Android back button returns here (not out of the app).
-class ModuleGridScreen extends ConsumerWidget {
+class ModuleGridScreen extends ConsumerStatefulWidget {
   const ModuleGridScreen({
     super.key,
     required this.module,
@@ -24,124 +202,91 @@ class ModuleGridScreen extends ConsumerWidget {
   final String? subtitle;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ModuleGridScreen> createState() => _ModuleGridScreenState();
+}
+
+class _ModuleGridScreenState extends ConsumerState<ModuleGridScreen> {
+  final _q = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _q.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final user = ref.watch(authUserProvider);
     // Rebuild when the branding refresh lands — menu entries follow its feature flags.
     ref.watch(brandingProvider);
-    final items = menuFor(module, user);
-    final theme = Theme.of(context);
+    final items = menuFor(widget.module, user);
+    final showSearch = items.length > 6;
 
-    return SafeArea(
-      child: items.isEmpty
-          ? _EmptyState(title: title)
-          : CustomScrollView(
-              slivers: [
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title, style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-                        if (subtitle != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 2),
-                            child: Text(subtitle!, style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor)),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-                  sliver: SliverGrid(
-                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 180,
-                      mainAxisSpacing: 10,
-                      crossAxisSpacing: 10,
-                      childAspectRatio: 1.05,
-                    ),
-                    delegate: SliverChildBuilderDelegate(
-                      (context, i) => _MenuCard(item: items[i]),
-                      childCount: items.length,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-    );
-  }
-}
+    final q = _query.trim().toLowerCase();
+    final results = q.isEmpty
+        ? items
+        : items
+            .where((m) =>
+                m.label.toLowerCase().contains(q) ||
+                (_kMenuSubtitles[m.key]?.toLowerCase().contains(q) ?? false))
+            .toList();
 
-class _MenuCard extends StatelessWidget {
-  const _MenuCard({required this.item});
-  final MobileMenuItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final accent = theme.colorScheme.primary;
-    return Material(
-      color: theme.cardColor,
-      borderRadius: BorderRadius.circular(16),
-      elevation: 0,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => context.push(item.route),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: theme.dividerColor.withValues(alpha: 0.5)),
-          ),
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    final List<Widget> body;
+    if (items.isEmpty) {
+      body = [
+        ProEmpty(
+          icon: Icons.inbox_rounded,
+          title: 'Nothing in ${widget.title}',
+          message: 'No items are available for your account.',
+        ),
+      ];
+    } else if (q.isNotEmpty) {
+      body = [
+        if (results.isEmpty)
+          ProEmpty(
+            icon: Icons.search_off_rounded,
+            title: 'No match for “${_query.trim()}”',
+            message: 'Try a shorter word.',
+          )
+        else
+          _MenuGroup(
+            label: 'Results · ${results.length}',
             children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(item.icon, color: accent, size: 22),
-              ),
-              Text(
-                item.label,
-                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+              for (final it in results)
+                _MenuRow(item: it, color: _sectionInfo(_sectionOf(it)).color),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
+      ];
+    } else {
+      body = [
+        for (final g in _groupItems(items))
+          _MenuGroup(
+            label: g.key.label,
+            children: [
+              for (final it in g.value) _MenuRow(item: it, color: g.key.color),
+            ],
+          ),
+      ];
+    }
 
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.title});
-  final String title;
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.inbox_rounded, size: 48, color: theme.hintColor),
-            const SizedBox(height: 12),
-            Text('Nothing in $title', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 4),
-            Text('No items are available for your account.',
-                textAlign: TextAlign.center, style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor)),
-          ],
-        ),
+    return ProPage(
+      topInset: MediaQuery.of(context).padding.top,
+      clearNav: true,
+      gap: 22,
+      hero: ProHero(
+        title: widget.title,
+        subtitle: widget.subtitle,
+        overlap: showSearch
+            ? ProSearchField(
+                raised: true,
+                controller: _q,
+                hint: 'Search ${widget.title}',
+                onChanged: (v) => setState(() => _query = v),
+              )
+            : null,
       ),
+      children: body,
     );
   }
 }
@@ -170,45 +315,40 @@ class MoreScreen extends ConsumerWidget {
     final user = ref.watch(authUserProvider);
     ref.watch(brandingProvider);
     final items = menuFor(MobileModule.more, user);
-    final theme = Theme.of(context);
-    return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(12, 16, 12, 24),
+    final fullName = [user?.firstName, user?.lastName]
+        .where((s) => s != null && s.trim().isNotEmpty)
+        .map((s) => s!.trim())
+        .join(' ');
+    final displayName = fullName.isNotEmpty ? fullName : (user?.username ?? '');
+    final email = user?.email ?? '';
+
+    return ProPage(
+      topInset: MediaQuery.of(context).padding.top,
+      clearNav: true,
+      gap: 22,
+      hero: ProHero(
+        title: 'More',
+        subtitle: 'Settings, support & your account',
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
-            child: Text('More', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-          ),
-          for (final item in items)
-            Card(
-              elevation: 0,
-              margin: const EdgeInsets.only(bottom: 8),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: theme.dividerColor.withValues(alpha: 0.5)),
-              ),
-              child: ListTile(
-                leading: Icon(item.icon, color: theme.colorScheme.primary),
-                title: Text(item.label),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => context.push(item.route),
-              ),
+          if (displayName.isNotEmpty)
+            ProHeroIdentity(
+              name: displayName,
+              role: email.isEmpty ? null : email,
+              initials: ProAvatar.initialsOf(displayName),
             ),
-          Card(
-            elevation: 0,
-            margin: const EdgeInsets.only(top: 4),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: theme.colorScheme.error.withValues(alpha: 0.4)),
-            ),
-            child: ListTile(
-              leading: Icon(Icons.power_settings_new_rounded, color: theme.colorScheme.error),
-              title: Text('Logout', style: TextStyle(color: theme.colorScheme.error)),
-              onTap: () => _confirmLogout(context, ref),
-            ),
-          ),
         ],
       ),
+      children: [
+        if (items.isNotEmpty)
+          _MenuGroup(
+            label: 'Settings & support',
+            children: [
+              for (final item in items)
+                _MenuRow(item: item, color: AppColors.primary),
+            ],
+          ),
+        _LogoutButton(onTap: () => _confirmLogout(context, ref)),
+      ],
     );
   }
 
@@ -230,5 +370,45 @@ class MoreScreen extends ConsumerWidget {
     if (ok == true) {
       await ref.read(authControllerProvider.notifier).logout();
     }
+  }
+}
+
+/// Full-width destructive "Logout" row in a hairline card.
+class _LogoutButton extends StatelessWidget {
+  const _LogoutButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AppColors.hairline),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(vertical: 15),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.power_settings_new_rounded,
+                  size: 19, color: AppColors.danger),
+              SizedBox(width: 8),
+              Text(
+                'Logout',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.danger,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

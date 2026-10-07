@@ -134,11 +134,11 @@ class FunnelStage {
 const _funnelDefs = <(String, String)>[
   ('PLANNED', 'Planned'),
   ('ASSIGNED', 'Assigned'),
-  ('IN_PROGRESS', 'In Progress'),
+  ('IN_PROGRESS', 'In progress'),
   ('SUBMITTED', 'Submitted'),
-  ('SUPERVISOR_APPROVAL_PENDING', 'Supervisor Approval'),
-  ('BM_ACTION_PENDING', 'BM Action Pending'),
-  ('BM_ACTION_SUBMITTED', 'BM Action Submitted'),
+  ('SUPERVISOR_APPROVAL_PENDING', 'Supervisor approval'),
+  ('BM_ACTION_PENDING', 'BM action pending'),
+  ('BM_ACTION_SUBMITTED', 'BM action submitted'),
   ('VERIFICATION_PENDING', 'Verification'),
   ('CLOSED', 'Completed'),
 ];
@@ -172,8 +172,8 @@ class ScoreDistribution {
 }
 
 const _bandDefs = <(String, String, double, double)>[
-  ('critical', 'Critical / Low Score', 0, 49.999),
-  ('needs_improvement', 'Needs Improvement', 50, 69.999),
+  ('critical', 'Critical / low score', 0, 49.999),
+  ('needs_improvement', 'Needs improvement', 50, 69.999),
   ('good', 'Good', 70, 84.999),
   ('excellent', 'Excellent', 85, 100),
 ];
@@ -260,27 +260,27 @@ List<AttentionGroup> computeAttentionGroups(
       );
 
   final groups = [
-    AttentionGroup('overdue_audits', 'Overdue Audits', overduePlans.length, [
+    AttentionGroup('overdue_audits', 'Overdue audits', overduePlans.length, [
       for (final p in overduePlans.take(limit))
         planItem(p, 'Planned end ${p.plannedEndDate}', true),
     ]),
-    AttentionGroup('critical_findings', 'Critical Findings', critical.length, [
+    AttentionGroup('critical_findings', 'Critical findings', critical.length, [
       for (final f in critical.take(limit))
         findingItem(f, f.category ?? f.sectionCode ?? 'High severity'),
     ]),
-    AttentionGroup('overdue_findings', 'Overdue Findings', overdueF.length, [
+    AttentionGroup('overdue_findings', 'Overdue findings', overdueF.length, [
       for (final f in overdueF.take(limit))
         findingItem(f, f.dueDate != null ? 'Due ${f.dueDate}' : 'Past due'),
     ]),
-    AttentionGroup('bm_action_pending', 'Pending BM Action', bm.length, [
+    AttentionGroup('bm_action_pending', 'Pending BM action', bm.length, [
       for (final p in bm.take(limit))
         planItem(p, 'Awaiting branch manager compliance', false),
     ]),
-    AttentionGroup('verification_pending', 'Pending Verification', ver.length, [
+    AttentionGroup('verification_pending', 'Pending verification', ver.length, [
       for (final p in ver.take(limit))
         planItem(p, 'Awaiting auditor verification', false),
     ]),
-    AttentionGroup('reopened', 'Reopened Audits', reop.length, [
+    AttentionGroup('reopened', 'Reopened audits', reop.length, [
       for (final p in reop.take(limit))
         planItem(p, 'Reopened after verification', false),
     ]),

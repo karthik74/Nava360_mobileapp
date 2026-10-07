@@ -14,11 +14,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import 'mis_format.dart';
 import 'mis_models.dart';
 import 'mis_repository.dart';
-import 'mis_widgets.dart';
 
 class MisLocationsScreen extends ConsumerStatefulWidget {
   const MisLocationsScreen({super.key});
@@ -59,7 +60,8 @@ class _MisLocationsScreenState extends ConsumerState<MisLocationsScreen> {
         _mapController.fitCamera(
           CameraFit.bounds(
             bounds: LatLngBounds.fromPoints(points),
-            padding: const EdgeInsets.all(48),
+            // Leave room for the floating search (top) and KPI card (bottom).
+            padding: const EdgeInsets.fromLTRB(48, 96, 48, 120),
           ),
         );
       }
@@ -67,49 +69,78 @@ class _MisLocationsScreenState extends ConsumerState<MisLocationsScreen> {
   }
 
   void _showBranch(BranchLocationRow b) {
+    final sub =
+        [b.area, b.region].where((s) => s != null && s.isNotEmpty).join(' · ');
+    String orDash(String? v) => v == null || v.isEmpty ? '—' : v;
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => Padding(
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
         padding: EdgeInsets.fromLTRB(
-            20, 18, 20, 20 + MediaQuery.of(context).padding.bottom),
+            20, 10, 20, 20 + MediaQuery.of(context).padding.bottom),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFC6D3D6),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
             Row(
               children: [
-                Icon(Icons.location_on_rounded,
-                    color: AppColors.primary, size: 22),
-                const SizedBox(width: 8),
+                ProIconWell(
+                    icon: Icons.location_on_rounded,
+                    color: AppColors.primary,
+                    size: 42),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: Text(b.branch,
-                      style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.ink)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(b.branch,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: -0.4,
+                              color: AppColors.ink)),
+                      if (sub.isNotEmpty)
+                        Text(sub,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.caption),
+                    ],
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              [b.area, b.region].where((s) => s != null && s.isNotEmpty).join(' · '),
-              style: const TextStyle(fontSize: 13, color: AppColors.muted),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: () {
-                  Navigator.pop(context);
-                  _openInMaps(b);
-                },
-                icon: const Icon(Icons.map_rounded, size: 18),
-                label: const Text('Open in Google Maps'),
-              ),
+            const SizedBox(height: 12),
+            ProKeyValue(rows: [
+              MapEntry('Area', orDash(b.area)),
+              MapEntry('Region', orDash(b.region)),
+              MapEntry('Coordinates',
+                  '${b.lat.toStringAsFixed(4)}, ${b.lng.toStringAsFixed(4)}'),
+            ]),
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _openInMaps(b);
+              },
+              icon: const Icon(Icons.map_rounded, size: 18),
+              label: const Text('Open in Google Maps'),
             ),
           ],
         ),
@@ -120,11 +151,15 @@ class _MisLocationsScreenState extends ConsumerState<MisLocationsScreen> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(misBranchLocationsProvider);
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('Branch Locator')),
+      appBar: AppBar(title: const Text('Branch locator')),
       body: async.when(
-        loading: () => const AppLoadingBlock(height: 300),
+        loading: () => const Padding(
+          padding: EdgeInsets.all(16),
+          child: AppLoadingBlock(height: 300),
+        ),
         error: (e, _) => Padding(
           padding: const EdgeInsets.all(16),
           child: AppErrorPanel(
@@ -144,85 +179,129 @@ class _MisLocationsScreenState extends ConsumerState<MisLocationsScreen> {
                   .toList();
           _fit(rows);
 
-          return Column(
+          int distinct(String? Function(BranchLocationRow) f) => rows
+              .map(f)
+              .where((s) => s != null && s.isNotEmpty)
+              .toSet()
+              .length;
+
+          return Stack(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: TextField(
-                  controller: _searchController,
-                  onChanged: (v) => setState(() => _query = v),
-                  decoration: InputDecoration(
-                    hintText: 'Search branch / area / region…',
-                    prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                    suffixIcon: _query.isEmpty
-                        ? null
-                        : IconButton(
-                            icon: const Icon(Icons.close_rounded, size: 18),
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() => _query = '');
-                            },
-                          ),
-                  ),
-                ),
-              ),
-              Expanded(
+              Positioned.fill(
                 child: rows.isEmpty
                     ? const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: MisInlineEmpty('No mapped branches in your scope.'),
-                      )
-                    : ClipRRect(
-                        borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(16)),
-                        child: FlutterMap(
-                          mapController: _mapController,
-                          options: MapOptions(
-                            initialCenter: LatLng(rows.first.lat, rows.first.lng),
-                            initialZoom: 6,
-                            interactionOptions: const InteractionOptions(
-                              flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-                            ),
+                        padding: EdgeInsets.fromLTRB(16, 84, 16, 16),
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: ProEmpty(
+                            icon: Icons.location_off_outlined,
+                            title: 'Nothing on the map',
+                            message: 'No mapped branches in your scope.',
                           ),
-                          children: [
-                            TileLayer(
-                              urlTemplate:
-                                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                              userAgentPackageName: 'com.nava360.app',
-                            ),
-                            MarkerLayer(
-                              markers: [
-                                for (final b in rows)
-                                  Marker(
-                                    point: LatLng(b.lat, b.lng),
-                                    width: 40,
-                                    height: 40,
-                                    alignment: Alignment.topCenter,
-                                    child: GestureDetector(
-                                      onTap: () => _showBranch(b),
-                                      child: Icon(
-                                        Icons.location_on,
-                                        color: AppColors.primary,
-                                        size: 34,
-                                        shadows: [
-                                          Shadow(
-                                              color: Colors.black26,
-                                              blurRadius: 4,
-                                              offset: Offset(0, 2)),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ],
                         ),
+                      )
+                    : FlutterMap(
+                        mapController: _mapController,
+                        options: MapOptions(
+                          initialCenter: LatLng(rows.first.lat, rows.first.lng),
+                          initialZoom: 6,
+                          interactionOptions: const InteractionOptions(
+                            flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                          ),
+                        ),
+                        children: [
+                          TileLayer(
+                            urlTemplate:
+                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            userAgentPackageName: 'com.nava360.app',
+                          ),
+                          MarkerLayer(
+                            markers: [
+                              for (final b in rows)
+                                Marker(
+                                  point: LatLng(b.lat, b.lng),
+                                  width: 40,
+                                  height: 40,
+                                  alignment: Alignment.topCenter,
+                                  child: GestureDetector(
+                                    onTap: () => _showBranch(b),
+                                    child: const _BranchPin(),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
                       ),
               ),
+              // Floating search over the map.
+              Positioned(
+                left: 16,
+                right: 16,
+                top: 12,
+                child: ProSearchField(
+                  raised: true,
+                  controller: _searchController,
+                  onChanged: (v) => setState(() => _query = v),
+                  hint: 'Search branch / area / region…',
+                  onClear: () => setState(() => _query = ''),
+                ),
+              ),
+              // Scope figures for the branches currently on the map.
+              if (rows.isNotEmpty)
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 16 + bottomInset,
+                  child: ProKpiStrip(cells: [
+                    ProKpi(
+                      value: misNum(rows.length),
+                      label: q.isEmpty
+                          ? 'Branches'
+                          : 'of ${misNum(withCoords.length)} branches',
+                    ),
+                    ProKpi(value: misNum(distinct((b) => b.area)), label: 'Areas'),
+                    ProKpi(
+                        value: misNum(distinct((b) => b.region)),
+                        label: 'Regions'),
+                  ]),
+                ),
             ],
           );
         },
       ),
+    );
+  }
+}
+
+/// Brand map pin with a white ring.
+class _BranchPin extends StatelessWidget {
+  const _BranchPin();
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.topCenter,
+      children: [
+        Icon(
+          Icons.location_on,
+          color: AppColors.primary,
+          size: 36,
+          shadows: const [
+            Shadow(color: Color(0x400B1D21), blurRadius: 6, offset: Offset(0, 3)),
+          ],
+        ),
+        Positioned(
+          top: 8,
+          child: Container(
+            width: 12,
+            height: 12,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/env.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'letterhead_align_screen.dart';
@@ -84,7 +85,10 @@ class _LetterheadScreenState extends ConsumerState<LetterheadScreen> {
           TextButton(
               onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.dangerTint,
+              foregroundColor: AppColors.danger,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete'),
           ),
@@ -113,62 +117,102 @@ class _LetterheadScreenState extends ConsumerState<LetterheadScreen> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(letterheadProvider);
-    final mq = MediaQuery.of(context);
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Letter Head'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
+    return Scaffold(
+      appBar: AppBar(title: const Text('Letter head')),
+      body: ProPage(
+        onRefresh: () async => ref.invalidate(letterheadProvider),
+        hero: const ProHero(
+          title: 'Letter head',
+          subtitle: 'Admin tools · A4 print guide',
+          children: [
+            _HeroIntro(
+              title: 'Your letterhead guide',
+              body: 'Upload a letterhead template (PDF or image). Use it to line up '
+                  'your documents when printing — Nava360 stores only this guide '
+                  'file; alignment and export happen on your own printer/desktop.',
+            ),
+          ],
         ),
-        body: RefreshIndicator(
-          color: AppColors.primary,
-          onRefresh: () async => ref.invalidate(letterheadProvider),
-          child: ListView(
-            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-            padding: EdgeInsets.fromLTRB(16, 12, 16, mq.padding.bottom + 24),
+        children: [
+          async.when(
+            data: (lh) => lh == null
+                ? const ProEmpty(
+                    icon: Icons.description_outlined,
+                    title: 'No letterhead uploaded yet.',
+                    message: 'Upload a PDF, JPG or PNG with the button below.',
+                  )
+                : _LetterheadCard(letterhead: lh, onDelete: _busy ? null : _delete),
+            loading: () => const AppLoadingBlock(height: 160),
+            error: (e, _) => AppErrorPanel(
+              message: e.toString(),
+              onRetry: () => ref.invalidate(letterheadProvider),
+            ),
+          ),
+          if (_busy)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: LinearProgressIndicator(
+                minHeight: 3,
+                color: AppColors.primary,
+                backgroundColor: AppColors.hairlineSoft,
+              ),
+            ),
+          ProListGroup(
             children: [
-              const AppSectionHeader(
-                title: 'Your letterhead guide',
-                subtitle:
-                    'Upload a letterhead template (PDF or image). Use it to line up '
-                    'your documents when printing — Nava360 stores only this guide '
-                    'file; alignment and export happen on your own printer/desktop.',
-              ),
-              const SizedBox(height: 12),
-              async.when(
-                data: (lh) => lh == null
-                    ? const AppEmptyState(
-                        icon: Icons.description_outlined,
-                        message: 'No letterhead uploaded yet.',
-                      )
-                    : _LetterheadCard(letterhead: lh, onDelete: _busy ? null : _delete),
-                loading: () => const AppLoadingBlock(height: 160),
-                error: (e, _) => AppErrorPanel(
-                  message: e.toString(),
-                  onRetry: () => ref.invalidate(letterheadProvider),
+              ProListRow(
+                leading: ProIconWell(
+                  icon: Icons.picture_as_pdf_rounded,
+                  color: AppColors.primary,
                 ),
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.of(context).push(
+                title: 'Align & export PDF',
+                subtitle: 'Position a letter PDF on A4 for pre-printed paper',
+                onTap: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(builder: (_) => const LetterheadAlignScreen())),
-                icon: const Icon(Icons.picture_as_pdf_rounded),
-                label: const Text('Align & export PDF'),
-              ),
-              const SizedBox(height: 10),
-              FilledButton.icon(
-                onPressed: _busy ? null : _upload,
-                icon: const Icon(Icons.upload_file_rounded),
-                label: Text(async.value == null ? 'Upload letterhead' : 'Replace letterhead'),
               ),
             ],
           ),
-        ),
+        ],
       ),
+      bottomNavigationBar: ProBottomBar(
+        children: [
+          FilledButton.icon(
+            onPressed: _busy ? null : _upload,
+            icon: const Icon(Icons.upload_file_rounded),
+            label: Text(async.value == null ? 'Upload letterhead' : 'Replace letterhead'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Heading + explanation on the deep hero.
+class _HeroIntro extends StatelessWidget {
+  const _HeroIntro({required this.title, required this.body});
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.24,
+            color: Colors.white,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          body,
+          style: const TextStyle(fontSize: 13, height: 1.5, color: Colors.white70),
+        ),
+      ],
     );
   }
 }
@@ -183,28 +227,17 @@ class _LetterheadCard extends StatelessWidget {
     final df = DateFormat('d MMM yyyy, HH:mm');
     return GlassCard(
       padding: const EdgeInsets.all(16),
-      shadow: AppShadows.soft,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(9),
-                  border: Border.all(color: AppColors.primary.withOpacity(0.22)),
-                ),
-                alignment: Alignment.center,
-                child: Icon(
-                  letterhead.isPdf ? Icons.picture_as_pdf_rounded : Icons.image_rounded,
-                  color: AppColors.primary,
-                  size: 17,
-                ),
+              ProIconWell(
+                icon: letterhead.isPdf ? Icons.picture_as_pdf_rounded : Icons.image_rounded,
+                color: AppColors.primary,
+                size: 40,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -214,43 +247,76 @@ class _LetterheadCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.ink),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.15,
+                        color: AppColors.ink,
+                      ),
                     ),
                     if (letterhead.uploadedAt != null)
                       Text(
                         'Uploaded ${df.format(letterhead.uploadedAt!)}',
-                        style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                        style: AppText.caption.copyWith(
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
                       ),
                   ],
                 ),
               ),
               if (onDelete != null)
-                IconButton(
-                  onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline_rounded,
-                      size: 19, color: AppColors.danger),
-                  tooltip: 'Delete',
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                Material(
+                  color: AppColors.dangerTint,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: onDelete,
+                    child: const Tooltip(
+                      message: 'Delete',
+                      child: SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: Icon(Icons.delete_outline_rounded,
+                            size: 19, color: AppColors.danger),
+                      ),
+                    ),
+                  ),
                 ),
             ],
           ),
           if (letterhead.isImage) ...[
-            const SizedBox(height: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(AppRadii.lg),
-              child: AspectRatio(
-                aspectRatio: 1 / 1.414, // A4 portrait
-                child: Image.network(
-                  _absoluteUrl(letterhead.url),
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const ColoredBox(
-                    color: AppColors.surface,
-                    child: Center(
-                      child: Icon(Icons.broken_image_outlined, color: AppColors.muted),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(AppRadii.md),
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(6),
+                      boxShadow: AppShadows.card,
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: AspectRatio(
+                      aspectRatio: 1 / 1.414, // A4 portrait
+                      child: Image.network(
+                        _absoluteUrl(letterhead.url),
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => const ColoredBox(
+                          color: AppColors.surface,
+                          child: Center(
+                            child: Icon(Icons.broken_image_outlined, color: AppColors.muted),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(height: 10),
+                  const Text('A4 portrait · 210 × 297 mm', style: AppText.caption),
+                ],
               ),
             ),
           ],

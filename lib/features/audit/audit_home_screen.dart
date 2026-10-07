@@ -94,8 +94,8 @@ class _AuditHomeScreenState extends ConsumerState<AuditHomeScreen>
 
   static String _label(_Tab t) => switch (t) {
         _Tab.dashboard => 'Dashboard',
-        _Tab.plans => 'Audit Plans',
-        _Tab.myAudits => 'My Audits',
+        _Tab.plans => 'Audit plans',
+        _Tab.myAudits => 'My audits',
         _Tab.findings => 'Findings & CAPA',
       };
 
@@ -118,18 +118,23 @@ class _AuditHomeScreenState extends ConsumerState<AuditHomeScreen>
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: const Text('Internal Audit'),
-        backgroundColor: AppColors.surface,
-        foregroundColor: AppColors.ink,
-        elevation: 0,
+        title: const Text('Internal audit'),
+        // Tabs sit on the deep app bar so each tab's hero continues it.
         bottom: _tabs.length > 1
             ? TabBar(
                 controller: ctrl,
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
-                labelColor: AppColors.primary,
-                unselectedLabelColor: AppColors.muted,
-                indicatorColor: AppColors.primary,
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white.withValues(alpha: 0.62),
+                indicatorSize: TabBarIndicatorSize.label,
+                indicator: const UnderlineTabIndicator(
+                  borderSide: BorderSide(color: Colors.white, width: 2.5),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(3)),
+                ),
+                dividerColor: Colors.transparent,
+                overlayColor: WidgetStatePropertyAll(
+                    Colors.white.withValues(alpha: 0.06)),
                 tabs: [for (final t in _tabs) Tab(text: _label(t))],
               )
             : null,
@@ -143,12 +148,10 @@ class _AuditHomeScreenState extends ConsumerState<AuditHomeScreen>
               label: const Text('New plan'),
             )
           : null,
-      body: SafeArea(
-        child: TabBarView(
-          controller: ctrl,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [for (final t in _tabs) _body(t)],
-        ),
+      body: TabBarView(
+        controller: ctrl,
+        physics: const NeverScrollableScrollPhysics(),
+        children: [for (final t in _tabs) _body(t)],
       ),
     );
   }

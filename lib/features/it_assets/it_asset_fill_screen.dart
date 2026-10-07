@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 
+import '../../core/pro_ui.dart';
+import '../../core/theme.dart';
 import '../files/file_repository.dart';
 import 'it_asset_models.dart';
 import 'it_asset_repository.dart';
@@ -128,18 +130,152 @@ class _ItAssetFillScreenState extends ConsumerState<ItAssetFillScreen> {
     }
   }
 
+  static const _autoTypes = {'auto_region', 'auto_division', 'auto_area', 'auto_branch'};
+
+  /// Presentation only — mirrors the required check in [_submit].
+  bool _filled(ItAssetFieldDef f) {
+    final value = _valuesDrivenTypes.contains(f.type) ? _values[f.key] : _controllers[f.key]?.text;
+    return !(value == null || value.trim().isEmpty || value == '[]');
+  }
+
+  /// Rebuilds the progress card as text fields change.
+  late final Listenable _textChanges = Listenable.merge(_controllers.values.toList());
+
   @override
   Widget build(BuildContext context) {
     final entry = widget.entry;
+    final autoFields = entry.fields.where((f) => _autoTypes.contains(f.type)).toList();
+    final formFields = entry.fields.where((f) => !_autoTypes.contains(f.type)).toList();
     return Scaffold(
-      appBar: AppBar(title: Text('${entry.templateName} — ${entry.period}')),
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: entry.templateName,
+        subtitle: 'IT assets · ${entry.period}',
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
-          for (final f in entry.fields) ...[
-            _fieldWidget(f),
-            const SizedBox(height: 16),
+          AnimatedBuilder(
+            animation: _textChanges,
+            builder: (context, _) {
+              final required = entry.fields.where((f) => f.required).toList();
+              final done = required.where(_filled).length;
+              return GlassCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        ProIconWell(
+                          icon: Icons.inventory_2_outlined,
+                          color: AppColors.primary,
+                          size: 40,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Period', style: AppText.caption),
+                              Text(
+                                entry.period,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.25,
+                                  color: AppColors.ink,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        entry.isSubmitted ? ProPill.ok('Submitted') : ProPill.warn('Pending'),
+                      ],
+                    ),
+                    if (required.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Required answers',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.inkSoft,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '$done of ${required.length}',
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.muted,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      ProBar(value: done / required.length),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
+          if (autoFields.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            GlassCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const ProSectionHeader(
+                    title: 'Your branch',
+                    trailing: Text('Read only', style: AppText.caption),
+                  ),
+                  const SizedBox(height: 4),
+                  // Never typed by the filler — the backend already filled these in
+                  // from the assignee's own org placement; shown read-only.
+                  ProKeyValue(rows: [
+                    for (final f in autoFields)
+                      MapEntry(
+                        f.label,
+                        (_controllers[f.key]?.text.trim().isNotEmpty ?? false)
+                            ? _controllers[f.key]!.text
+                            : '—',
+                      ),
+                  ]),
+                  const SizedBox(height: 4),
+                  const Text('Filled automatically from your branch', style: AppText.caption),
+                ],
+              ),
+            ),
           ],
+          if (formFields.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            GlassCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const ProSectionHeader(title: 'Form'),
+                  const SizedBox(height: 14),
+                  for (var i = 0; i < formFields.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 16),
+                    _fieldWidget(formFields[i]),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+      bottomNavigationBar: ProBottomBar(
+        children: [
           FilledButton(
             onPressed: _saving ? null : _submit,
             child: Text(_saving ? 'Submitting…' : 'Submit'),
@@ -150,116 +286,142 @@ class _ItAssetFillScreenState extends ConsumerState<ItAssetFillScreen> {
   }
 
   Widget _fieldWidget(ItAssetFieldDef f) {
-    final label = f.required ? '${f.label} *' : f.label;
     switch (f.type) {
       case 'checkbox':
-        return CheckboxListTile(
-          title: Text(label),
-          value: (_values[f.key] ?? 'false') == 'true',
-          onChanged: (v) => setState(() => _values[f.key] = (v ?? false).toString()),
+        final checked = (_values[f.key] ?? 'false') == 'true';
+        return _ToggleTile(
+          label: f.label,
+          required: f.required,
+          checked: checked,
+          onTap: () => setState(() => _values[f.key] = (!checked).toString()),
         );
       case 'dropdown':
         final current = _values[f.key];
-        return DropdownButtonFormField<String>(
-          decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
-          initialValue: (current != null && f.options.contains(current)) ? current : null,
-          items: f.options.map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
-          onChanged: (v) => setState(() => _values[f.key] = v ?? ''),
+        return ProField(
+          label: f.label,
+          required: f.required,
+          child: DropdownButtonFormField<String>(
+            decoration: const InputDecoration(hintText: 'Choose one'),
+            isExpanded: true,
+            initialValue: (current != null && f.options.contains(current)) ? current : null,
+            items: f.options
+                .map((o) => DropdownMenuItem(value: o, child: Text(o, overflow: TextOverflow.ellipsis)))
+                .toList(),
+            onChanged: (v) => setState(() => _values[f.key] = v ?? ''),
+          ),
         );
       case 'radio':
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(label, style: Theme.of(context).textTheme.bodyMedium)),
-            for (final o in f.options)
-              RadioListTile<String>(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                title: Text(o),
-                value: o,
-                groupValue: _values[f.key],
-                onChanged: (v) => setState(() => _values[f.key] = v ?? ''),
-              ),
-          ],
+        return ProField(
+          label: f.label,
+          required: f.required,
+          child: Column(
+            children: [
+              for (final o in f.options)
+                _ChoiceTile(
+                  label: o,
+                  selected: _values[f.key] == o,
+                  multi: false,
+                  onTap: () => setState(() => _values[f.key] = o),
+                ),
+            ],
+          ),
         );
       case 'multiselect':
         final selected = _multiselectValues(f.key);
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(label, style: Theme.of(context).textTheme.bodyMedium)),
-            for (final o in f.options)
-              CheckboxListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                title: Text(o),
-                value: selected.contains(o),
-                onChanged: (checked) => setState(() {
-                  final next = List<String>.from(selected);
-                  if (checked == true) {
-                    if (!next.contains(o)) next.add(o);
-                  } else {
-                    next.remove(o);
-                  }
-                  _values[f.key] = jsonEncode(next);
-                }),
-              ),
-          ],
+        return ProField(
+          label: f.label,
+          required: f.required,
+          child: Column(
+            children: [
+              for (final o in f.options)
+                _ChoiceTile(
+                  label: o,
+                  selected: selected.contains(o),
+                  multi: true,
+                  onTap: () {
+                    final checked = !selected.contains(o);
+                    setState(() {
+                      final next = List<String>.from(selected);
+                      if (checked) {
+                        if (!next.contains(o)) next.add(o);
+                      } else {
+                        next.remove(o);
+                      }
+                      _values[f.key] = jsonEncode(next);
+                    });
+                  },
+                ),
+            ],
+          ),
         );
       case 'photo':
       case 'file':
-        final ref = _fileRef(f.key);
+        final file = _fileRef(f.key);
         final uploading = _uploadingKey == f.key;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(label, style: Theme.of(context).textTheme.bodyMedium)),
-            if (ref != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(children: [
-                  Icon(ref.isImage ? Icons.image : Icons.insert_drive_file, size: 18),
-                  const SizedBox(width: 6),
-                  Expanded(child: Text(ref.name, overflow: TextOverflow.ellipsis)),
-                ]),
-              ),
-            OutlinedButton.icon(
-              onPressed: uploading ? null : () => _pickAndUpload(f.key, isPhoto: f.type == 'photo'),
-              icon: uploading
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Icon(f.type == 'photo' ? Icons.camera_alt : Icons.attach_file),
-              label: Text(uploading ? 'Uploading…' : (ref == null ? 'Choose' : 'Replace')),
-            ),
-          ],
+        final isPhoto = f.type == 'photo';
+        return ProField(
+          label: f.label,
+          required: f.required,
+          child: _UploadTile(
+            icon: file != null
+                ? (file.isImage ? Icons.image_outlined : Icons.insert_drive_file_outlined)
+                : (isPhoto ? Icons.photo_camera_outlined : Icons.attach_file_rounded),
+            title: uploading
+                ? 'Uploading…'
+                : file != null
+                    ? file.name
+                    : (isPhoto ? 'Take photo' : 'Choose file'),
+            subtitle: file != null
+                ? 'Uploaded'
+                : (isPhoto ? 'Opens the camera' : 'Pick a file from your phone'),
+            done: file != null,
+            uploading: uploading,
+            actionLabel: file == null ? null : 'Replace',
+            onTap: uploading ? null : () => _pickAndUpload(f.key, isPhoto: isPhoto),
+          ),
         );
       case 'number':
-        return TextField(
-          controller: _controllers[f.key],
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+        return ProField(
+          label: f.label,
+          required: f.required,
+          child: TextField(
+            controller: _controllers[f.key],
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(hintText: '0'),
+          ),
         );
       case 'date':
-        return TextField(
-          controller: _controllers[f.key],
-          readOnly: true,
-          decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), suffixIcon: const Icon(Icons.calendar_today)),
-          onTap: () async {
-            final picked = await showDatePicker(
-              context: context,
-              initialDate: DateTime.now(),
-              firstDate: DateTime(2000),
-              lastDate: DateTime(2100),
-            );
-            if (picked != null) {
-              _controllers[f.key]!.text = picked.toIso8601String().substring(0, 10);
-            }
-          },
+        return ProField(
+          label: f.label,
+          required: f.required,
+          child: TextField(
+            controller: _controllers[f.key],
+            readOnly: true,
+            decoration: const InputDecoration(
+              hintText: 'Select date',
+              suffixIcon: Icon(Icons.calendar_today_outlined, size: 18),
+            ),
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: DateTime.now(),
+                firstDate: DateTime(2000),
+                lastDate: DateTime(2100),
+              );
+              if (picked != null) {
+                _controllers[f.key]!.text = picked.toIso8601String().substring(0, 10);
+              }
+            },
+          ),
         );
       case 'textarea':
-        return TextField(
-          controller: _controllers[f.key],
-          maxLines: 4,
-          decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+        return ProField(
+          label: f.label,
+          required: f.required,
+          child: TextField(
+            controller: _controllers[f.key],
+            maxLines: 4,
+          ),
         );
       case 'auto_region':
       case 'auto_division':
@@ -267,20 +429,256 @@ class _ItAssetFillScreenState extends ConsumerState<ItAssetFillScreen> {
       case 'auto_branch':
         // Never typed by the filler — the backend already filled this in from the
         // assignee's own org placement (region/division/area/branch); shown read-only.
-        return TextField(
-          controller: _controllers[f.key],
-          enabled: false,
-          decoration: InputDecoration(
-            labelText: f.label,
-            border: const OutlineInputBorder(),
-            helperText: 'Filled automatically from your branch',
+        return ProField(
+          label: f.label,
+          helper: 'Filled automatically from your branch',
+          child: TextField(
+            controller: _controllers[f.key],
+            enabled: false,
           ),
         );
       default:
-        return TextField(
-          controller: _controllers[f.key],
-          decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+        return ProField(
+          label: f.label,
+          required: f.required,
+          child: TextField(
+            controller: _controllers[f.key],
+          ),
         );
     }
+  }
+}
+
+/// Bordered option row with a radio / check mark (radio + multiselect fields).
+class _ChoiceTile extends StatelessWidget {
+  const _ChoiceTile({
+    required this.label,
+    required this.selected,
+    required this.multi,
+    required this.onTap,
+  });
+  final String label;
+  final bool selected;
+  final bool multi;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppColors.primary;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: selected ? const Color(0xFFF2F8F9) : AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: selected ? primary : const Color(0xFFDBE3E5),
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+            child: Row(
+              children: [
+                _Mark(selected: selected, multi: multi),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-width tappable row with a trailing checkbox (checkbox fields).
+class _ToggleTile extends StatelessWidget {
+  const _ToggleTile({
+    required this.label,
+    required this.required,
+    required this.checked,
+    required this.onTap,
+  });
+  final String label;
+  final bool required;
+  final bool checked;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: checked ? AppColors.primary : const Color(0xFFDBE3E5)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text.rich(
+                  TextSpan(children: [
+                    TextSpan(text: label),
+                    if (required)
+                      const TextSpan(text: ' *', style: TextStyle(color: AppColors.danger)),
+                  ]),
+                  style: const TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.ink,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              _Mark(selected: checked, multi: true),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Mark extends StatelessWidget {
+  const _Mark({required this.selected, required this.multi});
+  final bool selected;
+  final bool multi;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = AppColors.primary;
+    if (multi) {
+      return AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          color: selected ? primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          border: selected ? null : Border.all(color: const Color(0xFFB9C7CA), width: 1.5),
+        ),
+        child: selected ? const Icon(Icons.check_rounded, size: 16, color: Colors.white) : null,
+      );
+    }
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: selected ? primary : const Color(0xFFB9C7CA),
+          width: selected ? 6.5 : 1.5,
+        ),
+      ),
+    );
+  }
+}
+
+/// Photo / file upload tile: empty state opens the picker; once uploaded it
+/// shows the file name with a "Replace" action.
+class _UploadTile extends StatelessWidget {
+  const _UploadTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.done,
+    required this.uploading,
+    required this.actionLabel,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool done;
+  final bool uploading;
+  final String? actionLabel;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: done ? AppColors.surface : AppColors.surfaceAlt,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: done ? AppColors.hairline : const Color(0xFFDBE3E5)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: actionLabel == null ? onTap : null,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 11, 8, 11),
+          child: Row(
+            children: [
+              if (uploading)
+                const SizedBox(
+                  width: 34,
+                  height: 34,
+                  child: Padding(
+                    padding: EdgeInsets.all(8),
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              else
+                ProIconWell(
+                  icon: icon,
+                  color: done ? AppColors.success : AppColors.primary,
+                ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: done ? AppColors.success : AppColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (actionLabel != null)
+                TextButton(
+                  onPressed: onTap,
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                  ),
+                  child: Text(actionLabel!),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

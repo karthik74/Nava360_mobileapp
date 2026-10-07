@@ -29,6 +29,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme.dart';
+import '../../core/pro_ui.dart';
 import '../attendance/location_tracker.dart';
 import '../auth/auth_controller.dart';
 import 'customer_detail_screen.dart';
@@ -409,17 +410,22 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
 
   // ── Build ────────────────────────────────────────────────────────────────
 
+  String _radiusLabel(int metres) => metres < 1000
+      ? '$metres m'
+      : '${(metres / 1000).toStringAsFixed(metres % 1000 == 0 ? 0 : 1)} km';
+
   @override
   Widget build(BuildContext context) {
     final customers = _visible;
     final me = _position == null
         ? null
         : LatLng(_position!.latitude, _position!.longitude);
+    final all = _result?.customers ?? const <NearbyCustomer>[];
+    final radii = _config.radiusOptions;
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: const Text('Nearby Customers'),
+        title: const Text('Nearby customers'),
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -428,33 +434,84 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
           ),
         ],
       ),
-      body: RefreshIndicator(
+      body: ProPage(
         onRefresh: () => _locateAndLoad(force: true),
-        child: ListView(
-          padding: EdgeInsets.zero,
+        hero: ProHero(
+          title: 'Nearby customers',
+          subtitle: 'Customers within ${_radiusLabel(_radius)} of you',
+          overlap: ProSearchField(
+            raised: true,
+            controller: _searchController,
+            onChanged: _onSearchChanged,
+            hint: 'Search name, ID, mobile or village',
+            onClear: () => setState(() => _search = ''),
+          ),
           children: [
-            _statusStrip(),
-            _controls(),
-            if (!_config.nearbyCustomersEnabled)
-              _message('Nearby Customers is not enabled for your company.')
-            else ...[
-              _map(me, customers),
-              _legend(),
-              _listHeader(customers.length),
-              if (_loading && _result == null)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 48),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              else if (customers.isEmpty)
-                _message(_emptyMessage())
-              else
-                ...customers.map(_customerTile),
-              ..._allCustomersSection(customers),
-            ],
-            const SizedBox(height: 24),
+            if (_loading && _result != null)
+              const ProLiveLine(text: 'Refreshing your position…')
+            else if (_position != null && _locationProblem == null)
+              ProLiveLine(
+                text: 'Live position · ±${_position!.accuracy.round()} m',
+                color: _position!.accuracy > _lowAccuracyMeters
+                    ? const Color(0xFFF2B347)
+                    : null,
+              ),
+            ProHeroStats(stats: [
+              for (final c in CustomerCategory.values)
+                ProStat(
+                  label: c.label,
+                  value: _result == null
+                      ? '—'
+                      : '${all.where((x) => x.category == c).length}',
+                  sub: _categories.contains(c) ? 'filtering' : 'tap to filter',
+                  dot: c.color,
+                  selected: _categories.contains(c),
+                  onTap: () => setState(() {
+                    if (_categories.contains(c)) {
+                      _categories.remove(c);
+                    } else {
+                      _categories.add(c);
+                    }
+                  }),
+                ),
+            ]),
           ],
         ),
+        children: [
+          ..._statusNotes(),
+          if (radii.isNotEmpty)
+            ProChipBar(
+              labels: [for (final m in radii) _radiusLabel(m)],
+              selected: radii.indexOf(_radius),
+              onSelected: (i) {
+                setState(() => _radius = radii[i]);
+                if (_position != null) {
+                  _load(LatLng(_position!.latitude, _position!.longitude));
+                }
+              },
+              bleed: 0,
+            ),
+          if (!_config.nearbyCustomersEnabled)
+            _message('Nearby Customers is not enabled for your company.')
+          else ...[
+            _map(me, customers),
+            _legend(),
+            _listHeader(customers.length),
+            if (_loading && _result == null)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 36),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (customers.isEmpty)
+              _message(_emptyMessage())
+            else
+              ProListGroup(
+                dividerIndent: 66,
+                children: [for (final c in customers) _customerTile(c)],
+              ),
+            ..._allCustomersSection(customers),
+          ],
+        ],
       ),
     );
   }
@@ -470,43 +527,27 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
     final others =
         _allMatches.where((c) => !nearbyIds.contains(c.id)).toList();
     return [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 18, 16, 6),
-        child: Row(
-          children: [
-            const Icon(Icons.manage_search_rounded,
-                size: 18, color: AppColors.muted),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'All customers matching "$term"',
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink,
-                ),
-              ),
-            ),
-            if (_searchingAll)
-              const SizedBox(
+      ProSectionHeader(
+        title: 'All customers matching "$term"',
+        small: true,
+        trailing: _searchingAll
+            ? const SizedBox(
                 width: 14,
                 height: 14,
                 child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-          ],
-        ),
+              )
+            : null,
       ),
       if (!_searchingAll && _allMatchesFor == term && others.isEmpty)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-          child: Text(
-            _allMatches.isEmpty
-                ? 'No other customers match.'
-                : 'Every match is already in the nearby list above.',
-            style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
-          ),
+        ProNote(
+          _allMatches.isEmpty
+              ? 'No other customers match.'
+              : 'Every match is already in the nearby list above.',
         ),
-      for (final c in others) _searchedCustomerTile(c),
+      if (others.isNotEmpty)
+        ProListGroup(
+          children: [for (final c in others) _searchedCustomerTile(c)],
+        ),
     ];
   }
 
@@ -536,36 +577,16 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
       c.address,
     ].where((x) => x != null && x.trim().isNotEmpty).join(' · ');
 
-    return ListTile(
+    return ProListRow(
       onTap: () => _showCustomer(_asNearby(c)),
-      leading: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: tone.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Icon(icon, size: 18, color: tone),
-      ),
-      title: Text(
-        c.customerName,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.ink),
-      ),
-      subtitle: Text(
-        sub.isEmpty ? badge : '$badge · $sub',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 12,
-          color: c.hasLocation ? AppColors.muted : tone,
-          fontWeight: c.hasLocation ? FontWeight.w500 : FontWeight.w700,
-        ),
-      ),
+      leading: ProIconWell(icon: icon, color: tone),
+      title: c.customerName,
+      subtitle: sub.isEmpty ? null : sub,
+      meta: badge,
+      chevron: c.hasLocation,
       trailing: !c.hasLocation
           ? Icon(Icons.add_location_alt_rounded, color: AppColors.primary)
-          : Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+          : null,
     );
   }
 
@@ -579,9 +600,9 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
     return 'No authorised customers found within $km km.';
   }
 
-  /// Location / freshness / accuracy banner. Everything the employee needs to
+  /// Location / freshness / accuracy notes. Everything the employee needs to
   /// judge how much to trust what they're looking at.
-  Widget _statusStrip() {
+  List<Widget> _statusNotes() {
     final messages = <_Status>[];
     if (_locationProblem != null) {
       messages.add(_Status(_locationProblem!, Icons.location_off_rounded,
@@ -611,111 +632,7 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
           AppColors.muted,
           null));
     }
-    if (messages.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      children: [
-        for (final m in messages)
-          Container(
-            width: double.infinity,
-            color: m.color.withOpacity(0.10),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            child: Row(
-              children: [
-                Icon(m.icon, size: 18, color: m.color),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(m.text,
-                      style: TextStyle(fontSize: 12.5, color: m.color)),
-                ),
-                if (m.action != null)
-                  TextButton(
-                    onPressed: () => Geolocator.openAppSettings(),
-                    child: Text(m.action!, style: const TextStyle(fontSize: 12)),
-                  ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _controls() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            height: 36,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                for (final metres in _config.radiusOptions)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(
-                      label: Text(metres < 1000
-                          ? '$metres m'
-                          : '${(metres / 1000).toStringAsFixed(0)} km'),
-                      selected: _radius == metres,
-                      onSelected: (_) {
-                        setState(() => _radius = metres);
-                        if (_position != null) {
-                          _load(LatLng(
-                              _position!.latitude, _position!.longitude));
-                        }
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              for (final c in CustomerCategory.values)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    label: Text(c.label),
-                    selected: _categories.contains(c),
-                    avatar: CircleAvatar(backgroundColor: c.color, radius: 6),
-                    onSelected: (on) => setState(() {
-                      if (on) {
-                        _categories.add(c);
-                      } else {
-                        _categories.remove(c);
-                      }
-                    }),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _searchController,
-            onChanged: _onSearchChanged,
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: 'Search any customer — name, ID, mobile or village',
-              prefixIcon: const Icon(Icons.search_rounded, size: 20),
-              suffixIcon: _search.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.close_rounded, size: 18),
-                      onPressed: () {
-                        _searchController.clear();
-                        setState(() => _search = '');
-                      },
-                    ),
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-          ),
-        ],
-      ),
-    );
+    return [for (final m in messages) _StatusNote(status: m)];
   }
 
   Widget _map(LatLng? me, List<NearbyCustomer> customers) {
@@ -724,45 +641,47 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
             ? LatLng(customers.first.latitude!, customers.first.longitude!)
             : const LatLng(20.5937, 78.9629)); // India, as a last resort
 
-    return SizedBox(
-      height: 320,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: centre,
-              initialZoom: _zoomForRadius(_radius),
-              onPositionChanged: (pos, _) {
-                // Track zoom so clustering can loosen as the user zooms in,
-                // without rebuilding the whole screen on every frame.
-                final z = pos.zoom ?? _zoom;
-                if ((z - _zoom).abs() >= 0.75) {
-                  setState(() => _zoom = z);
-                }
-              },
-            ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.nava360.app',
-              ),
-              if (me != null)
-                CircleLayer(circles: [
-                  CircleMarker(
-                    point: me,
-                    radius: _radius.toDouble(),
-                    useRadiusInMeter: true,
-                    color: AppColors.primary.withOpacity(0.06),
-                    borderColor: AppColors.primary.withOpacity(0.35),
-                    borderStrokeWidth: 1,
-                  ),
-                ]),
-              MarkerLayer(markers: _markers(me, customers)),
-            ],
+    return Container(
+      height: 300,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.hairline),
+        boxShadow: AppShadows.card,
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(15),
+        child: FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: centre,
+            initialZoom: _zoomForRadius(_radius),
+            onPositionChanged: (pos, _) {
+              // Track zoom so clustering can loosen as the user zooms in,
+              // without rebuilding the whole screen on every frame.
+              final z = pos.zoom ?? _zoom;
+              if ((z - _zoom).abs() >= 0.75) {
+                setState(() => _zoom = z);
+              }
+            },
           ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.nava360.app',
+            ),
+            if (me != null)
+              CircleLayer(circles: [
+                CircleMarker(
+                  point: me,
+                  radius: _radius.toDouble(),
+                  useRadiusInMeter: true,
+                  color: AppColors.primary.withOpacity(0.06),
+                  borderColor: AppColors.primary.withOpacity(0.35),
+                  borderStrokeWidth: 1,
+                ),
+              ]),
+            MarkerLayer(markers: _markers(me, customers)),
+          ],
         ),
       ),
     );
@@ -848,7 +767,7 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
       ),
       child: Text('${cluster.members.length}',
           style: const TextStyle(
-              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w800)),
+              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
     );
   }
 
@@ -875,42 +794,26 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
   }
 
   Widget _legend() {
+    Widget item(Color color, String label) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 9,
+              height: 9,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Text(label, style: AppText.caption),
+          ],
+        );
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+      padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Wrap(
         spacing: 16,
         runSpacing: 6,
         children: [
-          for (final c in CustomerCategory.values)
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 11,
-                  height: 11,
-                  decoration:
-                      BoxDecoration(color: c.color, shape: BoxShape.circle),
-                ),
-                const SizedBox(width: 6),
-                Text(c.label,
-                    style: const TextStyle(
-                        fontSize: 12, color: AppColors.muted)),
-              ],
-            ),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 11,
-                height: 11,
-                decoration: BoxDecoration(
-                    color: AppColors.primary, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 6),
-              const Text('You',
-                  style: TextStyle(fontSize: 12, color: AppColors.muted)),
-            ],
-          ),
+          for (final c in CustomerCategory.values) item(c.color, c.label),
+          item(AppColors.primary, 'You'),
         ],
       ),
     );
@@ -918,116 +821,57 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
 
   Widget _listHeader(int count) {
     final result = _result;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-      child: Row(
-        children: [
-          Text('$count customer${count == 1 ? '' : 's'}',
-              style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink)),
-          const Spacer(),
-          if (result != null)
-            Text(
+    return ProSectionHeader(
+      title: '$count customer${count == 1 ? '' : 's'} by distance',
+      small: true,
+      trailing: result == null
+          ? null
+          : Text(
               result.fromCache
                   ? 'Cached ${_time(result.generatedAt)}'
                   : 'Updated ${_time(result.generatedAt)}',
-              style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+              style: AppText.caption.merge(AppText.number),
             ),
-        ],
-      ),
     );
   }
 
   Widget _customerTile(NearbyCustomer c) {
-    return InkWell(
+    final sub = [c.customerCode, c.placeLabel]
+        .where((s) => s != null && s.isNotEmpty)
+        .join(' · ');
+    final money = [
+      if (c.outstandingAmount != null)
+        'Outstanding ₹${c.outstandingAmount!.toStringAsFixed(0)}',
+      if (c.overdueDays != null) '${c.overdueDays} days overdue',
+    ].join(' · ');
+    final visit = c.lastVisitedAt == null
+        ? null
+        : c.visitedRecentlyByColleague
+            ? 'A colleague visited ${_ago(c.lastVisitedAt!)}'
+            : 'Last visit ${_ago(c.lastVisitedAt!)}';
+    return ProListRow(
       onTap: () => _showCustomer(c),
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.hairline),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 10,
-              height: 10,
-              margin: const EdgeInsets.only(top: 5),
-              decoration: BoxDecoration(
-                  color: c.category.color, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(c.customerName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 14.5,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.ink)),
-                      ),
-                      Text(c.distanceLabel,
-                          style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.primary)),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    [c.customerCode, c.placeLabel]
-                        .where((s) => s != null && s.isNotEmpty)
-                        .join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style:
-                        const TextStyle(fontSize: 12, color: AppColors.muted),
-                  ),
-                  if (c.outstandingAmount != null || c.overdueDays != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        [
-                          if (c.outstandingAmount != null)
-                            'Outstanding ₹${c.outstandingAmount!.toStringAsFixed(0)}',
-                          if (c.overdueDays != null)
-                            '${c.overdueDays} days overdue',
-                        ].join(' · '),
-                        style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: c.category.color),
-                      ),
-                    ),
-                  if (c.lastVisitedAt != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        c.visitedRecentlyByColleague
-                            ? 'A colleague visited ${_ago(c.lastVisitedAt!)}'
-                            : 'Last visit ${_ago(c.lastVisitedAt!)}',
-                        style: const TextStyle(
-                            fontSize: 11.5, color: AppColors.muted),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+      leading: ProAvatar(name: c.customerName, dot: c.category.color),
+      title: c.customerName,
+      subtitle: [if (sub.isNotEmpty) sub, if (visit != null) visit].join('\n'),
+      meta: money.isEmpty ? null : money,
+      value: c.distanceLabel,
+      valueColor: AppColors.primary,
+      pill: ProPill(c.category.label,
+          color: _categoryInk(c.category), dot: true),
     );
+  }
+
+  /// Text-strength version of a category colour (readable on its tint).
+  static Color _categoryInk(CustomerCategory c) {
+    switch (c) {
+      case CustomerCategory.npa:
+        return AppColors.danger;
+      case CustomerCategory.overdue:
+        return const Color(0xFF9A5B00);
+      case CustomerCategory.regular:
+        return AppColors.success;
+    }
   }
 
   void _showCustomer(NearbyCustomer c) {
@@ -1036,48 +880,58 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
       backgroundColor: AppColors.surface,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => Padding(
         padding: EdgeInsets.fromLTRB(
-            20, 18, 20, 20 + MediaQuery.of(ctx).padding.bottom),
+            20, 10, 20, 20 + MediaQuery.of(ctx).padding.bottom),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFC6D3D6),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
             Row(
               children: [
-                Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                      color: c.category.color, shape: BoxShape.circle),
-                ),
-                const SizedBox(width: 10),
+                ProAvatar(name: c.customerName, size: 44, dot: c.category.color),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Text(c.customerName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
+                          fontSize: 19,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: -0.3,
                           color: AppColors.ink)),
                 ),
+                const SizedBox(width: 8),
                 Text(c.hasLocation ? c.distanceLabel : 'No location',
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
+                    style: AppText.number.copyWith(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                         color: c.hasLocation
                             ? AppColors.primary
                             : AppColors.warning)),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Text(
               [
                 c.customerCode,
                 c.category.label,
                 c.placeLabel,
               ].where((s) => s != null && s.isNotEmpty).join(' · '),
-              style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+              style: AppText.caption,
             ),
             if (c.outstandingAmount != null || c.overdueDays != null) ...[
               const SizedBox(height: 10),
@@ -1087,17 +941,16 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
                     'Outstanding ₹${c.outstandingAmount!.toStringAsFixed(0)}',
                   if (c.overdueDays != null) '${c.overdueDays} days overdue',
                 ].join('   ·   '),
-                style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: c.category.color),
+                style: AppText.number.copyWith(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: _categoryInk(c.category)),
               ),
             ],
             if (c.lastVisitedByMeAt != null) ...[
               const SizedBox(height: 8),
               Text('You last visited ${_ago(c.lastVisitedByMeAt!)}',
-                  style:
-                      const TextStyle(fontSize: 12, color: AppColors.muted)),
+                  style: AppText.caption),
             ],
             const SizedBox(height: 16),
             Row(
@@ -1114,10 +967,10 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
                     label: const Text('Navigate'),
                   ),
                 ),
-                const SizedBox(width: 8),
                 // Only rendered when the server sent a number — i.e. when the
                 // employee is permitted to see contact details at all.
-                if (c.mobileNumber != null && c.mobileNumber!.isNotEmpty)
+                if (c.mobileNumber != null && c.mobileNumber!.isNotEmpty) ...[
+                  const SizedBox(width: 10),
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () {
@@ -1128,9 +981,10 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
                       label: const Text('Call'),
                     ),
                   ),
+                ],
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 12),
             _LocationQualityBlock(
               customer: c,
               myPosition: _position,
@@ -1163,18 +1017,9 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
     );
   }
 
-  Widget _message(String text) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-        child: Column(
-          children: [
-            Icon(Icons.person_search_rounded,
-                size: 40, color: AppColors.muted.withOpacity(0.6)),
-            const SizedBox(height: 12),
-            Text(text,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13.5, color: AppColors.muted)),
-          ],
-        ),
+  Widget _message(String text) => ProEmpty(
+        icon: Icons.person_search_rounded,
+        title: text,
       );
 
   static String _time(DateTime t) =>
@@ -1190,7 +1035,45 @@ class _NearbyCustomersScreenState extends ConsumerState<NearbyCustomersScreen> {
   }
 }
 
-/// Location quality for one customer, plus the action that fixes it.
+/// One location / freshness note ([ProNote] look, with an optional action).
+class _StatusNote extends StatelessWidget {
+  const _StatusNote({required this.status});
+  final _Status status;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = status;
+    final Color bg;
+    if (m.color == AppColors.danger) {
+      bg = AppColors.dangerTint;
+    } else if (m.color == AppColors.warning) {
+      bg = AppColors.warningTint;
+    } else {
+      bg = AppColors.neutralTint;
+    }
+    return Container(
+      padding: EdgeInsets.fromLTRB(14, 12, m.action != null ? 6 : 14, 12),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
+      child: Row(
+        children: [
+          Icon(m.icon, size: 18, color: m.color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(m.text,
+                style: TextStyle(fontSize: 13, height: 1.45, color: m.color)),
+          ),
+          if (m.action != null)
+            TextButton(
+              onPressed: () => Geolocator.openAppSettings(),
+              child: Text(m.action!),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// Location quality for one customer, plus the action that fixes it.
 ///
 /// A visit is only as trustworthy as the pin it is measured against, and only
 /// the person standing at the door knows where that is. So the employee sees
@@ -1337,39 +1220,44 @@ class _LocationQualityBlockState extends ConsumerState<_LocationQualityBlock> {
           'Your GPS is currently ±${pos.accuracy.round()} m; move outside for a better fix if you can.';
     }
 
+    final Color tint = c.locationVerified
+        ? AppColors.successTint
+        : c.locationNeedsCorrection
+            ? AppColors.infoTint
+            : AppColors.warningTint;
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: tone.withOpacity(0.07),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: tone.withOpacity(0.25)),
+        color: tint,
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 16, color: tone),
+              Icon(icon, size: 18, color: tone),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   c.locationQualityLabel,
                   style: TextStyle(
-                      fontSize: 12.5, fontWeight: FontWeight.w700, color: tone),
+                      fontSize: 13.5, fontWeight: FontWeight.w600, color: tone),
                 ),
               ),
               if (pos != null)
                 Text('±${pos.accuracy.round()} m',
-                    style: const TextStyle(
-                        fontSize: 11, color: AppColors.muted)),
+                    style: AppText.caption.merge(AppText.number)),
             ],
           ),
           if (canSuggest) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(backgroundColor: AppColors.surface),
                 onPressed: canAct ? _submit : null,
                 icon: _busy
                     ? const SizedBox(
@@ -1387,8 +1275,7 @@ class _LocationQualityBlockState extends ConsumerState<_LocationQualityBlock> {
           ],
           if (blockedReason != null) ...[
             const SizedBox(height: 6),
-            Text(blockedReason,
-                style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+            Text(blockedReason, style: AppText.caption),
           ],
         ],
       ),

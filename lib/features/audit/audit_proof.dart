@@ -19,8 +19,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import 'audit_repository.dart';
+import 'audit_widgets.dart';
 import 'offline/audit_offline_store.dart';
 import 'offline/audit_sync_service.dart';
 
@@ -55,21 +57,21 @@ Future<({double? lat, double? lng})> _tryLocation() async {
 Future<ImageSource?> _pickSource(BuildContext context) {
   return showModalBottomSheet<ImageSource>(
     context: context,
-    backgroundColor: AppColors.surface,
-    builder: (_) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+    builder: (_) => AuditSheet(
+      title: 'Add photo proof',
+      subtitle: 'Photos are compressed and stamped with the time and your location.',
+      child: ProListGroup(
         children: [
-          ListTile(
-            leading: Icon(Icons.photo_camera_rounded,
-                color: AppColors.primary),
-            title: const Text('Take a photo'),
+          ProListRow(
+            leading: ProIconWell(
+                icon: Icons.photo_camera_rounded, color: AppColors.primary),
+            title: 'Take a photo',
             onTap: () => Navigator.pop(context, ImageSource.camera),
           ),
-          ListTile(
-            leading: Icon(Icons.photo_library_rounded,
-                color: AppColors.primary),
-            title: const Text('Choose from gallery'),
+          ProListRow(
+            leading: ProIconWell(
+                icon: Icons.photo_library_rounded, color: AppColors.primary),
+            title: 'Choose from gallery',
             onTap: () => Navigator.pop(context, ImageSource.gallery),
           ),
         ],

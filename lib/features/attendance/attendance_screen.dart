@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -241,49 +245,80 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
   Widget build(BuildContext context) {
     final startDay = ref.watch(_cycleStartDayProvider).valueOrNull ?? 1;
     final dataAsync = ref.watch(_monthDataProvider(_keyFor(startDay)));
-    final mq = MediaQuery.of(context);
+    final data = dataAsync.valueOrNull;
+    final summary = data == null ? null : _summarize(data);
+
+    final List<Widget> body = dataAsync.when(
+      data: (d) => _buildContent(context, d, summary ?? _summarize(d)),
+      loading: () => const [AppLoadingBlock(height: 260)],
+      error: (e, _) => [
+        AppErrorPanel(
+          message: e.toString(),
+          onRetry: () => _refresh(startDay),
+        ),
+      ],
+    );
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: RefreshIndicator(
-        color: AppColors.primary,
-        backgroundColor: Colors.white.withOpacity(0.92),
+      body: ProPage(
+        topInset: MediaQuery.of(context).padding.top,
+        // The shell hides its tab bar on /attendance.
+        clearNav: false,
+        gap: 22,
         onRefresh: () async => _refresh(startDay),
-        child: ListView(
-          physics: const BouncingScrollPhysics(
-            parent: AlwaysScrollableScrollPhysics(),
-          ),
-          padding: EdgeInsets.fromLTRB(
-            16,
-            mq.padding.top + AppChrome.appBarHeight + 12,
-            16,
-            mq.padding.bottom + 16,
-          ),
+        hero: ProHero(
+          title: 'Attendance & hours',
+          subtitle:
+              'Tap any day to see its status, request a regularization, or apply for leave.',
           children: [
-            const _AttendanceHeader(),
-            const SizedBox(height: 18),
-            _MonthSwitcher(
+            _TodayPanel(
+              record: summary?.todayRecord,
+              known: summary?.todayInCycle ?? false,
+            ),
+            _HeroMonthSwitcher(
               year: _year,
               month: _month,
               onPrev: () => _shiftMonth(-1),
               onNext: () => _shiftMonth(1),
+              summary: summary == null
+                  ? null
+                  : '${summary.worked} days worked · ${_fmtDuration(summary.totalHours)}',
             ),
-            const SizedBox(height: 12),
-            dataAsync.when(
-              data: (data) => _buildContent(context, data),
-              loading: () => const AppLoadingBlock(height: 260),
-              error: (e, _) => AppErrorPanel(
-                message: e.toString(),
-                onRetry: () => _refresh(startDay),
+            if (summary != null)
+              ProHeroStats(
+                stats: [
+                  ProStat(
+                    label: 'Worked days',
+                    value: summary.worked.toString(),
+                    sub: 'this cycle',
+                    dot: AppColors.live,
+                  ),
+                  ProStat(
+                    label: 'Hours',
+                    value: _fmtDuration(summary.totalHours),
+                    sub: 'this cycle',
+                  ),
+                  ProStat(
+                    label: 'Absent',
+                    value: summary.counts['absent'].toString(),
+                    sub: summary.counts['leave'] == 0
+                        ? 'days'
+                        : '${summary.counts['leave']} on leave',
+                    dot: const Color(0xFFE5484D),
+                  ),
+                ],
               ),
-            ),
           ],
         ),
+        children: body,
       ),
     );
   }
 
-  Widget _buildContent(BuildContext context, _MonthData data) {
+  /// Classifies every day of the cycle exactly as before (same buckets, same
+  /// hidden future days) so the hero, the calendar and the list agree.
+  _CycleSummary _summarize(_MonthData data) {
     final now = DateTime.now();
     final todayStart = DateTime(now.year, now.month, now.day);
 
@@ -336,53 +371,59 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     // Newest first.
     final sorted = [...cells]..sort((a, b) => b.iso.compareTo(a.iso));
     final worked = counts['present']! + counts['halfday']!;
+    final todayIso = fmt.format(todayStart);
+    return _CycleSummary(
+      cellsByIso: {for (final c in cells) c.iso: c},
+      sorted: sorted,
+      counts: counts,
+      totalHours: totalHours,
+      worked: worked,
+      todayInCycle: data.cycle.any((d) => fmt.format(d) == todayIso),
+      todayRecord: data.recordsByDate[todayIso],
+    );
+  }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
+  List<Widget> _buildContent(
+      BuildContext context, _MonthData data, _CycleSummary s) {
+    final now = DateTime.now();
+    bool isToday(DateTime d) =>
+        d.year == now.year && d.month == now.month && d.day == now.day;
+
+    return [
+      _CalendarCard(
+        data: data,
+        summary: s,
+        isToday: isToday,
+        onTapDay: _openDayActions,
+      ),
+      if (s.sorted.isEmpty)
+        const ProEmpty(
+          icon: Icons.calendar_month_rounded,
+          title: 'No attendance days in this cycle yet.',
+        )
+      else
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: StatTile(
-                label: 'Worked days',
-                value: worked.toString(),
-                icon: Icons.check_circle_rounded,
-                color: AppColors.success,
-              ),
+            ProSectionHeader(
+              title: 'Days this cycle · ${s.sorted.length}',
+              small: true,
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: StatTile(
-                label: 'Hours this cycle',
-                value: _fmtDuration(totalHours),
-                icon: Icons.access_time_rounded,
-                color: AppColors.info,
-              ),
+            const SizedBox(height: 8),
+            ProListGroup(
+              dividerIndent: 64,
+              children: [
+                for (final c in s.sorted)
+                  _DayRow(
+                    cell: c,
+                    isToday: isToday(c.date),
+                    onTap: () => _openDayActions(c),
+                  ),
+              ],
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        if (sorted.isEmpty)
-          const AppEmptyState(
-            icon: Icons.calendar_month_rounded,
-            message: 'No attendance days in this cycle yet.',
-          )
-        else
-          for (final c in sorted)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _DayRow(
-                cell: c,
-                isToday: c.date.year == now.year &&
-                    c.date.month == now.month &&
-                    c.date.day == now.day,
-                onTap: () => _openDayActions(c),
-              ),
-            ),
-        const SizedBox(height: 14),
-        const _Legend(),
-      ],
-    );
+    ];
   }
 
   // ── Day actions ────────────────────────────────────────────────────────────
@@ -401,138 +442,120 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
     // and not when a leave request is already pending for this day.
     final canLeave =
         (c.bucket == 'absent' || c.bucket == 'halfday') && !c.leavePending;
+    final rec = c.record;
 
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 10),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.hairline,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-              child: Row(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const _SheetHandle(),
+              const SizedBox(height: 14),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Text(
                       DateFormat('EEEE, d MMMM yyyy').format(c.date),
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.ink,
-                      ),
+                      style: _sheetTitleStyle,
                     ),
                   ),
-                  StatusPill(label: meta.label, color: meta.color),
+                  const SizedBox(width: 12),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: _bucketPill(c.bucket, meta.label),
+                  ),
                 ],
               ),
-            ),
-            if (c.record != null &&
-                (c.record!.checkIn != null || c.record!.checkOut != null))
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-                child: Align(
-                  alignment: Alignment.centerLeft,
+              if (c.bucket == 'holiday' && c.holidayName != null) ...[
+                const SizedBox(height: 2),
+                Text(c.holidayName!, style: AppText.caption),
+              ],
+              if (rec != null &&
+                  (rec.checkIn != null || rec.checkOut != null)) ...[
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                        child: _InfoCell(
+                            label: 'Check-in', value: _fmtTime(rec.checkIn))),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: _InfoCell(
+                            label: 'Check-out', value: _fmtTime(rec.checkOut))),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: _InfoCell(
+                            label: 'Worked',
+                            value: _fmtDuration(rec.workingHours))),
+                  ],
+                ),
+              ],
+              if (regPending) ...[
+                const SizedBox(height: 12),
+                const ProNote('Regularization pending approval',
+                    tone: ProNoteTone.warn,
+                    icon: Icons.hourglass_top_rounded),
+              ] else if (c.hasReg) ...[
+                const SizedBox(height: 12),
+                ProNote(
+                  'Regularization ${(c.regStatus ?? '').toLowerCase()}',
+                  icon: Icons.flag_outlined,
+                ),
+              ],
+              if (c.leavePending) ...[
+                const SizedBox(height: 12),
+                const ProNote('Leave request submitted',
+                    tone: ProNoteTone.info, icon: Icons.event_note_rounded),
+              ],
+              const SizedBox(height: 16),
+              if (canRegularize || canLeave)
+                ProListGroup(
+                  children: [
+                    if (canRegularize)
+                      ProListRow(
+                        leading: ProIconWell(
+                            icon: Icons.fact_check_outlined,
+                            color: AppColors.primary),
+                        title: 'Request regularization',
+                        subtitle: 'Fix or mark your attendance for this day',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _openRegularizationForm(c.date);
+                        },
+                      ),
+                    if (canLeave)
+                      ProListRow(
+                        leading: const ProIconWell(
+                            icon: Icons.event_busy_outlined,
+                            color: AppColors.info),
+                        title: 'Apply leave',
+                        subtitle: 'Request leave for this day',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _openLeaveForm(c.date);
+                        },
+                      ),
+                  ],
+                )
+              else
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4),
                   child: Text(
-                    '${_fmtTime(c.record!.checkIn)} → ${_fmtTime(c.record!.checkOut)}  ·  ${_fmtDuration(c.record!.workingHours)}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.muted,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    'No actions available for this day.',
+                    style: TextStyle(color: AppColors.muted, fontSize: 13.5),
                   ),
                 ),
-              ),
-            if (regPending)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Regularization pending approval',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: AppColors.warning,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              )
-            else if (c.hasReg)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Regularization ${(c.regStatus ?? '').toLowerCase()}',
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      color: AppColors.muted,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ),
-            if (c.leavePending)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Leave request submitted',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: AppColors.info,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ),
-            const SizedBox(height: 4),
-            if (canRegularize)
-              ListTile(
-                leading: Icon(Icons.fact_check_outlined,
-                    color: AppColors.primary),
-                title: const Text('Request regularization'),
-                subtitle: const Text('Fix or mark your attendance for this day'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _openRegularizationForm(c.date);
-                },
-              ),
-            if (canLeave)
-              ListTile(
-                leading:
-                    const Icon(Icons.event_busy_outlined, color: AppColors.info),
-                title: const Text('Apply leave'),
-                subtitle: const Text('Request leave for this day'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _openLeaveForm(c.date);
-                },
-              ),
-            if (!canRegularize && !canLeave)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 4, 16, 16),
-                child: Text(
-                  'No actions available for this day.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 13),
-                ),
-              ),
-            const SizedBox(height: 8),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -544,7 +567,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
       isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (_) => _RegularizationSheet(date: date),
     );
@@ -561,7 +584,7 @@ class _AttendanceScreenState extends ConsumerState<AttendanceScreen> {
       isScrollControlled: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (_) => _LeaveSheet(date: date),
     );
@@ -601,6 +624,26 @@ class _DayCellData {
   });
 }
 
+/// Everything the screen shows for one cycle, computed once per build.
+class _CycleSummary {
+  final Map<String, _DayCellData> cellsByIso; // visible days only
+  final List<_DayCellData> sorted; // newest first
+  final Map<String, int> counts;
+  final double totalHours;
+  final int worked;
+  final bool todayInCycle;
+  final AttendanceRecord? todayRecord;
+  const _CycleSummary({
+    required this.cellsByIso,
+    required this.sorted,
+    required this.counts,
+    required this.totalHours,
+    required this.worked,
+    required this.todayInCycle,
+    required this.todayRecord,
+  });
+}
+
 /// A short status note shown on the attendance day when a request is awaiting
 /// approval: a pending regularization or a submitted leave request.
 ({String label, Color color})? _pendingNote(_DayCellData c) {
@@ -626,73 +669,656 @@ String _attStatusLabel(String s) {
   }
 }
 
-// ── Month switcher ───────────────────────────────────────────────────────────
+// ── Status styling ───────────────────────────────────────────────────────────
 
-class _MonthSwitcher extends StatelessWidget {
-  const _MonthSwitcher(
-      {required this.year,
-      required this.month,
-      required this.onPrev,
-      required this.onNext});
-  final int year;
-  final int month;
-  final VoidCallback onPrev;
-  final VoidCallback onNext;
+const _holidayTint = Color(0xFFF0EBF7);
+const _warnInk = Color(0xFF9A5B00);
+
+/// (foreground, background) for a day bucket — calendar cells and pills.
+({Color fg, Color bg}) _bucketTone(String b) {
+  switch (b) {
+    case 'present':
+      return (fg: AppColors.success, bg: AppColors.successTint);
+    case 'halfday':
+      return (fg: _warnInk, bg: AppColors.warningTint);
+    case 'absent':
+      return (fg: AppColors.danger, bg: AppColors.dangerTint);
+    case 'leave':
+      return (fg: AppColors.info, bg: AppColors.infoTint);
+    case 'holiday':
+      return (fg: AppColors.pink, bg: _holidayTint);
+    case 'nonworking':
+      return (fg: AppColors.faint, bg: Colors.transparent);
+    case 'future':
+      return (fg: const Color(0xFF43585D), bg: AppColors.surfaceAlt);
+    default:
+      return (fg: AppColors.muted, bg: AppColors.neutralTint);
+  }
+}
+
+Widget _bucketPill(String bucket, String label) {
+  final t = _bucketTone(bucket);
+  return ProPill(
+    label,
+    color: t.fg,
+    background: t.bg == Colors.transparent ? AppColors.neutralTint : t.bg,
+  );
+}
+
+const _sheetTitleStyle = TextStyle(
+  fontSize: 19,
+  height: 1.3,
+  fontWeight: FontWeight.w600,
+  letterSpacing: -0.4,
+  color: AppColors.ink,
+);
+
+class _SheetHandle extends StatelessWidget {
+  const _SheetHandle();
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const Text(
-          'Attendance cycle',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color: AppColors.ink,
-          ),
+    return Center(
+      child: Container(
+        width: 40,
+        height: 5,
+        decoration: BoxDecoration(
+          color: const Color(0xFFC6D3D6),
+          borderRadius: BorderRadius.circular(5),
         ),
-        const Spacer(),
-        _NavBtn(icon: Icons.chevron_left_rounded, onTap: onPrev),
-        SizedBox(
-          width: 116,
-          child: Text(
-            DateFormat('MMMM yyyy').format(DateTime(year, month, 1)),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: AppColors.inkSoft,
-            ),
-          ),
-        ),
-        _NavBtn(icon: Icons.chevron_right_rounded, onTap: onNext),
-      ],
+      ),
     );
   }
 }
 
-class _NavBtn extends StatelessWidget {
-  const _NavBtn({required this.icon, required this.onTap});
+/// Small grey value cell (check-in / check-out / worked).
+class _InfoCell extends StatelessWidget {
+  const _InfoCell({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w500,
+              color: AppColors.muted,
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 16,
+                height: 1.35,
+                fontWeight: FontWeight.w600,
+                color: AppColors.ink,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Hero: today + month switcher ─────────────────────────────────────────────
+
+/// Live clock with today's check-in state (from the loaded cycle). Owns its
+/// own one-second ticker so the rest of the screen doesn't rebuild.
+class _TodayPanel extends StatefulWidget {
+  const _TodayPanel({required this.record, required this.known});
+
+  /// Today's attendance row, when the cycle on screen contains today.
+  final AttendanceRecord? record;
+
+  /// False while loading or when another cycle is on screen.
+  final bool known;
+
+  @override
+  State<_TodayPanel> createState() => _TodayPanelState();
+}
+
+class _TodayPanelState extends State<_TodayPanel> {
+  Timer? _ticker;
+  DateTime _now = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _now = DateTime.now());
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  String _liveWorked(AttendanceRecord r) {
+    final inTime = DateTime.tryParse(r.checkIn ?? '');
+    if (inTime == null) return '—';
+    final d = _now.difference(inTime.toLocal());
+    if (d.isNegative) return '0h 00m';
+    return '${d.inHours}h ${(d.inMinutes % 60).toString().padLeft(2, '0')}m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.known ? widget.record : null;
+    final checkedIn = r?.checkIn != null;
+    final checkedOut = r?.checkOut != null;
+    final onClock = checkedIn && !checkedOut;
+
+    final String status;
+    final Color dot;
+    if (checkedOut) {
+      status = 'Done for today';
+      dot = const Color(0xFF9FB3B8);
+    } else if (checkedIn) {
+      status = 'On the clock';
+      dot = AppColors.live;
+    } else {
+      status = 'Not checked in';
+      dot = const Color(0xFFF2B347);
+    }
+
+    final worked = r == null
+        ? '—'
+        : onClock
+            ? _liveWorked(r)
+            : checkedIn
+                ? _fmtDuration(r.workingHours)
+                : '—';
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Today · ${DateFormat('EEE, d MMM').format(_now)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white70,
+                  ),
+                ),
+              ),
+              if (widget.known)
+                Container(
+                  height: 26,
+                  padding: const EdgeInsets.only(left: 4, right: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.white.withOpacity(0.14)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (onClock)
+                        ProPulseDot(color: dot, size: 7)
+                      else
+                        SizedBox(
+                          width: 17,
+                          height: 17,
+                          child: Center(
+                            child: Container(
+                              width: 7,
+                              height: 7,
+                              decoration: BoxDecoration(
+                                  color: dot, shape: BoxShape.circle),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(width: 4),
+                      Text(
+                        status,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              DateFormat('h:mm:ss a').format(_now),
+              style: const TextStyle(
+                fontSize: 34,
+                height: 1.15,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -1,
+                color: Colors.white,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (widget.known)
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withOpacity(0.1)),
+              ),
+              child: IntrinsicHeight(
+                child: Row(
+                  children: [
+                    Expanded(
+                        child: _HeroMini(
+                            label: 'Check-in', value: _fmtTime(r?.checkIn))),
+                    VerticalDivider(
+                        width: 1, color: Colors.white.withOpacity(0.1)),
+                    Expanded(
+                        child: _HeroMini(
+                            label: 'Check-out', value: _fmtTime(r?.checkOut))),
+                    VerticalDivider(
+                        width: 1, color: Colors.white.withOpacity(0.1)),
+                    Expanded(child: _HeroMini(label: 'Worked', value: worked)),
+                  ],
+                ),
+              ),
+            )
+          else
+            const Text(
+              'Switch to the current cycle to see today\'s check-in.',
+              style: TextStyle(fontSize: 12.5, color: Colors.white70),
+            ),
+          if (widget.known && !checkedOut) ...[
+            const SizedBox(height: 10),
+            // Check-in / check-out (with location capture) lives on Home.
+            Align(
+              alignment: Alignment.centerLeft,
+              child: InkWell(
+                onTap: () => context.go('/home'),
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        checkedIn ? 'Go to check-out' : 'Go to check-in',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      const Icon(Icons.chevron_right_rounded,
+                          size: 18, color: Colors.white),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroMini extends StatelessWidget {
+  const _HeroMini({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w500,
+              color: Colors.white.withOpacity(0.66),
+            ),
+          ),
+          const SizedBox(height: 2),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroMonthSwitcher extends StatelessWidget {
+  const _HeroMonthSwitcher({
+    required this.year,
+    required this.month,
+    required this.onPrev,
+    required this.onNext,
+    this.summary,
+  });
+  final int year;
+  final int month;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+  final String? summary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Row(
+        children: [
+          _HeroNavBtn(
+            icon: Icons.chevron_left_rounded,
+            tooltip: 'Previous month',
+            onTap: onPrev,
+          ),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  DateFormat('MMMM yyyy').format(DateTime(year, month, 1)),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    height: 1.3,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.2,
+                    color: Colors.white,
+                  ),
+                ),
+                if (summary != null)
+                  Text(
+                    summary!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white.withOpacity(0.66),
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          _HeroNavBtn(
+            icon: Icons.chevron_right_rounded,
+            tooltip: 'Next month',
+            onTap: onNext,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroNavBtn extends StatelessWidget {
+  const _HeroNavBtn(
+      {required this.icon, required this.tooltip, required this.onTap});
   final IconData icon;
+  final String tooltip;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surfaceAlt,
-      borderRadius: BorderRadius.circular(10),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.hairline),
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Icon(icon, size: 22, color: Colors.white),
           ),
-          alignment: Alignment.center,
-          child: Icon(icon, size: 20, color: AppColors.inkSoft),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Calendar ─────────────────────────────────────────────────────────────────
+
+class _CalendarCard extends StatelessWidget {
+  const _CalendarCard({
+    required this.data,
+    required this.summary,
+    required this.isToday,
+    required this.onTapDay,
+  });
+  final _MonthData data;
+  final _CycleSummary summary;
+  final bool Function(DateTime) isToday;
+  final ValueChanged<_DayCellData> onTapDay;
+
+  @override
+  Widget build(BuildContext context) {
+    final cycle = data.cycle;
+    final fmt = DateFormat('yyyy-MM-dd');
+    final String title;
+    if (cycle.isEmpty) {
+      title = 'Calendar';
+    } else if (cycle.first.month == cycle.last.month &&
+        cycle.first.year == cycle.last.year) {
+      title = DateFormat('MMMM yyyy').format(cycle.first);
+    } else {
+      title =
+          '${DateFormat('d MMM').format(cycle.first)} – ${DateFormat('d MMM').format(cycle.last)}';
+    }
+
+    // Monday-first grid; leading blanks before the first cycle day.
+    final slots = <DateTime?>[
+      if (cycle.isNotEmpty)
+        for (var i = 0; i < cycle.first.weekday - 1; i++) null,
+      ...cycle,
+    ];
+    while (slots.length % 7 != 0) {
+      slots.add(null);
+    }
+
+    Widget cellFor(DateTime? d) {
+      if (d == null) return const SizedBox(height: 40);
+      final iso = fmt.format(d);
+      final cell = summary.cellsByIso[iso];
+      // Hidden (future) days still show their kind, but aren't tappable.
+      final bucket = cell?.bucket ??
+          _deriveBucket(d, data.recordsByDate[iso], data.holidays[iso],
+              data.nonworking);
+      return _CalCell(
+        date: d,
+        bucket: bucket,
+        holidayName: cell?.holidayName ?? data.holidays[iso],
+        today: isToday(d),
+        marker: cell == null ? null : _pendingNote(cell)?.color,
+        onTap: cell == null ? null : () => onTapDay(cell),
+      );
+    }
+
+    const weekdays = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+    return GlassCard(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ProSectionHeader(
+            title: title,
+            trailing: const Text(
+              'Tap a day for details',
+              style: TextStyle(fontSize: 12.5, color: AppColors.faint),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              for (var i = 0; i < 7; i++) ...[
+                if (i > 0) const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    weekdays[i],
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.muted,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          for (var r = 0; r < slots.length; r += 7) ...[
+            if (r > 0) const SizedBox(height: 6),
+            Row(
+              children: [
+                for (var i = 0; i < 7; i++) ...[
+                  if (i > 0) const SizedBox(width: 6),
+                  Expanded(child: cellFor(slots[r + i])),
+                ],
+              ],
+            ),
+          ],
+          const SizedBox(height: 14),
+          const Divider(height: 1, thickness: 1, color: AppColors.hairlineSoft),
+          const SizedBox(height: 12),
+          const _Legend(),
+        ],
+      ),
+    );
+  }
+}
+
+class _CalCell extends StatelessWidget {
+  const _CalCell({
+    required this.date,
+    required this.bucket,
+    required this.holidayName,
+    required this.today,
+    required this.marker,
+    required this.onTap,
+  });
+  final DateTime date;
+  final String bucket;
+  final String? holidayName;
+  final bool today;
+  final Color? marker;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = _bucketTone(bucket);
+    final meta = _bucketMeta(bucket, holidayName);
+    return Semantics(
+      button: onTap != null,
+      label: '${DateFormat('EEEE, d MMMM').format(date)}, ${meta.label}',
+      onTap: onTap,
+      excludeSemantics: true,
+      child: Material(
+        color: tone.bg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: today
+              ? BorderSide(color: AppColors.primary, width: 2)
+              : BorderSide.none,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            height: 40,
+            child: Stack(
+              children: [
+                Center(
+                  child: Text(
+                    '${date.day}',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: today && bucket == 'nonworking'
+                          ? AppColors.primary
+                          : tone.fg,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+                if (marker != null)
+                  Positioned(
+                    top: 5,
+                    right: 5,
+                    child: Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: marker,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -724,42 +1350,32 @@ class _DayRow extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        child: GlassCard(
-          padding: const EdgeInsets.all(12),
-          shadow: AppShadows.soft,
-          border: isToday
-              ? Border.all(color: AppColors.primary, width: 1.4)
-              : null,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
           child: Row(
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: meta.color.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: meta.color.withOpacity(0.22)),
-                ),
+              SizedBox(
+                width: 40,
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      DateFormat('d').format(cell.date),
+                      DateFormat('EEE').format(cell.date),
                       style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        color: meta.color,
-                        height: 1.0,
+                        fontSize: 11.5,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                        color: isToday ? AppColors.primary : AppColors.muted,
                       ),
                     ),
                     Text(
-                      DateFormat('EEE').format(cell.date).toUpperCase(),
+                      DateFormat('d').format(cell.date),
                       style: TextStyle(
-                        fontSize: 8.5,
-                        fontWeight: FontWeight.w700,
-                        color: meta.color,
-                        letterSpacing: 0.3,
+                        fontSize: 19,
+                        height: 1.2,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.4,
+                        color: isToday ? AppColors.primary : AppColors.ink,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                   ],
@@ -772,77 +1388,56 @@ class _DayRow extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Text(
-                          DateFormat('EEEE, d MMM').format(cell.date),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.ink,
+                        Flexible(
+                          child: Text(
+                            DateFormat('EEEE, d MMM').format(cell.date),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              height: 1.33,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: -0.15,
+                              color: AppColors.ink,
+                            ),
                           ),
                         ),
                         if (isToday) ...[
                           const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: AppColors.primary.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(AppRadii.pill),
-                            ),
-                            child: Text(
-                              'Today',
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                          ),
+                          ProPill('Today',
+                              color: AppColors.primary,
+                              background: AppColors.primary.withOpacity(0.1)),
                         ],
                         if (cell.hasReg) ...[
                           const SizedBox(width: 6),
                           const Icon(Icons.flag_rounded,
-                              size: 12, color: AppColors.warning),
+                              size: 13, color: AppColors.warning),
                         ],
                       ],
                     ),
-                    const SizedBox(height: 1),
                     Text(
                       sub,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.muted,
-                        fontWeight: FontWeight.w500,
-                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        height: 1.35,
+                        color: AppColors.muted,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
                     ),
                     if (note != null) ...[
                       const SizedBox(height: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: note.color.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(AppRadii.pill),
-                          border:
-                              Border.all(color: note.color.withOpacity(0.25)),
-                        ),
-                        child: Text(
-                          note.label,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: note.color,
-                          ),
-                        ),
-                      ),
+                      ProPill(note.label, color: note.color, dot: true),
                     ],
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              StatusPill(label: meta.label, color: meta.color),
+              const SizedBox(width: 10),
+              _bucketPill(cell.bucket, meta.label),
+              const SizedBox(width: 4),
+              const Icon(Icons.chevron_right_rounded,
+                  size: 20, color: Color(0xFFB3C0C3)),
             ],
           ),
         ),
@@ -873,20 +1468,21 @@ class _Legend extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 9,
-                height: 9,
+                width: 10,
+                height: 10,
                 decoration: BoxDecoration(
-                  color: _bucketMeta(it.$1).color,
-                  shape: BoxShape.circle,
+                  color: it.$1 == 'nonworking'
+                      ? const Color(0xFFD8E5E8)
+                      : _bucketMeta(it.$1).color.withOpacity(0.55),
+                  borderRadius: BorderRadius.circular(3),
                 ),
               ),
-              const SizedBox(width: 5),
+              const SizedBox(width: 6),
               Text(
                 it.$2,
                 style: const TextStyle(
-                  fontSize: 11,
+                  fontSize: 12,
                   color: AppColors.muted,
-                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
@@ -967,75 +1563,75 @@ class _RegularizationSheetState extends ConsumerState<_RegularizationSheet> {
       padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
       child: SingleChildScrollView(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+          padding: EdgeInsets.fromLTRB(20, 10, 20, 20 + mq.padding.bottom),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.hairline,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
+              const _SheetHandle(),
               const SizedBox(height: 14),
               Text(
                 'Regularize ${DateFormat('d MMM yyyy').format(widget.date)}',
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink),
+                style: _sheetTitleStyle,
+              ),
+              const SizedBox(height: 16),
+              ProField(
+                label: 'Requested status',
+                child: DropdownButtonFormField<String>(
+                  value: _status,
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.tune_rounded, size: 20),
+                  ),
+                  items: [
+                    for (final s in _statuses)
+                      DropdownMenuItem(value: s, child: Text(_attStatusLabel(s))),
+                  ],
+                  onChanged: (v) => setState(() => _status = v ?? 'PRESENT'),
+                ),
               ),
               const SizedBox(height: 14),
-              DropdownButtonFormField<String>(
-                value: _status,
-                decoration: const InputDecoration(
-                  labelText: 'Requested status',
-                  prefixIcon: Icon(Icons.tune_rounded, size: 20),
-                ),
-                items: [
-                  for (final s in _statuses)
-                    DropdownMenuItem(value: s, child: Text(_attStatusLabel(s))),
-                ],
-                onChanged: (v) => setState(() => _status = v ?? 'PRESENT'),
-              ),
-              const SizedBox(height: 12),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                    child: _TimeField(
+                    child: ProField(
                       label: 'Check-in',
-                      value: _checkIn,
-                      onPick: (t) => setState(() => _checkIn = t),
+                      child: _TimeField(
+                        value: _checkIn,
+                        onPick: (t) => setState(() => _checkIn = t),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: _TimeField(
+                    child: ProField(
                       label: 'Check-out',
-                      value: _checkOut,
-                      onPick: (t) => setState(() => _checkOut = t),
+                      child: _TimeField(
+                        value: _checkOut,
+                        onPick: (t) => setState(() => _checkOut = t),
+                      ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _reason,
-                minLines: 2,
-                maxLines: 4,
-                textCapitalization: TextCapitalization.words,
-                inputFormatters: const [TitleCaseTextFormatter()],
-                decoration: const InputDecoration(
-                  labelText: 'Reason *',
-                  alignLabelWithHint: true,
+              const SizedBox(height: 14),
+              ProField(
+                label: 'Reason',
+                required: true,
+                child: TextField(
+                  controller: _reason,
+                  minLines: 2,
+                  maxLines: 4,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [TitleCaseTextFormatter()],
+                  decoration: const InputDecoration(
+                    hintText: 'What should be corrected?',
+                  ),
                 ),
               ),
               if (_error != null) ...[
                 const SizedBox(height: 12),
-                AppErrorPanel(message: _error!),
+                ProNote(_error!, tone: ProNoteTone.bad),
               ],
               const SizedBox(height: 18),
               SizedBox(
@@ -1062,9 +1658,7 @@ class _RegularizationSheetState extends ConsumerState<_RegularizationSheet> {
 }
 
 class _TimeField extends StatelessWidget {
-  const _TimeField(
-      {required this.label, required this.value, required this.onPick});
-  final String label;
+  const _TimeField({required this.value, required this.onPick});
   final TimeOfDay? value;
   final ValueChanged<TimeOfDay> onPick;
 
@@ -1080,16 +1674,18 @@ class _TimeField extends StatelessWidget {
       },
       borderRadius: BorderRadius.circular(AppRadii.md),
       child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: label,
-          prefixIcon: const Icon(Icons.schedule_rounded, size: 20),
+        decoration: const InputDecoration(
+          prefixIcon: Icon(Icons.schedule_rounded, size: 20),
         ),
         child: Text(
           value == null ? 'Not set' : value!.format(context),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
             color: value == null ? AppColors.muted : AppColors.ink,
+            fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
       ),
@@ -1165,64 +1761,62 @@ class _LeaveSheetState extends ConsumerState<_LeaveSheet> {
       padding: EdgeInsets.only(bottom: mq.viewInsets.bottom),
       child: SingleChildScrollView(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+          padding: EdgeInsets.fromLTRB(20, 10, 20, 20 + mq.padding.bottom),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.hairline,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
+              const _SheetHandle(),
               const SizedBox(height: 14),
               Text(
                 'Apply leave · ${DateFormat('d MMM yyyy').format(widget.date)}',
-                style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink),
+                style: _sheetTitleStyle,
+              ),
+              const SizedBox(height: 16),
+              ProField(
+                label: 'Leave type',
+                required: true,
+                child: types.when(
+                  data: (list) => DropdownButtonFormField<String>(
+                    value: _type,
+                    isExpanded: true,
+                    hint: const Text('Choose a leave type'),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.category_outlined, size: 20),
+                    ),
+                    items: [
+                      for (final t in list)
+                        DropdownMenuItem(value: t.code, child: Text(t.label)),
+                    ],
+                    onChanged: (v) => setState(() => _type = v),
+                  ),
+                  loading: () => const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: LinearProgressIndicator(),
+                  ),
+                  error: (e, _) => Text('Could not load leave types: $e',
+                      style: const TextStyle(
+                          color: AppColors.danger, fontSize: 12.5)),
+                ),
               ),
               const SizedBox(height: 14),
-              types.when(
-                data: (list) => DropdownButtonFormField<String>(
-                  value: _type,
-                  isExpanded: true,
+              ProField(
+                label: 'Reason',
+                required: true,
+                child: TextField(
+                  controller: _reason,
+                  minLines: 2,
+                  maxLines: 4,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [TitleCaseTextFormatter()],
                   decoration: const InputDecoration(
-                    labelText: 'Leave type',
-                    prefixIcon: Icon(Icons.category_outlined, size: 20),
+                    hintText: 'Why do you need this day off?',
                   ),
-                  items: [
-                    for (final t in list)
-                      DropdownMenuItem(value: t.code, child: Text(t.label)),
-                  ],
-                  onChanged: (v) => setState(() => _type = v),
-                ),
-                loading: () => const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: LinearProgressIndicator(),
-                ),
-                error: (e, _) => Text('Could not load leave types: $e',
-                    style: const TextStyle(color: AppColors.danger, fontSize: 12.5)),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _reason,
-                minLines: 2,
-                maxLines: 4,
-                textCapitalization: TextCapitalization.words,
-                inputFormatters: const [TitleCaseTextFormatter()],
-                decoration: const InputDecoration(
-                  labelText: 'Reason *',
-                  alignLabelWithHint: true,
                 ),
               ),
               if (_error != null) ...[
                 const SizedBox(height: 12),
-                AppErrorPanel(message: _error!),
+                ProNote(_error!, tone: ProNoteTone.bad),
               ],
               const SizedBox(height: 18),
               SizedBox(
@@ -1243,100 +1837,6 @@ class _LeaveSheetState extends ConsumerState<_LeaveSheet> {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ── Header ───────────────────────────────────────────────────────────────────
-
-class _AttendanceHeader extends StatelessWidget {
-  const _AttendanceHeader();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: AppColors.heroGradient,
-        borderRadius: BorderRadius.circular(AppRadii.xl),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withOpacity(0.3),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topRight,
-                  end: Alignment.bottomLeft,
-                  colors: [
-                    Colors.white.withOpacity(0.12),
-                    Colors.transparent,
-                    Colors.black.withOpacity(0.04),
-                  ],
-                  stops: const [0, 0.56, 1],
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.18),
-                        borderRadius: BorderRadius.circular(AppRadii.pill),
-                        border:
-                            Border.all(color: Colors.white.withOpacity(0.25)),
-                      ),
-                      child: const Text(
-                        'MY ATTENDANCE',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.6,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                const Text(
-                  'Attendance & Hours',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.4,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Tap any day to see its status, request a regularization, or apply for leave.',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.85),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    height: 1.4,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }

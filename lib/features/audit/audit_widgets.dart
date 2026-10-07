@@ -1,11 +1,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
-//  Branch Internal Audit — reusable presentation widgets.
+//  Branch Internal Audit — reusable presentation widgets ("Pro" look).
 //
 //  Card-first, no wide tables. Scores / percentages are on a 0–100 scale.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 
 // ── Formatting / tone helpers────────────────────────────────────────────────
@@ -30,13 +31,13 @@ Color auditScoreTone(double? score) {
     case 'PLANNED':
       return (color: AppColors.info, label: 'Planned');
     case 'IN_PROGRESS':
-      return (color: AppColors.primary, label: 'In Progress');
+      return (color: AppColors.primary, label: 'In progress');
     case 'SUBMITTED':
       return (color: AppColors.accent, label: 'Submitted');
     case 'ASSIGNED':
       return (color: AppColors.info, label: 'Assigned');
     case 'SUPERVISOR_APPROVAL_PENDING':
-      return (color: AppColors.warning, label: 'Supervisor Approval');
+      return (color: AppColors.warning, label: 'Supervisor approval');
     case 'BM_ACTION_PENDING':
     case 'SENT_TO_BM': // legacy alias
       return (color: AppColors.warning, label: 'Sent to BM');
@@ -44,9 +45,9 @@ Color auditScoreTone(double? score) {
     case 'VERIFICATION_PENDING':
     case 'BM_SUBMITTED': // legacy alias
     case 'BM_RESPONDED':
-      return (color: AppColors.pink, label: 'BM Submitted');
+      return (color: AppColors.pink, label: 'BM submitted');
     case 'UNDER_REVIEW':
-      return (color: AppColors.accent, label: 'Under Review');
+      return (color: AppColors.accent, label: 'Under review');
     case 'REOPENED':
       return (color: AppColors.warning, label: 'Reopened');
     case 'CLOSED':
@@ -64,10 +65,10 @@ Color auditScoreTone(double? score) {
     case 'OPEN':
       return (color: AppColors.danger, label: 'Open');
     case 'IN_PROGRESS':
-      return (color: AppColors.warning, label: 'In Progress');
+      return (color: AppColors.warning, label: 'In progress');
     case 'CAPA_SUBMITTED':
     case 'PENDING_VERIFICATION':
-      return (color: AppColors.accent, label: 'CAPA Submitted');
+      return (color: AppColors.accent, label: 'CAPA submitted');
     case 'ACCEPTED':
       return (color: AppColors.primary, label: 'Accepted');
     case 'REJECTED':
@@ -97,6 +98,35 @@ Color auditScoreTone(double? score) {
   }
 }
 
+/// Pill / tile background for a status colour.
+Color auditTint(Color c) {
+  if (c == AppColors.success) return AppColors.successTint;
+  if (c == AppColors.warning) return AppColors.warningTint;
+  if (c == AppColors.danger) return AppColors.dangerTint;
+  if (c == AppColors.info || c == AppColors.accent) return AppColors.infoTint;
+  if (c == AppColors.muted) return AppColors.neutralTint;
+  return c.withValues(alpha: 0.12);
+}
+
+/// Text colour that reads on [auditTint] (amber and grey get an ink shade).
+Color auditInk(Color c) {
+  if (c == AppColors.warning) return const Color(0xFF9A5B00);
+  if (c == AppColors.muted) return const Color(0xFF43585D);
+  return c;
+}
+
+/// Tinted status pill for any status colour.
+ProPill auditPill(String label, Color color, {bool dot = false}) =>
+    ProPill(label, color: auditInk(color), background: auditTint(color), dot: dot);
+
+/// Hero tag tone (deep surfaces) for a status colour.
+ProTagTone auditTagTone(Color c) {
+  if (c == AppColors.success) return ProTagTone.ok;
+  if (c == AppColors.warning) return ProTagTone.warn;
+  if (c == AppColors.danger) return ProTagTone.bad;
+  return ProTagTone.neutral;
+}
+
 // ── Status chips ─────────────────────────────────────────────────────────────
 
 /// A pill rendering an audit plan / execution status (tone via [auditStatusTone]).
@@ -108,7 +138,8 @@ class AuditStatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = auditStatusTone(status);
-    return StatusPill(label: t.label, color: t.color, icon: icon);
+    if (icon == null) return auditPill(t.label, t.color);
+    return _IconPill(label: t.label, color: t.color, icon: icon!);
   }
 }
 
@@ -120,7 +151,7 @@ class FindingStatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = findingStatusTone(status);
-    return StatusPill(label: t.label, color: t.color);
+    return auditPill(t.label, t.color);
   }
 }
 
@@ -132,17 +163,48 @@ class SeverityChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = severityTone(severity);
-    return StatusPill(
-      label: t.label,
-      color: t.color,
-      icon: Icons.flag_rounded,
+    return _IconPill(label: t.label, color: t.color, icon: Icons.flag_rounded);
+  }
+}
+
+class _IconPill extends StatelessWidget {
+  const _IconPill({required this.label, required this.color, required this.icon});
+  final String label;
+  final Color color;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = auditInk(color);
+    return Container(
+      height: 22,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: auditTint(color),
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: ink),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: ink,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 // ── Score bar (0–100) ─────────────────────────────────────────────────────────
 
-/// A labelled linear progress bar with a tinted % badge for a 0–100 score.
+/// A labelled progress bar with a tinted % pill for a 0–100 score.
 class AuditScoreBar extends StatelessWidget {
   const AuditScoreBar({
     super.key,
@@ -171,56 +233,25 @@ class AuditScoreBar extends StatelessWidget {
                 label,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.ink,
-                ),
+                style: AppText.section,
               ),
             ),
             const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              decoration: BoxDecoration(
-                color: tone.withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(AppRadii.pill),
-                border: Border.all(color: tone.withValues(alpha: 0.30)),
-              ),
-              child: Text(
-                auditPct(score),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: tone,
-                ),
-              ),
-            ),
+            auditPill(auditPct(score), tone),
           ],
         ),
         if (sub != null || riskLevel != null) ...[
-          const SizedBox(height: 3),
+          const SizedBox(height: 2),
           Text(
             [
               if (sub != null) sub!,
               if (riskLevel != null) 'Risk: $riskLevel',
             ].join(' · '),
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: AppColors.muted,
-            ),
+            style: AppText.caption,
           ),
         ],
-        const SizedBox(height: 9),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadii.pill),
-          child: LinearProgressIndicator(
-            value: clamped,
-            minHeight: 7,
-            backgroundColor: AppColors.hairline,
-            valueColor: AlwaysStoppedAnimation(tone),
-          ),
-        ),
+        const SizedBox(height: 12),
+        ProBar(value: clamped, color: tone, height: 6),
       ],
     );
   }
@@ -254,37 +285,51 @@ class AuditScoreRing extends StatelessWidget {
           SizedBox(
             width: size,
             height: size,
-            child: CircularProgressIndicator(
-              value: clamped,
-              strokeWidth: 8,
-              backgroundColor: AppColors.hairline,
-              valueColor: AlwaysStoppedAnimation(tone),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: clamped),
+              duration: const Duration(milliseconds: 900),
+              curve: Curves.easeOutCubic,
+              builder: (_, v, __) => CircularProgressIndicator(
+                value: v,
+                strokeWidth: size * 0.085,
+                strokeCap: StrokeCap.round,
+                backgroundColor: AppColors.hairlineSoft,
+                valueColor: AlwaysStoppedAnimation(tone),
+              ),
             ),
           ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                auditPct(score),
-                style: TextStyle(
-                  fontSize: size * 0.20,
-                  fontWeight: FontWeight.w800,
-                  color: tone,
-                  height: 1.0,
-                ),
-              ),
-              if (label != null) ...[
-                const SizedBox(height: 2),
-                Text(
-                  label!,
-                  style: const TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.muted,
+          Padding(
+            padding: EdgeInsets.all(size * 0.14),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    auditPct(score),
+                    style: TextStyle(
+                      fontSize: size * 0.2,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.4,
+                      color: auditInk(tone),
+                      height: 1.0,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                   ),
                 ),
+                if (label != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    label!,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.muted,
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ],
       ),
@@ -294,7 +339,7 @@ class AuditScoreRing extends StatelessWidget {
 
 // ── Section card ─────────────────────────────────────────────────────────────
 
-/// A titled white card with an icon and divider (mirrors the team-detail look).
+/// A titled white card (Pro section header + body).
 class AuditSectionCard extends StatelessWidget {
   const AuditSectionCard({
     super.key,
@@ -312,31 +357,27 @@ class AuditSectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GlassCard(
-      shadow: AppShadows.soft,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
               if (icon != null) ...[
-                Icon(icon, size: 16, color: AppColors.primary),
-                const SizedBox(width: 8),
+                ProIconWell(icon: icon!, color: AppColors.primary, size: 30),
+                const SizedBox(width: 10),
               ],
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.section,
                 ),
               ),
               if (trailing != null) trailing!,
             ],
           ),
-          const SizedBox(height: 6),
-          const Divider(height: 12),
+          const SizedBox(height: 10),
           ...children,
         ],
       ),
@@ -353,35 +394,315 @@ class AuditKeyValueRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            flex: 4,
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: AppColors.muted,
-              ),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: AppColors.muted,
             ),
           ),
+          const SizedBox(width: 12),
           Expanded(
-            flex: 5,
             child: Text(
               value,
               textAlign: TextAlign.right,
               style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
                 color: AppColors.ink,
+                fontFeatures: [FontFeature.tabularFigures()],
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+// ── Bottom sheets ────────────────────────────────────────────────────────────
+
+/// White bottom-sheet frame (radius 24 top, drag handle, 19px title). Lifts
+/// above the keyboard; the [child] may be scrollable (it is given the space
+/// left under the title).
+class AuditSheet extends StatelessWidget {
+  const AuditSheet({
+    super.key,
+    required this.child,
+    this.title,
+    this.subtitle,
+    this.trailing,
+    this.padding = const EdgeInsets.fromLTRB(16, 0, 16, 16),
+  });
+
+  final Widget child;
+  final String? title;
+  final String? subtitle;
+  final Widget? trailing;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  margin: const EdgeInsets.only(top: 10, bottom: 10),
+                  width: 40,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFC6D3D6),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+              if (title != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 2, 16, 12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title!,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 19,
+                                height: 1.25,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.35,
+                                color: AppColors.ink,
+                              ),
+                            ),
+                            if (subtitle != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(subtitle!, style: AppText.caption),
+                              ),
+                          ],
+                        ),
+                      ),
+                      if (trailing != null) trailing!,
+                    ],
+                  ),
+                ),
+              Flexible(child: Padding(padding: padding, child: child)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Pickers (filters) ────────────────────────────────────────────────────────
+
+/// Wraps a picker choice so "All" (null) can be told apart from "dismissed".
+class AuditPickResult<T> {
+  const AuditPickResult(this.value);
+  final T? value;
+}
+
+/// Bottom-sheet single-choice list. Returns null when dismissed.
+Future<AuditPickResult<T>?> showAuditPicker<T>(
+  BuildContext context, {
+  required String title,
+  required List<({T? value, String label})> options,
+  required T? selected,
+}) {
+  return showModalBottomSheet<AuditPickResult<T>>(
+    context: context,
+    isScrollControlled: true,
+    builder: (ctx) => AuditSheet(
+      title: title,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(ctx).size.height * 0.62,
+        ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.hairline),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: ListView.separated(
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            itemCount: options.length,
+            separatorBuilder: (_, __) => const Divider(
+              height: 1,
+              thickness: 1,
+              indent: 14,
+              color: AppColors.hairlineSoft,
+            ),
+            itemBuilder: (_, i) {
+              final o = options[i];
+              final on = o.value == selected;
+              return ProListRow(
+                title: o.label,
+                chevron: false,
+                trailing: on
+                    ? Icon(Icons.check_rounded, size: 20, color: AppColors.primary)
+                    : null,
+                onTap: () => Navigator.pop(ctx, AuditPickResult<T>(o.value)),
+              );
+            },
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// Tappable filter field: small label over the current value + chevron.
+class AuditPickField extends StatelessWidget {
+  const AuditPickField({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.onTap,
+    this.active = false,
+  });
+
+  final String label;
+  final String value;
+  final VoidCallback? onTap;
+
+  /// Highlights the border when a non-default value is picked.
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        side: BorderSide(
+          color: active ? AppColors.primary : const Color(0xFFD9E2E4),
+          width: active ? 1.4 : 1,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 9, 8, 9),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                    const SizedBox(height: 1),
+                    Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.expand_more_rounded,
+                  size: 20, color: AppColors.muted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pager row ("‹  Page 2 of 5  ›") for server-paged lists.
+class AuditPager extends StatelessWidget {
+  const AuditPager({
+    super.key,
+    required this.page,
+    required this.totalPages,
+    required this.onPrev,
+    required this.onNext,
+  });
+  final int page; // zero-based
+  final int totalPages;
+  final VoidCallback? onPrev;
+  final VoidCallback? onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget btn(IconData icon, String tip, VoidCallback? onTap) => Tooltip(
+          message: tip,
+          child: Material(
+            color: AppColors.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: const BorderSide(color: AppColors.hairline),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onTap,
+              child: SizedBox(
+                width: 42,
+                height: 42,
+                child: Icon(
+                  icon,
+                  size: 22,
+                  color: onTap == null ? AppColors.hairline : AppColors.ink,
+                ),
+              ),
+            ),
+          ),
+        );
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        btn(Icons.chevron_left_rounded, 'Previous page', onPrev),
+        const SizedBox(width: 14),
+        Text(
+          'Page ${page + 1} of $totalPages',
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: AppColors.inkSoft,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+        const SizedBox(width: 14),
+        btn(Icons.chevron_right_rounded, 'Next page', onNext),
+      ],
     );
   }
 }

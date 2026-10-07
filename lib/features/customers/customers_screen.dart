@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/text_formatters.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../core/navigation/mobile_menu_config.dart';
@@ -78,56 +79,23 @@ class _HubToggle extends StatelessWidget {
   /// Adds the manager-only "Team" segment.
   final bool showTeam;
 
+  /// Deep-surface segmented switch — sits inside the hero of the Customers,
+  /// My tasks and Team views (Customers.dc.html / Tasks.dc.html).
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.5),
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: Colors.white.withOpacity(0.6)),
-      ),
-      child: Row(
-        children: [
-          _seg('Customers', Icons.people_alt_rounded, 0),
-          _seg('My tasks', Icons.task_alt_rounded, 1),
-          if (showTeam) _seg('Team', Icons.groups_rounded, 2),
-        ],
-      ),
-    );
-  }
-
-  Widget _seg(String label, IconData icon, int index) {
-    final selected = current == index;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => onChanged(index),
-        behavior: HitTestBehavior.opaque,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(vertical: 9),
-          decoration: BoxDecoration(
-            color: selected ? AppColors.primary : Colors.transparent,
-            borderRadius: BorderRadius.circular(AppRadii.sm),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon,
-                  size: 16, color: selected ? Colors.white : AppColors.muted),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: selected ? Colors.white : AppColors.inkSoft,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return ProHeroSegmented(
+      labels: [
+        'Customers',
+        'My tasks',
+        if (showTeam) 'Team',
+      ],
+      icons: const [
+        Icons.people_alt_rounded,
+        Icons.task_alt_rounded,
+        Icons.groups_rounded,
+      ],
+      selected: current,
+      onChanged: onChanged,
     );
   }
 }
@@ -145,6 +113,13 @@ class _CustomersViewState extends ConsumerState<_CustomersView> {
   String _query = '';
   Timer? _debounce;
 
+  /// Client-side quick filter over the loaded list:
+  /// 0 all · 1 active · 2 inactive · 3 no location pinned.
+  int _filter = 0;
+
+  /// false = server order, true = A–Z by name (list already in memory).
+  bool _sortAz = false;
+
   @override
   void dispose() {
     _debounce?.cancel();
@@ -159,225 +134,149 @@ class _CustomersViewState extends ConsumerState<_CustomersView> {
     });
   }
 
+  bool _matches(Customer c, int filter) {
+    switch (filter) {
+      case 1:
+        return c.isActive;
+      case 2:
+        return !c.isActive;
+      case 3:
+        return !c.hasLocation;
+      default:
+        return true;
+    }
+  }
+
+  void _open(Customer c) {
+    // Push onto the ROOT navigator so the detail screen covers the HomeShell
+    // chrome — otherwise the bottom nav bar overlaps the "Perform task" button.
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute(
+        builder: (_) => CustomerDetailScreen(customerId: c.id),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
     final async = ref.watch(customerSearchProvider(_query));
+    final all = async.valueOrNull ?? const <Customer>[];
+    final active = all.where((c) => c.isActive).length;
+    final inactive = all.length - active;
+    final noPin = all.where((c) => !c.hasLocation).length;
+    const filterNames = [
+      'All customers',
+      'Active customers',
+      'Inactive customers',
+      'Without a location pin',
+    ];
 
-    return RefreshIndicator(
-      color: AppColors.primary,
-      backgroundColor: Colors.white.withOpacity(0.85),
+    return ProPage(
+      topInset: mq.padding.top,
+      clearNav: true,
       onRefresh: () async => ref.invalidate(customerSearchProvider(_query)),
-      child: ListView(
-        physics: const BouncingScrollPhysics(
-          parent: AlwaysScrollableScrollPhysics(),
-        ),
-        padding: EdgeInsets.fromLTRB(
-          16,
-          mq.padding.top + 1,
-          16,
-          mq.padding.bottom + AppChrome.bottomNavHeight + 10,
+      hero: ProHero(
+        title: 'Customers',
+        subtitle: 'Pick a customer to perform a task for them',
+        overlap: _CustomerSearchField(
+          controller: _searchCtrl,
+          onChanged: _onSearchChanged,
         ),
         children: [
           widget.header,
-          const SizedBox(height: 12),
-          const AppSectionHeader(
-            title: 'Customers',
-            subtitle: 'Pick a customer to perform a task for them',
-          ),
-          const SizedBox(height: 14),
-          _CustomerSearchField(
-            controller: _searchCtrl,
-            onChanged: _onSearchChanged,
-            onClear: () {
-              _searchCtrl.clear();
-              _onSearchChanged('');
-            },
-          ),
-          const SizedBox(height: 16),
-          async.when(
-            data: (customers) {
-              if (customers.isEmpty) {
-                return AppEmptyState(
-                  icon: Icons.person_search_rounded,
-                  message: _query.isEmpty
-                      ? 'No customers available in your branch yet.'
-                      : 'No customers match “$_query”.',
-                );
-              }
-              return Column(
-                children: [
-                  for (final c in customers)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(AppRadii.lg),
-                        // Push onto the ROOT navigator so the detail screen
-                        // covers the HomeShell chrome — otherwise the bottom
-                        // nav bar overlaps the "Perform task" button.
-                        onTap: () => Navigator.of(context, rootNavigator: true).push(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                CustomerDetailScreen(customerId: c.id),
-                          ),
-                        ),
-                        child: _CustomerCard(customer: c),
-                      ),
-                    ),
-                ],
-              );
-            },
-            loading: () => const AppLoadingBlock(height: 160),
-            error: (err, _) => AppErrorPanel(
-              message: err.toString(),
-              onRetry: () => ref.invalidate(customerSearchProvider(_query)),
+          ProHeroStats(stats: [
+            ProStat(
+              label: 'Customers',
+              value: async.hasValue ? '${all.length}' : '—',
+              sub: _query.isEmpty ? 'in your branch' : 'matching search',
+              dot: Colors.white,
+              selected: _filter == 0 && async.hasValue,
+              onTap: () => setState(() => _filter = 0),
             ),
-          ),
+            ProStat(
+              label: 'Active',
+              value: async.hasValue ? '$active' : '—',
+              sub: 'of ${all.length}',
+              dot: AppColors.live,
+              selected: _filter == 1,
+              onTap: () => setState(() => _filter = _filter == 1 ? 0 : 1),
+            ),
+            ProStat(
+              label: 'Inactive',
+              value: async.hasValue ? '$inactive' : '—',
+              sub: 'closed or paused',
+              dot: const Color(0xFFB3C0C3),
+              selected: _filter == 2,
+              onTap: () => setState(() => _filter = _filter == 2 ? 0 : 2),
+            ),
+          ]),
         ],
       ),
-    );
-  }
-}
-
-class _CustomerSearchField extends StatelessWidget {
-  const _CustomerSearchField({
-    required this.controller,
-    required this.onChanged,
-    required this.onClear,
-  });
-
-  final TextEditingController controller;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 48,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.55),
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: Colors.white.withOpacity(0.6)),
-      ),
-      child: Row(
-        children: [
-          const SizedBox(width: 12),
-          const Icon(Icons.search_rounded, size: 18, color: AppColors.muted),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              onChanged: onChanged,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
-              textInputAction: TextInputAction.search,
-              cursorColor: AppColors.primary,
-              style: const TextStyle(
-                fontSize: 14,
-                color: AppColors.ink,
-                fontWeight: FontWeight.w500,
-              ),
-              decoration: const InputDecoration(
-                isCollapsed: true,
-                border: InputBorder.none,
-                hintText: 'Search by name, code or mobile…',
-                hintStyle: TextStyle(
-                  color: AppColors.muted,
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ),
-          if (controller.text.isNotEmpty)
-            IconButton(
-              tooltip: 'Clear',
-              icon: const Icon(Icons.close_rounded, size: 18),
-              color: AppColors.muted,
-              onPressed: onClear,
-            )
-          else
-            const SizedBox(width: 8),
-        ],
-      ),
-    );
-  }
-}
-
-class _CustomerCard extends StatelessWidget {
-  const _CustomerCard({required this.customer});
-  final Customer customer;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = customer;
-    return GlassCard(
-      padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
-      child: Row(
-        children: [
-          UserAvatar(name: c.customerName, size: 44, radius: 13),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        c.customerName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.ink,
-                        ),
-                      ),
-                    ),
-                    if (!c.isActive) ...[
-                      const SizedBox(width: 6),
-                      _StatusDot(label: c.status ?? 'INACTIVE'),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 3),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 2,
-                  children: [
-                    if (c.customerCode != null && c.customerCode!.isNotEmpty)
-                      _meta(Icons.tag_rounded, c.customerCode!),
-                    if (c.mobileNumber != null && c.mobileNumber!.isNotEmpty)
-                      _meta(Icons.call_outlined, c.mobileNumber!),
-                    if (c.branchName != null && c.branchName!.isNotEmpty)
-                      _meta(Icons.store_mall_directory_outlined, c.branchName!),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 6),
-          const Icon(Icons.chevron_right_rounded,
-              size: 20, color: AppColors.muted),
-        ],
-      ),
-    );
-  }
-
-  Widget _meta(IconData icon, String label) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 12.5, color: AppColors.muted),
-        const SizedBox(width: 3),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11.5,
-            color: AppColors.muted,
-            fontWeight: FontWeight.w600,
+        ProChipBar(
+          labels: const ['All', 'Active', 'Inactive', 'No location'],
+          counts: async.hasValue ? [all.length, active, inactive, noPin] : null,
+          selected: _filter,
+          onSelected: (i) => setState(() => _filter = i),
+          bleed: 0,
+        ),
+        async.when(
+          data: (customers) {
+            if (customers.isEmpty) {
+              return ProEmpty(
+                icon: Icons.person_search_rounded,
+                title: _query.isEmpty ? 'No customers yet' : 'No matches',
+                message: _query.isEmpty
+                    ? 'No customers available in your branch yet.'
+                    : 'No customers match “$_query”.',
+              );
+            }
+            final shown = customers.where((c) => _matches(c, _filter)).toList();
+            if (_sortAz) {
+              shown.sort((a, b) => a.customerName
+                  .toLowerCase()
+                  .compareTo(b.customerName.toLowerCase()));
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ProSectionHeader(
+                  title: '${filterNames[_filter]} · ${shown.length}',
+                  small: true,
+                  trailing: TextButton.icon(
+                    onPressed: () => setState(() => _sortAz = !_sortAz),
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size(0, 34),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      foregroundColor: AppColors.inkSoft,
+                    ),
+                    icon: const Icon(Icons.sort_rounded, size: 17),
+                    label: Text(_sortAz ? 'A–Z' : 'Default order'),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (shown.isEmpty)
+                  const ProEmpty(
+                    icon: Icons.filter_alt_off_rounded,
+                    title: 'Nothing in this filter',
+                    message: 'Pick another filter above to see more customers.',
+                  )
+                else
+                  ProListGroup(
+                    dividerIndent: 66,
+                    children: [
+                      for (final c in shown)
+                        _CustomerRow(customer: c, onTap: () => _open(c)),
+                    ],
+                  ),
+              ],
+            );
+          },
+          loading: () => const AppLoadingBlock(height: 160),
+          error: (err, _) => AppErrorPanel(
+            message: err.toString(),
+            onRetry: () => ref.invalidate(customerSearchProvider(_query)),
           ),
         ),
       ],
@@ -385,27 +284,94 @@ class _CustomerCard extends StatelessWidget {
   }
 }
 
-class _StatusDot extends StatelessWidget {
-  const _StatusDot({required this.label});
-  final String label;
+/// [ProSearchField] look (raised, 50px) that keeps the customer search's
+/// title-case formatter.
+class _CustomerSearchField extends StatelessWidget {
+  const _CustomerSearchField({
+    required this.controller,
+    required this.onChanged,
+  });
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
+    OutlineInputBorder border(Color c, [double w = 1]) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(15),
+          borderSide: BorderSide(color: c, width: w),
+        );
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
-        color: AppColors.muted.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(AppRadii.pill),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: AppShadows.lifted,
       ),
-      child: Text(
-        label.toUpperCase(),
-        style: const TextStyle(
-          fontSize: 9,
-          fontWeight: FontWeight.w800,
-          color: AppColors.muted,
-          letterSpacing: 0.3,
+      child: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: controller,
+        builder: (_, v, __) => TextField(
+          controller: controller,
+          onChanged: onChanged,
+          textCapitalization: TextCapitalization.words,
+          inputFormatters: const [TitleCaseTextFormatter()],
+          textInputAction: TextInputAction.search,
+          style: const TextStyle(fontSize: 15, color: AppColors.ink),
+          decoration: InputDecoration(
+            hintText: 'Name, customer code or mobile',
+            prefixIcon: const Icon(Icons.search_rounded, size: 21),
+            suffixIcon: v.text.isNotEmpty
+                ? IconButton(
+                    tooltip: 'Clear search',
+                    icon: const Icon(Icons.close_rounded, size: 19),
+                    onPressed: () {
+                      controller.clear();
+                      onChanged('');
+                    },
+                  )
+                : null,
+            contentPadding: const EdgeInsets.symmetric(vertical: 15),
+            border: border(AppColors.hairline),
+            enabledBorder: border(AppColors.hairline),
+            focusedBorder: border(AppColors.primary, 1.6),
+          ),
         ),
       ),
     );
+  }
+}
+
+class _CustomerRow extends StatelessWidget {
+  const _CustomerRow({required this.customer, required this.onTap});
+  final Customer customer;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = customer;
+    final sub = [
+      if (c.customerCode != null && c.customerCode!.isNotEmpty) c.customerCode!,
+      if (c.branchName != null && c.branchName!.isNotEmpty) c.branchName!,
+      if (c.mobileNumber != null && c.mobileNumber!.isNotEmpty) c.mobileNumber!,
+    ].join(' · ');
+    return ProListRow(
+      leading: ProAvatar(
+        name: c.customerName,
+        size: 42,
+        dot: c.isActive ? null : const Color(0xFFB3C0C3),
+      ),
+      title: c.customerName,
+      subtitle: sub.isEmpty ? null : sub,
+      meta: c.hasLocation ? null : 'No location pinned',
+      pill: c.isActive
+          ? ProPill.ok('Active')
+          : ProPill.neutral(_statusLabel(c.status ?? 'INACTIVE')),
+      onTap: onTap,
+    );
+  }
+
+  static String _statusLabel(String raw) {
+    final s = raw.replaceAll('_', ' ').trim().toLowerCase();
+    if (s.isEmpty) return 'Inactive';
+    return s[0].toUpperCase() + s.substring(1);
   }
 }
