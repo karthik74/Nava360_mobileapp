@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -78,88 +79,80 @@ class _TeamPerformanceScreenState extends ConsumerState<TeamPerformanceScreen> {
     final user = ref.watch(authUserProvider);
     final canTeam = _canViewTeam(user);
     final options = _periodOptions();
+    final hasSelf = user?.employeeId != null;
 
     final int? qMonth = _selected.month == 0 ? null : _selected.month;
     final int? qYear = _selected.year == 0 ? null : _selected.year;
+    final selectedIndex = options.indexOf(_selected);
 
-    return RefreshIndicator(
-      color: AppColors.primary,
+    return ProPage(
+      topInset: MediaQuery.of(context).padding.top,
+      clearNav: true,
       onRefresh: () async {
         ref.invalidate(myPerformanceProvider);
         ref.invalidate(teamPerformanceProvider);
         await Future<void>.delayed(const Duration(milliseconds: 250));
       },
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        // Match the My Team screen's spacing: status-bar inset + 8 at top (the
-        // shell's glass app bar floats over), 16 horizontal, nav-bar inset at bottom.
-        padding: EdgeInsets.fromLTRB(
-            16, MediaQuery.of(context).padding.top + 8, 16,
-            MediaQuery.of(context).padding.bottom + AppChrome.bottomNavHeight + 16),
+      hero: ProHero(
+        title: canTeam ? 'Team performance' : 'Performance',
+        subtitle: _selected == _kLatest
+            ? 'Latest scorecards'
+            : 'Scorecards · ${_selected.label}',
+        actions: [
+          if (hasSelf)
+            ProHeroIconButton(
+              icon: Icons.insights_rounded,
+              tooltip: 'My performance',
+              onTap: () => context.push('/my-performance'),
+            ),
+        ],
+        // ── Search the team (server-side, on submit) ──
+        overlap: canTeam
+            ? _SearchField(
+                controller: _searchCtrl,
+                onSubmit: (v) => setState(() {
+                  _q = v.trim();
+                  _page = 0;
+                }),
+                onClear: () => setState(() {
+                  _q = '';
+                  _page = 0;
+                }),
+              )
+            : null,
         children: [
-          // Sticky-feel month selector.
-          PerfMonthSelector(
-            periods: options,
-            selected: _selected,
-            onChanged: (p) => setState(() {
-              _selected = p;
-              _page = 0;
-            }),
-          ),
-          const SizedBox(height: 12),
-
           // The signed-in user's own scorecard (everyone).
-          if (user?.employeeId != null) ...[
-            _MyPerformanceCard(month: qMonth, year: qYear),
-            const SizedBox(height: 14),
-          ],
-
-          if (canTeam) ...[
-            Row(
-              children: [
-                Icon(Icons.groups_2_rounded, size: 17, color: AppColors.primary),
-                SizedBox(width: 8),
-                Text(
-                  'My Team',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                    letterSpacing: 0.1,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            _SearchField(
-              controller: _searchCtrl,
-              onSubmit: (v) => setState(() {
-                _q = v.trim();
-                _page = 0;
-              }),
-              onClear: () => setState(() {
-                _q = '';
-                _page = 0;
-              }),
-            ),
-            const SizedBox(height: 12),
-            _TeamList(
-              query: TeamPerfQuery(
-                month: qMonth,
-                year: qYear,
-                q: _q.isEmpty ? null : _q,
-                page: _page,
-                size: 20,
-                sort: 'overallPercentage,desc',
-              ),
-              onPrev: _page > 0 ? () => setState(() => _page -= 1) : null,
-              onNext: (last) => last ? null : () => setState(() => _page += 1),
-              onOpen: _openEmployee,
-            ),
-          ] else
-            const _NotAManagerNote(),
+          if (hasSelf) _MyPerformanceCard(month: qMonth, year: qYear),
         ],
       ),
+      children: [
+        // Period chips (Latest + the last 13 months).
+        ProChipBar(
+          labels: [for (final p in options) p.label],
+          selected: selectedIndex < 0 ? 0 : selectedIndex,
+          onSelected: (i) => setState(() {
+            _selected = options[i];
+            _page = 0;
+          }),
+          bleed: 0,
+        ),
+        if (canTeam)
+          _TeamList(
+            query: TeamPerfQuery(
+              month: qMonth,
+              year: qYear,
+              q: _q.isEmpty ? null : _q,
+              page: _page,
+              size: 20,
+              sort: 'overallPercentage,desc',
+            ),
+            onPrev: _page > 0 ? () => setState(() => _page -= 1) : null,
+            onNext: (last) => last ? null : () => setState(() => _page += 1),
+            onOpen: _openEmployee,
+          )
+        else
+          const _NotAManagerNote(),
+      ],
     );
   }
 
@@ -175,7 +168,7 @@ class _TeamPerformanceScreenState extends ConsumerState<TeamPerformanceScreen> {
   }
 }
 
-// ── My own scorecard summary card ────────────────────────────────────────────
+// ── My own scorecard summary (hero stats) ────────────────────────────────────
 
 class _MyPerformanceCard extends ConsumerWidget {
   const _MyPerformanceCard({this.month, this.year});
@@ -186,57 +179,37 @@ class _MyPerformanceCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final async =
         ref.watch(myPerformanceProvider(PerfQuery(month: month, year: year)));
+    void open() => context.push('/my-performance');
     return async.when(
-      loading: () => const AppLoadingBlock(height: 96),
+      loading: () => const ProHeroStats(stats: [
+        ProStat(label: 'My overall', value: '—'),
+        ProStat(label: 'NLPL rank', value: '—'),
+        ProStat(label: 'Branch rank', value: '—'),
+      ]),
       error: (_, __) => const SizedBox.shrink(),
       data: (detail) {
         final s = detail.summary;
-        return InkWell(
-          borderRadius: BorderRadius.circular(AppRadii.lg),
-          onTap: () => context.push('/my-performance'),
-          child: GlassCard(
-            shadow: AppShadows.soft,
-            child: Row(
-              children: [
-                PerfRingProgress(
-                  ratio: s?.overallPercentage,
-                  size: 64,
-                  label: 'Overall',
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'My Performance',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.ink,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        s == null
-                            ? 'No scorecard synced yet'
-                            : 'NLPL #${s.nlplRank ?? '—'}  ·  ${s.monthLabel ?? ''}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w500,
-                          color: AppColors.muted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
-              ],
-            ),
+        return ProHeroStats(stats: [
+          ProStat(
+            label: 'My overall',
+            value: perfPct(s?.overallPercentage),
+            sub: s == null ? 'No scorecard synced yet' : (s.monthLabel ?? ''),
+            dot: perfToneOnDark(s?.overallPercentage),
+            onTap: open,
           ),
-        );
+          ProStat(
+            label: 'NLPL rank',
+            value: s == null ? '—' : '#${s.nlplRank ?? '—'}',
+            dot: const Color(0xFFF2B347),
+            onTap: open,
+          ),
+          ProStat(
+            label: 'Branch rank',
+            value: s?.branchRank == null ? '—' : '#${s!.branchRank}',
+            dot: Colors.white54,
+            onTap: open,
+          ),
+        ]);
       },
     );
   }
@@ -274,13 +247,31 @@ class _TeamList extends ConsumerWidget {
                 'No team scorecards for this period.\nYour reportees\' performance will appear here once synced.',
           );
         }
+        // The list is sorted by overall score server-side, so the position is
+        // the rank — shown only when no search narrows the list.
+        final ranked = query.q == null;
+        final base = pageData.page * query.size;
         return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            for (final row in pageData.content)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _TeamRow(row: row, onTap: () => onOpen(row)),
-              ),
+            ProSectionHeader(
+              title: query.q == null
+                  ? 'My team · ${pageData.totalElements}'
+                  : '${pageData.totalElements} match “${query.q}”',
+              subtitle: 'Ranked by overall',
+            ),
+            const SizedBox(height: 10),
+            ProListGroup(
+              dividerIndent: ranked ? 92 : 62,
+              children: [
+                for (var i = 0; i < pageData.content.length; i++)
+                  _TeamRow(
+                    row: pageData.content[i],
+                    rank: ranked ? base + i + 1 : null,
+                    onTap: () => onOpen(pageData.content[i]),
+                  ),
+              ],
+            ),
             if (pageData.totalPages > 1)
               _Pager(
                 page: pageData.page,
@@ -296,149 +287,54 @@ class _TeamList extends ConsumerWidget {
 }
 
 class _TeamRow extends StatelessWidget {
-  const _TeamRow({required this.row, required this.onTap});
+  const _TeamRow({required this.row, required this.onTap, this.rank});
   final PerformanceSummary row;
   final VoidCallback onTap;
+  final int? rank;
 
   @override
   Widget build(BuildContext context) {
-    final tone = perfTone(row.overallPercentage);
-    return InkWell(
-      borderRadius: BorderRadius.circular(AppRadii.lg),
-      onTap: onTap,
-      child: GlassCard(
-        padding: const EdgeInsets.all(12),
-        shadow: AppShadows.soft,
-        child: Row(
-          children: [
-            UserAvatar(name: row.employeeName ?? '?', size: 38, radius: 11),
-            const SizedBox(width: 11),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    row.employeeName ?? row.employeeCode ?? 'Employee',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.ink,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    [
-                      if ((row.employeeCode ?? '').isNotEmpty) row.employeeCode!,
-                      if ((row.branchName ?? '').isNotEmpty) row.branchName!,
-                    ].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: AppColors.muted,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: [
-                      if (row.nlplRank != null)
-                        _MiniChip(
-                            icon: Icons.emoji_events_rounded,
-                            label: 'NLPL #${row.nlplRank}',
-                            color: AppColors.primary),
-                      if (row.branchRank != null)
-                        _MiniChip(
-                            icon: Icons.store_mall_directory_rounded,
-                            label: 'Branch #${row.branchRank}',
-                            color: AppColors.accent),
-                      if ((row.branchGrade ?? '').isNotEmpty)
-                        _MiniChip(
-                            icon: Icons.workspace_premium_rounded,
-                            label: 'Grade ${row.branchGrade}',
-                            color: AppColors.pink),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+    final name = row.employeeName ?? row.employeeCode ?? 'Employee';
+    final sub = [
+      if ((row.employeeCode ?? '').isNotEmpty) row.employeeCode!,
+      if ((row.branchName ?? '').isNotEmpty) row.branchName!,
+    ].join(' · ');
+    final meta = [
+      if (row.nlplRank != null) 'NLPL #${row.nlplRank}',
+      if (row.branchRank != null) 'Branch #${row.branchRank}',
+      if ((row.branchGrade ?? '').isNotEmpty) 'Grade ${row.branchGrade}',
+    ].join(' · ');
+    final avatar = ProAvatar(name: row.employeeName ?? '?', size: 38);
+    return ProListRow(
+      leading: rank == null
+          ? avatar
+          : Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: tone.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(AppRadii.pill),
-                    border: Border.all(color: tone.withValues(alpha: 0.30)),
-                  ),
+                SizedBox(
+                  width: 24,
                   child: Text(
-                    perfPct(row.overallPercentage),
+                    '$rank',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w800,
-                      color: tone,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: rank! <= 3 ? AppColors.primary : AppColors.faint,
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
                 ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Overall',
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.muted,
-                  ),
-                ),
+                const SizedBox(width: 6),
+                avatar,
               ],
             ),
-            const SizedBox(width: 2),
-            const Icon(Icons.chevron_right_rounded,
-                size: 18, color: AppColors.muted),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _MiniChip extends StatelessWidget {
-  const _MiniChip(
-      {required this.icon, required this.label, required this.color});
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: color.withValues(alpha: 0.22)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 11, color: color),
-          const SizedBox(width: 3),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-              color: color,
-            ),
-          ),
-        ],
-      ),
+      title: name,
+      subtitle: sub.isEmpty ? null : sub,
+      meta: meta.isEmpty ? null : meta,
+      value: perfPct(row.overallPercentage),
+      valueColor: perfTone(row.overallPercentage),
+      pill: ProPill.neutral('Overall'),
+      onTap: onTap,
     );
   }
 }
@@ -458,29 +354,30 @@ class _Pager extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 8),
+      padding: const EdgeInsets.only(top: 10),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          IconButton(
+          IconButton.outlined(
+            tooltip: 'Previous page',
             onPressed: onPrev,
             icon: const Icon(Icons.chevron_left_rounded),
-            color: AppColors.primary,
-            disabledColor: AppColors.hairline,
           ),
+          const SizedBox(width: 12),
           Text(
             'Page ${page + 1} of $totalPages',
             style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
+              fontSize: 13.5,
+              fontWeight: FontWeight.w500,
               color: AppColors.inkSoft,
+              fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
-          IconButton(
+          const SizedBox(width: 12),
+          IconButton.outlined(
+            tooltip: 'Next page',
             onPressed: onNext,
             icon: const Icon(Icons.chevron_right_rounded),
-            color: AppColors.primary,
-            disabledColor: AppColors.hairline,
           ),
         ],
       ),
@@ -488,6 +385,7 @@ class _Pager extends StatelessWidget {
   }
 }
 
+/// Raised search field (Pro look) that searches on submit, like before.
 class _SearchField extends StatelessWidget {
   const _SearchField({
     required this.controller,
@@ -500,56 +398,45 @@ class _SearchField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    OutlineInputBorder border(Color c, [double w = 1]) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(15),
+          borderSide: BorderSide(color: c, width: w),
+        );
     return Container(
-      height: 44,
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: AppColors.hairline),
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: AppShadows.lifted,
       ),
-      child: Row(
-        children: [
-          const SizedBox(width: 12),
-          const Icon(Icons.search_rounded, size: 18, color: AppColors.muted),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
-              textInputAction: TextInputAction.search,
-              onSubmitted: onSubmit,
-              cursorColor: AppColors.primary,
-              style: const TextStyle(
-                  fontSize: 13.5,
-                  color: AppColors.ink,
-                  fontWeight: FontWeight.w500),
-              decoration: const InputDecoration(
-                isCollapsed: true,
-                contentPadding: EdgeInsets.symmetric(vertical: 13),
-                border: InputBorder.none,
-                hintText: 'Search by name or code…',
-                hintStyle: TextStyle(
-                    color: AppColors.muted,
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w500),
-              ),
-            ),
+      child: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: controller,
+        builder: (_, v, __) => TextField(
+          controller: controller,
+          textCapitalization: TextCapitalization.words,
+          inputFormatters: const [TitleCaseTextFormatter()],
+          textInputAction: TextInputAction.search,
+          onSubmitted: onSubmit,
+          cursorColor: AppColors.primary,
+          style: const TextStyle(fontSize: 15, color: AppColors.ink),
+          decoration: InputDecoration(
+            hintText: 'Search team by name or code',
+            prefixIcon: const Icon(Icons.search_rounded, size: 21),
+            suffixIcon: v.text.isNotEmpty
+                ? IconButton(
+                    tooltip: 'Clear search',
+                    icon: const Icon(Icons.close_rounded, size: 19),
+                    onPressed: () {
+                      controller.clear();
+                      onClear();
+                    },
+                  )
+                : null,
+            contentPadding: const EdgeInsets.symmetric(vertical: 15),
+            border: border(AppColors.hairline),
+            enabledBorder: border(AppColors.hairline),
+            focusedBorder: border(AppColors.primary, 1.6),
           ),
-          if (controller.text.isNotEmpty)
-            IconButton(
-              splashRadius: 16,
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.close_rounded,
-                  size: 16, color: AppColors.muted),
-              onPressed: () {
-                controller.clear();
-                onClear();
-              },
-            )
-          else
-            const SizedBox(width: 10),
-        ],
+        ),
       ),
     );
   }
@@ -559,25 +446,8 @@ class _NotAManagerNote extends StatelessWidget {
   const _NotAManagerNote();
   @override
   Widget build(BuildContext context) {
-    return GlassCard(
-      shadow: AppShadows.soft,
-      child: Row(
-        children: [
-          const Icon(Icons.info_outline_rounded,
-              size: 18, color: AppColors.muted),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Team performance is available to managers. Your own scorecard is shown above.',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: AppColors.muted.withValues(alpha: 0.95),
-              ),
-            ),
-          ),
-        ],
-      ),
+    return const ProNote(
+      'Team performance is available to managers. Your own scorecard is shown above.',
     );
   }
 }
@@ -593,12 +463,7 @@ class _EmployeePerformanceScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: Text(name),
-        backgroundColor: AppColors.surface,
-        foregroundColor: AppColors.ink,
-        elevation: 0,
-      ),
+      appBar: AppBar(title: Text(name)),
       body: SafeArea(child: PerformanceTabBody(employeeId: employeeId)),
     );
   }

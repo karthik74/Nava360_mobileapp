@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../core/pro_ui.dart';
 import '../../../core/theme.dart';
 import '../form_renderer.dart' show absoluteFileUrl;
 import '../task_models.dart';
@@ -80,67 +81,94 @@ class VideoQaField extends StatelessWidget {
     }
 
     if (cfg == null || !cfg.isUsable) {
-      return Text(
+      return const Text(
         'No questions have been set for this recording yet.',
-        style: TextStyle(color: Theme.of(context).hintColor, fontSize: 12.5),
+        style: TextStyle(color: AppColors.muted, fontSize: 13.5),
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: AppColors.surfaceAlt,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.hairline),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Text(
-                '${cfg.questions.length} question${cfg.questions.length == 1 ? '' : 's'} · '
-                '${cfg.secondsPerQuestion}s to answer each',
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+              ProIconWell(
+                icon: Icons.videocam_outlined,
+                color: AppColors.primary,
+                size: 30,
               ),
-              const SizedBox(height: 8),
-              for (var i = 0; i < cfg.questions.length; i++)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 20,
-                        child: Text('${i + 1}.',
-                            style: const TextStyle(color: AppColors.muted, fontSize: 12.5)),
-                      ),
-                      Expanded(
-                        child: Text(cfg.questions[i].text,
-                            style: const TextStyle(fontSize: 13)),
-                      ),
-                    ],
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '${cfg.questions.length} question${cfg.questions.length == 1 ? '' : 's'} · '
+                  '${cfg.secondsPerQuestion}s to answer each',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    color: AppColors.ink,
+                    fontFeatures: [FontFeature.tabularFigures()],
                   ),
                 ),
+              ),
             ],
           ),
-        ),
-        const SizedBox(height: 10),
-        if (readOnly)
-          Text('Not recorded.',
-              style: TextStyle(color: Theme.of(context).hintColor, fontSize: 12.5))
-        else
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: () => _record(context),
-              icon: const Icon(Icons.videocam_outlined, size: 18),
-              label: const Text('Record answers'),
+          const SizedBox(height: 10),
+          for (var i = 0; i < cfg.questions.length; i++)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 22,
+                    height: 22,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(7),
+                      border: Border.all(color: AppColors.hairline),
+                    ),
+                    child: Text(
+                      '${i + 1}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.inkSoft,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(cfg.questions[i].text,
+                        style: const TextStyle(
+                            fontSize: 14, height: 1.4, color: AppColors.inkSoft)),
+                  ),
+                ],
+              ),
             ),
-          ),
-      ],
+          const SizedBox(height: 10),
+          if (readOnly)
+            const Text('Not recorded.',
+                style: TextStyle(color: AppColors.muted, fontSize: 13.5))
+          else
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _record(context),
+                icon: const Icon(Icons.videocam_outlined, size: 18),
+                label: const Text('Record answers'),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -218,21 +246,15 @@ class _RecordedAnswerState extends State<_RecordedAnswer> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (_failed)
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceAlt,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.hairline),
-            ),
-            child: const Text('The recording could not be played on this device.',
-                style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+          const ProNote(
+            'The recording could not be played on this device.',
+            icon: Icons.videocam_off_outlined,
           )
         else if (player != null && player.value.isInitialized)
           Column(
             children: [
               ClipRRect(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
                 child: AspectRatio(
                   aspectRatio: player.value.aspectRatio,
                   child: Stack(
@@ -252,42 +274,60 @@ class _RecordedAnswerState extends State<_RecordedAnswer> {
                   ),
                 ),
               ),
-              VideoProgressIndicator(player, allowScrubbing: true),
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: VideoProgressIndicator(
+                  player,
+                  allowScrubbing: true,
+                  colors: VideoProgressColors(
+                    playedColor: AppColors.primary,
+                    bufferedColor: AppColors.hairline,
+                    backgroundColor: AppColors.hairlineSoft,
+                  ),
+                ),
+              ),
             ],
           )
         else
-          const SizedBox(
+          Container(
             height: 140,
-            child: Center(child: CircularProgressIndicator()),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Center(child: CircularProgressIndicator()),
           ),
 
         if (duration is num) ...[
-          const SizedBox(height: 6),
-          Text('Recorded · ${_clock(duration)}',
-              style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+          const SizedBox(height: 8),
+          Text('Recorded · ${_clock(duration)}', style: AppText.caption),
         ],
 
         for (final c in _chapters)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            child: InkWell(
-              onTap: player == null || !player.value.isInitialized
-                  ? null
-                  : () {
-                      player.seekTo(Duration(seconds: (c['startSec'] as num?)?.toInt() ?? 0));
-                      player.play();
-                    },
+          InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: player == null || !player.value.isInitialized
+                ? null
+                : () {
+                    player.seekTo(Duration(seconds: (c['startSec'] as num?)?.toInt() ?? 0));
+                    player.play();
+                  },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(
-                    width: 44,
-                    child: Text(_clock((c['startSec'] as num?) ?? 0),
-                        style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+                    width: 56,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: ProPill.neutral(_clock((c['startSec'] as num?) ?? 0)),
+                    ),
                   ),
                   Expanded(
                     child: Text((c['text'] as String?) ?? '',
-                        style: const TextStyle(fontSize: 13)),
+                        style: const TextStyle(
+                            fontSize: 14, height: 1.4, color: AppColors.inkSoft)),
                   ),
                 ],
               ),

@@ -239,38 +239,41 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
   // ── Step 1 UI ─────────────────────────────────────────────────────────────
   Widget _buildCodeStep() {
     return AuthShell(
+      header: 'First login',
+      steps: _kSteps,
+      step: 0,
+      icon: Icons.badge_outlined,
       title: 'Activate account',
       subtitle: const Text(
         'First time signing in? Enter your employee code and we’ll send a '
         'one-time code to your registered mobile number.',
       ),
       onBack: _back,
+      action: AuthGradientButton(
+        label: 'Send OTP',
+        loading: _loading,
+        done: false,
+        onPressed: _loading ? null : _sendOtp,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const AuthFieldLabel('Employee code'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           AuthTextField(
             controller: _code,
             hint: 'e.g. EMP-0001',
             prefixIcon: Icons.badge_outlined,
             enabled: !_loading,
             textCapitalization: TextCapitalization.characters,
-            inputFormatters: [UpperCaseTextFormatter()],
+            inputFormatters: const [UpperCaseTextFormatter()],
             textInputAction: TextInputAction.done,
             onSubmit: (_) => _sendOtp(),
           ),
           if (_error != null) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             AuthFlashError(message: _error!),
           ],
-          SizedBox(height: _error != null ? 16 : 22),
-          AuthGradientButton(
-            label: 'Send OTP',
-            loading: _loading,
-            done: false,
-            onPressed: _loading ? null : _sendOtp,
-          ),
         ],
       ),
     );
@@ -279,6 +282,10 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
   // ── Step 2 UI ─────────────────────────────────────────────────────────────
   Widget _buildOtpStep() {
     return AuthShell(
+      header: 'First login',
+      steps: _kSteps,
+      step: 1,
+      icon: Icons.sms_outlined,
       title: 'Verify OTP',
       subtitle: Text.rich(
         TextSpan(
@@ -287,8 +294,8 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
             TextSpan(
               text: _maskedMobile ?? 'your registered mobile',
               style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
+                color: AppColors.ink,
+                fontWeight: FontWeight.w600,
               ),
             ),
             const TextSpan(text: '.'),
@@ -296,56 +303,31 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
         ),
       ),
       onBack: _back,
+      action: AuthGradientButton(
+        label: 'Verify',
+        loading: _loading,
+        done: false,
+        onPressed: _loading ? null : _verifyOtp,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const AuthFieldLabel('Verification code'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           OtpInput(
             key: _otpKey,
             length: 6,
             onChanged: (v) => setState(() => _otp = v),
           ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerRight,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(6),
-              onTap: (_loading || _cooldown > 0) ? null : _resendOtp,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                child: Text.rich(
-                  TextSpan(
-                    style: const TextStyle(
-                        fontSize: 12.5, color: AppColors.muted),
-                    children: [
-                      const TextSpan(text: "Didn't get it? "),
-                      TextSpan(
-                        text: _cooldown > 0 ? 'Resend in ${_cooldown}s' : 'Resend',
-                        style: TextStyle(
-                          color: _cooldown > 0
-                              ? AppColors.muted
-                              : AppColors.primary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          const SizedBox(height: 4),
+          OtpResendRow(
+            cooldown: _cooldown,
+            onResend: (_loading || _cooldown > 0) ? null : _resendOtp,
           ),
           if (_error != null) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 10),
             AuthFlashError(message: _error!),
           ],
-          SizedBox(height: _error != null ? 16 : 22),
-          AuthGradientButton(
-            label: 'Verify',
-            loading: _loading,
-            done: false,
-            onPressed: _loading ? null : _verifyOtp,
-          ),
         ],
       ),
     );
@@ -354,16 +336,27 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
   // ── Step 3 UI ─────────────────────────────────────────────────────────────
   Widget _buildPasswordStep() {
     return AuthShell(
+      header: 'First login',
+      steps: _kSteps,
+      step: 2,
+      icon: Icons.lock_outline_rounded,
       title: 'Set your password',
       subtitle: const Text(
         'Create a password to finish activating your account.',
       ),
       onBack: _back,
+      action: AuthGradientButton(
+        label: 'Activate & continue',
+        doneLabel: 'Activated',
+        loading: _loading,
+        done: _done,
+        onPressed: (_loading || _done) ? null : _setPassword,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const AuthFieldLabel('New password'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           AuthTextField(
             controller: _p1,
             hint: 'At least 8 characters',
@@ -372,19 +365,14 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
             enabled: !_loading,
             textCapitalization: TextCapitalization.sentences,
             textInputAction: TextInputAction.next,
-            suffix: IconButton(
-              splashRadius: 18,
-              icon: Icon(
-                _o1 ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                color: AppColors.muted,
-                size: 19,
-              ),
+            suffix: AuthVisibilityToggle(
+              obscure: _o1,
               onPressed: () => setState(() => _o1 = !_o1),
             ),
           ),
           const SizedBox(height: 14),
           const AuthFieldLabel('Confirm new password'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           AuthTextField(
             controller: _p2,
             hint: 'Re-enter new password',
@@ -394,29 +382,72 @@ class _FirstLoginScreenState extends ConsumerState<FirstLoginScreen> {
             textCapitalization: TextCapitalization.sentences,
             textInputAction: TextInputAction.done,
             onSubmit: (_) => _setPassword(),
-            suffix: IconButton(
-              splashRadius: 18,
-              icon: Icon(
-                _o2 ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                color: AppColors.muted,
-                size: 19,
-              ),
+            suffix: AuthVisibilityToggle(
+              obscure: _o2,
               onPressed: () => setState(() => _o2 = !_o2),
             ),
           ),
+          const SizedBox(height: 14),
+          AuthPasswordRules(
+            listenable: Listenable.merge([_p1, _p2]),
+            rules: [
+              ('At least 8 characters', () => _p1.text.length >= 8),
+              (
+                'Both passwords match',
+                () => _p2.text.isNotEmpty && _p1.text == _p2.text
+              ),
+            ],
+          ),
           if (_error != null) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             AuthFlashError(message: _error!),
           ],
-          SizedBox(height: _error != null ? 16 : 22),
-          AuthGradientButton(
-            label: 'Activate & continue',
-            loading: _loading,
-            done: _done,
-            onPressed: (_loading || _done) ? null : _setPassword,
-          ),
         ],
       ),
+    );
+  }
+}
+
+/// Wizard step labels (header caption + progress bar).
+const _kSteps = ['Your code', 'Verify OTP', 'Password'];
+
+/// "Didn't get it? Resend" row under the OTP boxes. Public so the
+/// forgot-password screen can reuse it.
+class OtpResendRow extends StatelessWidget {
+  const OtpResendRow({super.key, required this.cooldown, required this.onResend});
+
+  final int cooldown;
+
+  /// Null while a resend isn't allowed (cooldown / request in flight).
+  final VoidCallback? onResend;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Expanded(
+          child: Text(
+            "Didn't get it?",
+            style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+          ),
+        ),
+        TextButton(
+          onPressed: onResend,
+          style: TextButton.styleFrom(
+            minimumSize: const Size(0, 36),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            disabledForegroundColor: AppColors.muted,
+          ),
+          child: Text(
+            cooldown > 0 ? 'Resend in ${cooldown}s' : 'Resend',
+            style: const TextStyle(
+              fontSize: 13,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -469,7 +500,7 @@ class OtpInputState extends State<OtpInput> {
     return Row(
       children: [
         for (var i = 0; i < widget.length; i++) ...[
-          if (i > 0) const SizedBox(width: 7),
+          if (i > 0) const SizedBox(width: 8),
           Expanded(
             child: _OtpCell(
               controller: _controllers[i],
@@ -522,16 +553,29 @@ class _OtpCellState extends State<_OtpCell> {
   @override
   Widget build(BuildContext context) {
     final filled = widget.controller.text.isNotEmpty;
-    final highlight = _focused || filled;
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 160),
       height: 52,
+      alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.7),
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: highlight ? AppColors.primary : Colors.white.withOpacity(0.85),
-          width: highlight ? 1.6 : 1,
+          color: _focused
+              ? AppColors.primary
+              : filled
+                  ? const Color(0xFFA9BABE)
+                  : AppColors.hairline,
+          width: _focused ? 1.6 : 1,
         ),
+        boxShadow: _focused
+            ? [
+                BoxShadow(
+                  color: AppColors.primary.withOpacity(0.12),
+                  spreadRadius: 3,
+                ),
+              ]
+            : null,
       ),
       child: KeyboardListener(
         focusNode: FocusNode(skipTraversal: true),
@@ -551,15 +595,23 @@ class _OtpCellState extends State<_OtpCell> {
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           cursorColor: AppColors.primary,
           style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
+            fontSize: 22,
+            fontWeight: FontWeight.w600,
             color: AppColors.ink,
+            fontFeatures: [FontFeature.tabularFigures()],
           ),
+          // The cell draws its own border; switch off the themed field chrome.
           decoration: const InputDecoration(
             counterText: '',
+            filled: false,
             border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            disabledBorder: InputBorder.none,
+            errorBorder: InputBorder.none,
+            focusedErrorBorder: InputBorder.none,
             isCollapsed: true,
-            contentPadding: EdgeInsets.symmetric(vertical: 14),
+            contentPadding: EdgeInsets.zero,
           ),
           onChanged: widget.onChanged,
         ),

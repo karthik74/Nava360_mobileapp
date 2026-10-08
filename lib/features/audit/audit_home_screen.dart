@@ -94,8 +94,8 @@ class _AuditHomeScreenState extends ConsumerState<AuditHomeScreen>
 
   static String _label(_Tab t) => switch (t) {
         _Tab.dashboard => 'Dashboard',
-        _Tab.plans => 'Audit Plans',
-        _Tab.myAudits => 'My Audits',
+        _Tab.plans => 'Audit plans',
+        _Tab.myAudits => 'My audits',
         _Tab.findings => 'Findings & CAPA',
       };
 
@@ -118,18 +118,14 @@ class _AuditHomeScreenState extends ConsumerState<AuditHomeScreen>
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: const Text('Internal Audit'),
-        backgroundColor: AppColors.surface,
-        foregroundColor: AppColors.ink,
-        elevation: 0,
+        title: const Text('Internal audit'),
+        // Tabs on the light app bar use the theme's ink + brand underline.
         bottom: _tabs.length > 1
             ? TabBar(
                 controller: ctrl,
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
-                labelColor: AppColors.primary,
-                unselectedLabelColor: AppColors.muted,
-                indicatorColor: AppColors.primary,
+                dividerColor: Colors.transparent,
                 tabs: [for (final t in _tabs) Tab(text: _label(t))],
               )
             : null,
@@ -143,12 +139,10 @@ class _AuditHomeScreenState extends ConsumerState<AuditHomeScreen>
               label: const Text('New plan'),
             )
           : null,
-      body: SafeArea(
-        child: TabBarView(
-          controller: ctrl,
-          physics: const NeverScrollableScrollPhysics(),
-          children: [for (final t in _tabs) _body(t)],
-        ),
+      body: TabBarView(
+        controller: ctrl,
+        physics: const NeverScrollableScrollPhysics(),
+        children: [for (final t in _tabs) _body(t)],
       ),
     );
   }

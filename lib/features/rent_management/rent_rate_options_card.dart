@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import 'rent_models.dart';
 import 'rent_repository.dart';
@@ -66,8 +67,8 @@ class _RentRateOptionsCardState extends State<RentRateOptionsCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
-        const SizedBox(height: 6),
+        Text(label, style: AppText.label),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 6,
@@ -101,23 +102,17 @@ class _RentRateOptionsCardState extends State<RentRateOptionsCard> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: AppColors.hairline),
-      ),
+    return GlassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('GST / TDS rate options', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 2),
-          const Text('Full access only. Rates offered when adding or editing a branch.',
-              style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
-          const SizedBox(height: 10),
+          const ProSectionHeader(
+            title: 'GST / TDS rate options',
+            subtitle: 'Full access only. Rates offered when adding or editing a branch.',
+          ),
+          const SizedBox(height: 14),
           _list('GST rates', 'GST', widget.options.gstRates),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
           _list('TDS rates', 'TDS', widget.options.tdsRates),
         ],
       ),

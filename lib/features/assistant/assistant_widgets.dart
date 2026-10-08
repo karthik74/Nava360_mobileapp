@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/branding.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import 'assistant_cards.dart';
 import 'assistant_models.dart';
 
 /// One chat bubble. User turns render right-aligned on the brand color;
-/// assistant turns render left-aligned on a white card with markdown.
+/// assistant turns render left-aligned on a white hairline card with markdown.
 class AssistantChatBubble extends StatelessWidget {
   const AssistantChatBubble({
     super.key,
@@ -27,26 +30,33 @@ class AssistantChatBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isUser = message.isUser;
+    final width = MediaQuery.of(context).size.width;
     final bubble = Container(
-      constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.82),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      constraints: BoxConstraints(maxWidth: width * (isUser ? 0.76 : 0.88)),
+      padding: EdgeInsets.symmetric(horizontal: 14, vertical: isUser ? 10 : 12),
       decoration: BoxDecoration(
         color: isUser ? AppColors.primary : AppColors.surface,
-        borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(16),
-          topRight: const Radius.circular(16),
-          bottomLeft: Radius.circular(isUser ? 16 : 4),
-          bottomRight: Radius.circular(isUser ? 4 : 16),
-        ),
+        borderRadius: isUser
+            ? const BorderRadius.only(
+                topLeft: Radius.circular(18),
+                topRight: Radius.circular(18),
+                bottomLeft: Radius.circular(18),
+                bottomRight: Radius.circular(5),
+              )
+            : const BorderRadius.only(
+                topLeft: Radius.circular(5),
+                topRight: Radius.circular(18),
+                bottomLeft: Radius.circular(18),
+                bottomRight: Radius.circular(18),
+              ),
         border: isUser ? null : Border.all(color: AppColors.hairline),
-        boxShadow: AppShadows.soft,
+        boxShadow: AppShadows.card,
       ),
       child: isUser
           ? Text(
               message.content,
               style: const TextStyle(
-                  color: Colors.white, fontSize: 13.5, height: 1.4),
+                  color: Colors.white, fontSize: 15, height: 1.45),
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -76,11 +86,12 @@ class AssistantChatBubble extends StatelessWidget {
     );
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.only(bottom: 14),
       child: Column(
         crossAxisAlignment:
             isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
+          if (!isUser) const _BotLabel(),
           Align(
             alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
             child: GestureDetector(
@@ -96,7 +107,7 @@ class AssistantChatBubble extends StatelessWidget {
           ),
           if (!isUser && !streaming && message.content.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.only(top: 2, left: 4),
+              padding: const EdgeInsets.only(top: 2),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -129,7 +140,10 @@ class AssistantChatBubble extends StatelessWidget {
                       child: Text(
                         DateFormat('h:mm a').format(message.createdAt!),
                         style: const TextStyle(
-                            fontSize: 10, color: AppColors.muted),
+                          fontSize: 12,
+                          color: AppColors.faint,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
                       ),
                     ),
                 ],
@@ -142,38 +156,91 @@ class AssistantChatBubble extends StatelessWidget {
 
   static MarkdownStyleSheet _markdownStyle(BuildContext context) {
     const body = TextStyle(
-        fontSize: 13.5, height: 1.45, color: AppColors.inkSoft);
+        fontSize: 15, height: 1.47, color: AppColors.inkSoft);
     return MarkdownStyleSheet(
       p: body,
       listBullet: body,
       a: TextStyle(
-          fontSize: 13.5,
+          fontSize: 15,
           fontWeight: FontWeight.w600,
           color: AppColors.primary, // runtime branding — not a const
           decoration: TextDecoration.underline),
       strong: const TextStyle(
-          fontSize: 13.5, fontWeight: FontWeight.w700, color: AppColors.ink),
+          fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.ink),
       h1: const TextStyle(
-          fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink),
+          fontSize: 17,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.25,
+          color: AppColors.ink),
       h2: const TextStyle(
-          fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.ink),
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.2,
+          color: AppColors.ink),
       h3: const TextStyle(
-          fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.ink),
-      code: TextStyle(
-        fontSize: 12.5,
+          fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.ink),
+      code: const TextStyle(
+        fontSize: 13,
         fontFamily: 'monospace',
         color: AppColors.ink,
         backgroundColor: AppColors.surfaceAlt,
       ),
+      codeblockDecoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.hairlineSoft),
+      ),
       blockquoteDecoration: BoxDecoration(
         color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(8),
         border: Border(left: BorderSide(color: AppColors.primary, width: 3)),
       ),
       tableBorder: TableBorder.all(color: AppColors.hairline),
       tableHead: const TextStyle(
-          fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.ink),
-      tableBody: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft),
+          fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.ink),
+      tableBody: const TextStyle(fontSize: 13, color: AppColors.inkSoft),
+    );
+  }
+}
+
+/// "✦ Nava360 Assistant" label above an assistant reply.
+class _BotLabel extends ConsumerWidget {
+  const _BotLabel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final productName = ref.watch(brandingProvider).productName;
+    return Padding(
+      padding: const EdgeInsets.only(left: 2, bottom: 5),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: AppColors.deep,
+              borderRadius: BorderRadius.circular(7),
+            ),
+            alignment: Alignment.center,
+            child: const Icon(Icons.auto_awesome_rounded,
+                size: 11, color: Colors.white),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              '$productName Assistant',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.muted,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -195,13 +262,20 @@ class _MiniAction extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
-        child: Padding(
-          padding: const EdgeInsets.all(5),
-          child: Icon(icon,
-              size: 15, color: active ? AppColors.primary : AppColors.muted),
+      child: Material(
+        color: active
+            ? AppColors.primary.withValues(alpha: 0.1)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: SizedBox(
+            width: 36,
+            height: 36,
+            child: Icon(icon,
+                size: 16, color: active ? AppColors.primary : AppColors.faint),
+          ),
         ),
       ),
     );
@@ -237,11 +311,16 @@ class _AssistantThinkingIndicatorState extends State<AssistantThinkingIndicator>
     return Align(
       alignment: Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(5),
+            topRight: Radius.circular(18),
+            bottomLeft: Radius.circular(18),
+            bottomRight: Radius.circular(18),
+          ),
           border: Border.all(color: AppColors.hairline),
         ),
         child: Row(
@@ -262,7 +341,7 @@ class _AssistantThinkingIndicatorState extends State<AssistantThinkingIndicator>
                         Matrix4.translationValues(0, -3.0 * bounce, 0),
                     decoration: BoxDecoration(
                       color: AppColors.primary
-                          .withOpacity(0.4 + 0.6 * bounce),
+                          .withValues(alpha: 0.4 + 0.6 * bounce),
                       shape: BoxShape.circle,
                     ),
                   );
@@ -270,13 +349,15 @@ class _AssistantThinkingIndicatorState extends State<AssistantThinkingIndicator>
               ),
             ),
             if (widget.label != null) ...[
-              const SizedBox(width: 8),
-              Text(
-                widget.label!,
-                style: const TextStyle(
-                    fontSize: 11.5,
-                    color: AppColors.muted,
-                    fontWeight: FontWeight.w600),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  widget.label!,
+                  style: const TextStyle(
+                      fontSize: 13,
+                      color: AppColors.muted,
+                      fontWeight: FontWeight.w500),
+                ),
               ),
             ],
           ],
@@ -286,7 +367,8 @@ class _AssistantThinkingIndicatorState extends State<AssistantThinkingIndicator>
   }
 }
 
-/// Empty-state suggestion chips ("What can you ask?").
+/// Empty-state suggestions ("Try asking"): a white grouped list, one row per
+/// prompt.
 class AssistantSuggestions extends StatelessWidget {
   const AssistantSuggestions({super.key, required this.onPick});
 
@@ -301,22 +383,45 @@ class AssistantSuggestions extends StatelessWidget {
     'Which assets are assigned to me?',
   ];
 
+  static const _icons = [
+    Icons.event_available_rounded,
+    Icons.schedule_rounded,
+    Icons.wb_sunny_outlined,
+    Icons.assignment_turned_in_outlined,
+    Icons.receipt_long_rounded,
+    Icons.laptop_mac_rounded,
+  ];
+
+  static Color _tone(int i) => switch (i % 6) {
+        0 => AppColors.primary,
+        1 => AppColors.info,
+        2 => const Color(0xFF9A5B00),
+        3 => const Color(0xFF4253A8),
+        4 => AppColors.success,
+        _ => AppColors.pink,
+      };
+
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      alignment: WrapAlignment.center,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final s in _suggestions)
-          ActionChip(
-            label: Text(s,
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600)),
-            onPressed: () => onPick(s),
-            backgroundColor: AppColors.surface,
-            side: const BorderSide(color: AppColors.hairline),
-          ),
+        const ProSectionHeader(title: 'Try asking', small: true),
+        const SizedBox(height: 8),
+        ProListGroup(
+          children: [
+            for (var i = 0; i < _suggestions.length; i++)
+              ProListRow(
+                leading: ProIconWell(icon: _icons[i], color: _tone(i)),
+                title: _suggestions[i],
+                titleMaxLines: 2,
+                chevron: false,
+                trailing: const Icon(Icons.north_east_rounded,
+                    size: 16, color: Color(0xFF9FB0B4)),
+                onTap: () => onPick(_suggestions[i]),
+              ),
+          ],
+        ),
       ],
     );
   }

@@ -12,10 +12,13 @@
 //  own customers, branch, or everything — is decided by the server.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'ftod_models.dart';
@@ -280,18 +283,9 @@ class _FtodScreenState extends ConsumerState<FtodScreen> {
     final dist = distAsync.valueOrNull;
     final today = DateTime.now();
     final noDues = dist != null && dist.totals.customers == 0 && dist.days.isEmpty;
+    final totals = (dist != null && !noDues) ? dist.totals : null;
 
     final header = <Widget>[
-      _MonthSwitcher(
-        label: ftodMonthLabel(_month),
-        scopeLabel: dist == null ? null : _scopeLabel(dist.scope),
-        onPrev: () => _shiftMonth(-1),
-        // Dues can be imported a month ahead; nothing exists beyond that.
-        onNext: _month.isBefore(ftodShiftMonth(_thisMonth, 1))
-            ? () => _shiftMonth(1)
-            : null,
-      ),
-      const SizedBox(height: 12),
       ...distAsync.when(
         loading: () => const [AppLoadingBlock(height: 150)],
         error: (e, _) => [
@@ -302,9 +296,10 @@ class _FtodScreenState extends ConsumerState<FtodScreen> {
         ],
         data: (d) => noDues
             ? [
-                AppEmptyState(
+                ProEmpty(
                   icon: Icons.event_available_rounded,
-                  message: 'No FTOD dues for ${ftodMonthLabel(_month)}.',
+                  title: 'No FTOD dues for ${ftodMonthLabel(_month)}.',
+                  message: 'Dues show up here once they are imported for the month.',
                 ),
               ]
             : _distributionSection(d),
@@ -317,18 +312,10 @@ class _FtodScreenState extends ConsumerState<FtodScreen> {
     final counts = dist?.dayFor(_dueDate)?.counts ?? dist?.totals.counts;
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        backgroundColor: AppColors.surface,
-        surfaceTintColor: Colors.transparent,
-        title: const Text('FTOD collections'),
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1),
-        ),
-      ),
+      appBar: AppBar(title: const Text('Collections')),
       body: RefreshIndicator(
         color: AppColors.primary,
+        backgroundColor: Colors.white,
         onRefresh: _refresh,
         child: NotificationListener<ScrollNotification>(
           onNotification: (n) {
@@ -342,15 +329,35 @@ class _FtodScreenState extends ConsumerState<FtodScreen> {
             return false;
           },
           child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
+            physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
             slivers: [
+              SliverToBoxAdapter(
+                child: ProHero(
+                  title: 'FTOD collections',
+                  subtitle: dist == null
+                      ? 'First-time overdue EMIs'
+                      : 'First-time overdue EMIs · ${_scopeLabel(dist.scope)}',
+                  overlap: totals != null ? _totalsStrip(totals) : null,
+                  children: [
+                    _HeroMonthSwitcher(
+                      label: ftodMonthLabel(_month),
+                      onPrev: () => _shiftMonth(-1),
+                      // Dues can be imported a month ahead; nothing exists beyond that.
+                      onNext: _month.isBefore(ftodShiftMonth(_thisMonth, 1))
+                          ? () => _shiftMonth(1)
+                          : null,
+                    ),
+                    if (totals != null) _HeroStatusMix(counts: totals.counts),
+                  ],
+                ),
+              ),
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 sliver: SliverList(delegate: SliverChildListDelegate(header)),
               ),
               if (showList) ...[
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+                  padding: const EdgeInsets.fromLTRB(16, 22, 16, 0),
                   sliver: SliverToBoxAdapter(
                     child: _customersHeader(counts),
                   ),
@@ -371,15 +378,50 @@ class _FtodScreenState extends ConsumerState<FtodScreen> {
     );
   }
 
+  /// Month totals straddling the hero: customers, EMI due, collected.
+  Widget _totalsStrip(FtodTotals totals) {
+    return ProKpiStrip(cells: [
+      ProKpi(value: ftodCount(totals.customers), label: 'Customers'),
+      ProKpi(value: ftodRupees(totals.dueAmount), label: 'EMI due'),
+      ProKpi(
+        value: ftodRupees(totals.collectedAmount),
+        label: 'Collected · ${totals.collectedPercent}%',
+        progress: totals.collectedPercent / 100,
+        color: AppColors.success,
+      ),
+    ]);
+  }
+
   List<Widget> _distributionSection(FtodDistribution d) {
     return [
-      _TotalsCard(totals: d.totals),
-      const SizedBox(height: 20),
-      const AppSectionHeader(
-        title: 'Date-wise distribution',
-        subtitle: 'When each due date\'s money came in · tap to see customers',
-      ),
-      const SizedBox(height: 10),
+      if (d.days.isNotEmpty) ...[
+        GlassCard(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const ProSectionHeader(
+                title: 'Date-wise distribution',
+                subtitle: 'When each due date\'s money came in · tap to see customers',
+              ),
+              const SizedBox(height: 14),
+              _DueChart(
+                days: d.days,
+                selected: _dueDate,
+                onTap: (day) => _selectDueDate(day),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Bars show customers by status; the figure above each is money collected.',
+                style: AppText.caption,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 22),
+        const ProSectionHeader(title: 'By due date', small: true),
+        const SizedBox(height: 8),
+      ],
       for (final day in d.days) ...[
         _DueDayCard(
           day: day,
@@ -395,9 +437,9 @@ class _FtodScreenState extends ConsumerState<FtodScreen> {
     final all = counts?.total;
     return Column(
       key: _customersKey,
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AppSectionHeader(
+        ProSectionHeader(
           title: 'Customers',
           subtitle: _dueDate == null
               ? 'All due dates this month'
@@ -405,35 +447,23 @@ class _FtodScreenState extends ConsumerState<FtodScreen> {
         ),
         if (_dueDate != null) ...[
           const SizedBox(height: 8),
-          InputChip(
-            label: Text('Due ${ftodDay(_dueDate)}'),
-            avatar: const Icon(Icons.event_rounded, size: 16),
-            onDeleted: () => _selectDueDate(null),
-            deleteButtonTooltipMessage: 'Show all due dates',
+          Align(
+            alignment: Alignment.centerLeft,
+            child: InputChip(
+              label: Text('Due ${ftodDay(_dueDate)}'),
+              avatar: const Icon(Icons.event_rounded, size: 16),
+              onDeleted: () => _selectDueDate(null),
+              deleteButtonTooltipMessage: 'Show all due dates',
+            ),
           ),
         ],
-        const SizedBox(height: 8),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              _FilterChip(
-                label: 'All',
-                count: all,
-                selected: _status == null,
-                color: AppColors.primary,
-                onTap: () => _selectStatus(null),
-              ),
-              for (final s in _chipOrder)
-                _FilterChip(
-                  label: s.label,
-                  count: counts?.of(s),
-                  selected: _status == s,
-                  color: ftodStatusColor(s),
-                  onTap: () => _selectStatus(s),
-                ),
-            ],
-          ),
+        const SizedBox(height: 10),
+        ProChipBar(
+          labels: ['All', for (final s in _chipOrder) s.label],
+          counts: all == null ? null : [all, for (final s in _chipOrder) counts!.of(s)],
+          selected: _status == null ? 0 : _chipOrder.indexOf(_status!) + 1,
+          onSelected: (i) => _selectStatus(i == 0 ? null : _chipOrder[i - 1]),
+          bleed: 0,
         ),
       ],
     );
@@ -450,22 +480,36 @@ class _FtodScreenState extends ConsumerState<FtodScreen> {
           onRetry: _reloadList,
         );
       } else {
-        child = const AppEmptyState(
+        child = const ProEmpty(
           icon: Icons.people_outline_rounded,
-          message: 'No customers match this filter.',
+          title: 'No customers match this filter.',
+          message: 'Pick another status or due date.',
         );
       }
       return SliverToBoxAdapter(child: child);
     }
-    return SliverList.separated(
-      itemCount: _items.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (_, i) => _DueTile(
-        due: _items[i],
-        today: today,
-        // Unknown scope (distribution failed): naming the officer is harmless.
-        showOfficer: dist?.showsOfficer ?? true,
-        onCall: () => _call(_items[i]),
+    return DecoratedSliver(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.lg),
+        border: Border.all(color: AppColors.hairline),
+        boxShadow: AppShadows.card,
+      ),
+      sliver: SliverList.separated(
+        itemCount: _items.length,
+        separatorBuilder: (_, __) => const Divider(
+          height: 1,
+          thickness: 1,
+          indent: 64,
+          color: AppColors.hairlineSoft,
+        ),
+        itemBuilder: (_, i) => _DueTile(
+          due: _items[i],
+          today: today,
+          // Unknown scope (distribution failed): naming the officer is harmless.
+          showOfficer: dist?.showsOfficer ?? true,
+          onCall: () => _call(_items[i]),
+        ),
       ),
     );
   }
@@ -491,14 +535,14 @@ class _FtodScreenState extends ConsumerState<FtodScreen> {
         label: const Text('Could not load more — retry'),
       );
     } else if (!_last) {
-      child = TextButton(
+      child = OutlinedButton(
         onPressed: _loadMore,
         child: const Text('Load more'),
       );
     } else if (_items.length > 3) {
       child = Text(
         'All ${ftodCount(_items.length)} customers shown',
-        style: const TextStyle(color: AppColors.muted, fontSize: 12),
+        style: AppText.caption,
       );
     }
     if (child == null) return const SizedBox.shrink();
@@ -513,58 +557,85 @@ class _FtodScreenState extends ConsumerState<FtodScreen> {
 // Pieces
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _MonthSwitcher extends StatelessWidget {
-  const _MonthSwitcher({
+/// Status colours tuned for the deep hero (the light-surface ones are too
+/// dark there): lime / amber / orange / red.
+Color _onDeep(FtodStatus s) {
+  switch (s) {
+    case FtodStatus.paidOnTime:
+      return AppColors.live;
+    case FtodStatus.paidLate:
+      return const Color(0xFFF2B347);
+    case FtodStatus.partial:
+      return const Color(0xFFFF8A4C);
+    case FtodStatus.pending:
+      return const Color(0xFFE5484D);
+  }
+}
+
+/// Status as a tinted Pro pill.
+Widget _statusPill(FtodStatus s, String label) {
+  switch (s) {
+    case FtodStatus.paidOnTime:
+      return ProPill.ok(label);
+    case FtodStatus.paidLate:
+      return ProPill.warn(label);
+    case FtodStatus.partial:
+      return ProPill(label, color: const Color(0xFFC2410C), background: const Color(0xFFFDEADF));
+    case FtodStatus.pending:
+      return ProPill.bad(label);
+  }
+}
+
+/// Previous / next month on the deep hero.
+class _HeroMonthSwitcher extends StatelessWidget {
+  const _HeroMonthSwitcher({
     required this.label,
-    required this.scopeLabel,
     required this.onPrev,
     required this.onNext,
   });
 
   final String label;
-  final String? scopeLabel;
   final VoidCallback onPrev;
   final VoidCallback? onNext;
 
   @override
   Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-      shadow: AppShadows.soft,
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
       child: Row(
         children: [
-          IconButton(
-            onPressed: onPrev,
+          ProHeroIconButton(
+            icon: Icons.chevron_left_rounded,
+            iconSize: 24,
             tooltip: 'Previous month',
-            icon: const Icon(Icons.chevron_left_rounded),
+            onTap: onPrev,
           ),
           Expanded(
-            child: Column(
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
-                ),
-                if (scopeLabel != null)
-                  Text(
-                    scopeLabel!,
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.muted,
-                    ),
-                  ),
-              ],
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.3,
+                color: Colors.white,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
           ),
-          IconButton(
-            onPressed: onNext,
-            tooltip: 'Next month',
-            icon: const Icon(Icons.chevron_right_rounded),
+          Opacity(
+            opacity: onNext == null ? 0.35 : 1,
+            child: ProHeroIconButton(
+              icon: Icons.chevron_right_rounded,
+              iconSize: 24,
+              tooltip: 'Next month',
+              onTap: onNext,
+            ),
           ),
         ],
       ),
@@ -572,109 +643,60 @@ class _MonthSwitcher extends StatelessWidget {
   }
 }
 
-class _TotalsCard extends StatelessWidget {
-  const _TotalsCard({required this.totals});
-  final FtodTotals totals;
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: _Metric(
-                  label: 'Customers',
-                  value: ftodCount(totals.customers),
-                ),
-              ),
-              Expanded(
-                child: _Metric(
-                  label: 'EMI due',
-                  value: ftodRupees(totals.dueAmount),
-                ),
-              ),
-              Expanded(
-                child: _Metric(
-                  label: 'Collected',
-                  value: ftodRupees(totals.collectedAmount),
-                  sub: '${totals.collectedPercent}%',
-                  subColor: AppColors.success,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          _StatusBar(counts: totals.counts, height: 10),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 12,
-            runSpacing: 6,
-            children: [
-              for (final s in _barOrder)
-                _LegendDot(
-                  color: ftodStatusColor(s),
-                  label: '${s.label} ${ftodCount(totals.counts.of(s))}',
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Metric extends StatelessWidget {
-  const _Metric({
-    required this.label,
-    required this.value,
-    this.sub,
-    this.subColor,
-  });
-
-  final String label;
-  final String value;
-  final String? sub;
-  final Color? subColor;
+/// On time / late / partial / pending mix for the month, on the deep hero.
+class _HeroStatusMix extends StatelessWidget {
+  const _HeroStatusMix({required this.counts});
+  final FtodStatusCounts counts;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label.toUpperCase(),
-          style: const TextStyle(
-            fontSize: 10.5,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.4,
-            color: AppColors.muted,
-          ),
-        ),
-        const SizedBox(height: 4),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: Alignment.centerLeft,
-          child: Text(
-            value,
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-              color: AppColors.ink,
+        if (counts.total == 0)
+          Container(
+            height: 8,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(4),
             ),
-          ),
+          )
+        else
+          ProStackBar(parts: [
+            for (final s in _barOrder) MapEntry(counts.of(s).toDouble(), _onDeep(s)),
+          ]),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 12,
+          runSpacing: 6,
+          children: [
+            for (final s in _barOrder)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(color: _onDeep(s), shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    '${s.label} ',
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                  Text(
+                    ftodCount(counts.of(s)),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+              ),
+          ],
         ),
-        if (sub != null)
-          Text(
-            sub!,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: subColor ?? AppColors.muted,
-            ),
-          ),
       ],
     );
   }
@@ -688,52 +710,133 @@ class _StatusBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppRadii.pill),
-      child: SizedBox(
+    if (counts.total == 0) {
+      return Container(
         height: height,
-        child: counts.total == 0
-            ? const ColoredBox(color: AppColors.hairline)
-            : Row(
-                children: [
-                  for (final s in _barOrder)
-                    if (counts.of(s) > 0)
-                      Expanded(
-                        flex: counts.of(s),
-                        child: ColoredBox(color: ftodStatusColor(s)),
-                      ),
-                ],
-              ),
-      ),
+        decoration: BoxDecoration(
+          color: AppColors.hairlineSoft,
+          borderRadius: BorderRadius.circular(height / 2),
+        ),
+      );
+    }
+    return ProStackBar(
+      height: height,
+      parts: [
+        for (final s in _barOrder) MapEntry(counts.of(s).toDouble(), ftodStatusColor(s)),
+      ],
     );
   }
 }
 
-class _LegendDot extends StatelessWidget {
-  const _LegendDot({required this.color, required this.label});
-  final Color color;
-  final String label;
+/// Column chart: one stacked bar per due date (customers by status) with the
+/// collected % above it. Tapping a column narrows the customers below.
+class _DueChart extends StatelessWidget {
+  const _DueChart({required this.days, required this.selected, required this.onTap});
+  final List<FtodDueDay> days;
+  final DateTime? selected;
+  final ValueChanged<DateTime?> onTap;
+
+  static const double _barMax = 96;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 5),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 11.5,
-            fontWeight: FontWeight.w600,
-            color: AppColors.inkSoft,
-          ),
-        ),
-      ],
+    final maxCount = days.fold<int>(0, (m, d) => math.max(m, d.counts.total));
+    return SizedBox(
+      height: _barMax + 70,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: days.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        itemBuilder: (_, i) {
+          final day = days[i];
+          final on = selected != null && day.dueDate == selected;
+          final total = day.counts.total;
+          final h = maxCount == 0 ? 0.0 : _barMax * total / maxCount;
+          return Semantics(
+            button: true,
+            selected: on,
+            label: '${day.headline()}, ${day.collectedPercent}% collected',
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => onTap(day.dueDate),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 54,
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                decoration: BoxDecoration(
+                  color: on ? AppColors.surfaceAlt : Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: on ? AppColors.primary : Colors.transparent, width: 1.4),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Text(
+                      '${day.collectedPercent}%',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.inkSoft,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    SizedBox(
+                      height: _barMax,
+                      child: Align(
+                        alignment: Alignment.bottomCenter,
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0, end: math.max(h, 4)),
+                          duration: Duration(milliseconds: 600 + i * 40),
+                          curve: Curves.easeOutCubic,
+                          builder: (_, v, __) => ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: SizedBox(
+                              width: 22,
+                              height: v,
+                              child: total == 0
+                                  ? const ColoredBox(color: AppColors.hairline)
+                                  : Column(
+                                      children: [
+                                        for (final s in _barOrder.reversed)
+                                          if (day.counts.of(s) > 0)
+                                            Expanded(
+                                              flex: day.counts.of(s),
+                                              child: ColoredBox(color: ftodStatusColor(s)),
+                                            ),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      ftodDay(day.dueDate),
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: on ? FontWeight.w600 : FontWeight.w500,
+                        color: AppColors.ink,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    Text(
+                      ftodCount(total),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.muted,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -754,89 +857,98 @@ class _DueDayCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final late = day.lateAmount;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
+    return DecoratedBox(
+      decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(AppRadii.lg),
-        onTap: onTap,
-        child: GlassCard(
-          padding: const EdgeInsets.all(14),
-          shadow: selected ? AppShadows.card : AppShadows.soft,
-          border: Border.all(
+        boxShadow: AppShadows.card,
+      ),
+      child: Material(
+        color: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+          side: BorderSide(
             color: selected ? AppColors.primary : AppColors.hairline,
             width: selected ? 1.6 : 1,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      day.headline(),
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.ink,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        day.headline(),
+                        style: const TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.ink,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
                       ),
                     ),
-                  ),
-                  Icon(
-                    selected
-                        ? Icons.filter_alt_rounded
-                        : Icons.chevron_right_rounded,
-                    size: 18,
-                    color: selected ? AppColors.primary : AppColors.muted,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Collected ${ftodRupees(day.collectedAmount)} '
-                '(${day.collectedPercent}%)'
-                '${late > 0 ? ' · ${ftodRupees(late)} after due date' : ''}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.inkSoft,
-                ),
-              ),
-              const SizedBox(height: 10),
-              _StatusBar(counts: day.counts, height: 6),
-              const SizedBox(height: 10),
-              if (day.collections.isEmpty)
-                const Text(
-                  'Nothing collected yet',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.danger,
-                  ),
-                )
-              else ...[
-                const Text(
-                  'COLLECTED ON',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.4,
-                    color: AppColors.muted,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final c in day.collections)
-                      _CollectionChip(
-                        collection: c,
-                        daysAfter: c.daysAfter(day.dueDate),
-                      ),
+                    Icon(
+                      selected
+                          ? Icons.filter_alt_rounded
+                          : Icons.chevron_right_rounded,
+                      size: 19,
+                      color: selected ? AppColors.primary : const Color(0xFFB3C0C3),
+                    ),
                   ],
                 ),
+                const SizedBox(height: 3),
+                Text(
+                  'Collected ${ftodRupees(day.collectedAmount)} '
+                  '(${day.collectedPercent}%)'
+                  '${late > 0 ? ' · ${ftodRupees(late)} after due date' : ''}',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.inkSoft,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _StatusBar(counts: day.counts, height: 6),
+                const SizedBox(height: 10),
+                if (day.collections.isEmpty)
+                  const Text(
+                    'Nothing collected yet',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.danger,
+                    ),
+                  )
+                else ...[
+                  const Text(
+                    'Collected on',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final c in day.collections)
+                        _CollectionChip(
+                          collection: c,
+                          daysAfter: c.daysAfter(day.dueDate),
+                        ),
+                    ],
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
@@ -853,21 +965,25 @@ class _CollectionChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = daysAfter > 0
-        ? AppColors.warning
+        ? const Color(0xFF9A5B00)
         : daysAfter < 0
             ? AppColors.info
             : AppColors.success;
+    final bg = daysAfter > 0
+        ? AppColors.warningTint
+        : daysAfter < 0
+            ? AppColors.infoTint
+            : AppColors.successTint;
     final tag = daysAfter > 0
         ? '+${daysAfter}d'
         : daysAfter < 0
             ? 'early'
             : null;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.10),
+        color: bg,
         borderRadius: BorderRadius.circular(AppRadii.sm),
-        border: Border.all(color: color.withValues(alpha: 0.30)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -875,9 +991,10 @@ class _CollectionChip extends StatelessWidget {
           Text(
             collection.chipLabel(),
             style: const TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w700,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
               color: AppColors.ink,
+              fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
           if (tag != null) ...[
@@ -885,54 +1002,13 @@ class _CollectionChip extends StatelessWidget {
             Text(
               tag,
               style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w800,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
                 color: color,
               ),
             ),
           ],
         ],
-      ),
-    );
-  }
-}
-
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
-    required this.label,
-    required this.count,
-    required this.selected,
-    required this.color,
-    required this.onTap,
-  });
-
-  final String label;
-  final int? count;
-  final bool selected;
-  final Color color;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: ChoiceChip(
-        selected: selected,
-        onSelected: (_) => onTap(),
-        showCheckmark: false,
-        selectedColor: color,
-        backgroundColor: AppColors.surface,
-        side: BorderSide(
-          color: selected ? color : AppColors.hairline,
-        ),
-        label: Text(
-          count == null ? label : '$label ${ftodCount(count!)}',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            color: selected ? Colors.white : AppColors.inkSoft,
-          ),
-        ),
       ),
     );
   }
@@ -961,95 +1037,100 @@ class _DueTile extends StatelessWidget {
     final owesMoney =
         due.status == FtodStatus.partial || due.status == FtodStatus.pending;
 
-    return GlassCard(
-      padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
-      child: Column(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      due.customerName,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      [
-                        'EMI ${ftodRupees(due.dueAmount)}',
-                        'Due ${ftodDay(due.dueDate)}',
-                        if (due.reference != null) due.reference!,
-                      ].join(' · '),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.muted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (hasPhone)
-                IconButton.filledTonal(
-                  onPressed: onCall,
-                  tooltip: 'Call ${due.customerName}',
-                  icon: const Icon(Icons.call_rounded, size: 18),
-                  style: IconButton.styleFrom(
-                    backgroundColor: AppColors.success.withValues(alpha: 0.12),
-                    foregroundColor: AppColors.success,
-                    minimumSize: const Size(38, 38),
+          ProAvatar(name: due.customerName, size: 40),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  due.customerName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    height: 1.33,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: -0.15,
+                    color: AppColors.ink,
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          StatusPill(label: due.statusText(today), color: color),
-          const SizedBox(height: 10),
-          Text(
-            due.status == FtodStatus.partial
-                ? '${due.collectedLine()} · Balance ${ftodRupees(due.balance)}'
-                : due.collectedLine(),
-            style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: AppColors.inkSoft,
+                Text(
+                  [
+                    'EMI ${ftodRupees(due.dueAmount)}',
+                    'Due ${ftodDay(due.dueDate)}',
+                    if (due.reference != null) due.reference!,
+                  ].join(' · '),
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    height: 1.35,
+                    color: AppColors.muted,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const SizedBox(height: 7),
+                _statusPill(due.status, due.statusText(today)),
+                const SizedBox(height: 9),
+                ProBar(
+                  value: progress.toDouble(),
+                  color: owesMoney ? color : AppColors.success,
+                  height: 4,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  due.status == FtodStatus.partial
+                      ? '${due.collectedLine()} · Balance ${ftodRupees(due.balance)}'
+                      : due.collectedLine(),
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.inkSoft,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                if (due.collections.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  _InfoLine(
+                    icon: Icons.payments_outlined,
+                    text: 'Paid ${due.paymentsLine()}',
+                  ),
+                ],
+                if (branch.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  _InfoLine(icon: Icons.store_mall_directory_outlined, text: branch),
+                ],
+                if (showOfficer && (due.fieldOfficerName ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  _InfoLine(
+                    icon: Icons.badge_outlined,
+                    text: 'Field officer: ${due.fieldOfficerName}',
+                  ),
+                ],
+              ],
             ),
           ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            child: LinearProgressIndicator(
-              value: progress.toDouble(),
-              minHeight: 5,
-              color: owesMoney ? color : AppColors.success,
-              backgroundColor: AppColors.hairline,
-            ),
-          ),
-          if (due.collections.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _InfoLine(
-              icon: Icons.payments_outlined,
-              text: 'Paid ${due.paymentsLine()}',
-            ),
-          ],
-          if (branch.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            _InfoLine(icon: Icons.store_mall_directory_outlined, text: branch),
-          ],
-          if (showOfficer && (due.fieldOfficerName ?? '').isNotEmpty) ...[
-            const SizedBox(height: 4),
-            _InfoLine(
-              icon: Icons.badge_outlined,
-              text: 'Field officer: ${due.fieldOfficerName}',
+          if (hasPhone) ...[
+            const SizedBox(width: 8),
+            Tooltip(
+              message: 'Call ${due.customerName}',
+              child: Material(
+                color: AppColors.successTint,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: onCall,
+                  child: const SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Icon(Icons.call_rounded, size: 19, color: AppColors.success),
+                  ),
+                ),
+              ),
             ),
           ],
         ],
@@ -1068,15 +1149,19 @@ class _InfoLine extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 14, color: AppColors.muted),
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(icon, size: 14, color: AppColors.faint),
+        ),
         const SizedBox(width: 6),
         Expanded(
           child: Text(
             text,
             style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
+              fontSize: 12.5,
+              height: 1.35,
               color: AppColors.inkSoft,
+              fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
         ),

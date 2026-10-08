@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -36,6 +37,16 @@ enum _PoTab { orders, dashboard, audit }
 
 class _PoListScreenState extends ConsumerState<PoListScreen> {
   _PoTab _tab = _PoTab.orders;
+
+  /// In-memory search + sort over the loaded order list.
+  final _q = TextEditingController();
+  bool _byValue = false;
+
+  @override
+  void dispose() {
+    _q.dispose();
+    super.dispose();
+  }
 
   Future<void> _create() async {
     final ok = await context.push<bool>('/admin/purchase-orders/new');
@@ -96,7 +107,6 @@ class _PoListScreenState extends ConsumerState<PoListScreen> {
     final canDelete = user?.hasPermission('ADMIN_PO_DELETE') ?? false;
     final canViewReport = user?.hasPermission('ADMIN_PO_REPORT_VIEW') ?? false;
     final canViewAudit = user?.hasPermission('ADMIN_PO_AUDIT_VIEW') ?? false;
-    final mq = MediaQuery.of(context);
 
     final tabs = <_PoTab, String>{
       _PoTab.orders: 'Orders',
@@ -104,92 +114,93 @@ class _PoListScreenState extends ConsumerState<PoListScreen> {
       if (canViewAudit) _PoTab.audit: 'Audit trail',
     };
     if (!tabs.containsKey(_tab)) _tab = _PoTab.orders;
+    final tabKeys = tabs.keys.toList();
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Purchase Orders'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        floatingActionButton: canManage
-            ? FloatingActionButton.extended(
-                onPressed: _create,
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('New order'),
-              )
-            : null,
-        body: Column(
+    // Hero figures come from the order list (the Orders tab's own data).
+    final orders = ref.watch(poListProvider).asData?.value;
+    final now = DateTime.now();
+    final thisMonth = orders
+        ?.where((p) =>
+            p.poDate != null && p.poDate!.year == now.year && p.poDate!.month == now.month)
+        .toList();
+    double total(Iterable<PurchaseOrder> rows) =>
+        rows.fold<double>(0, (a, p) => a + p.grandTotal);
+
+    final provider = switch (_tab) {
+      _PoTab.orders => poListProvider,
+      _PoTab.dashboard => poDashboardProvider,
+      _PoTab.audit => poAuditTrailProvider,
+    };
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Purchase orders')),
+      floatingActionButton: canManage
+          ? FloatingActionButton.extended(
+              onPressed: _create,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('New order'),
+            )
+          : null,
+      body: ProPage(
+        onRefresh: () async => ref.invalidate(provider),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, canManage ? 96 : 24),
+        hero: ProHero(
+          title: 'Purchase orders',
+          subtitle: orders == null
+              ? 'Admin tools'
+              : 'Admin tools · ${orders.length} order${orders.length == 1 ? '' : 's'}',
+          overlap: _tab == _PoTab.orders
+              ? ProSearchField(
+                  raised: true,
+                  controller: _q,
+                  onChanged: (_) => setState(() {}),
+                  hint: 'PO number, supplier or GSTIN',
+                )
+              : null,
           children: [
-            SizedBox(
-              height: 44,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                children: [
-                  for (final entry in tabs.entries)
-                    _TabChip(
-                      label: entry.value,
-                      selected: _tab == entry.key,
-                      onTap: () => setState(() => _tab = entry.key),
-                    ),
-                ],
+            if (tabs.length > 1)
+              ProHeroSegmented(
+                labels: tabs.values.toList(),
+                selected: tabKeys.indexOf(_tab),
+                onChanged: (i) => setState(() => _tab = tabKeys[i]),
               ),
-            ),
-            Expanded(
-              child: switch (_tab) {
-                _PoTab.orders => _OrdersTab(
-                    canDelete: canDelete,
-                    onOpen: _open,
-                    onDelete: _delete,
-                    bottomPadding: mq.padding.bottom + 90,
-                  ),
-                _PoTab.dashboard => _DashboardTab(bottomPadding: mq.padding.bottom + 24),
-                _PoTab.audit => _AuditTab(bottomPadding: mq.padding.bottom + 24),
-              },
-            ),
+            ProHeroStats(stats: [
+              ProStat(
+                label: 'Orders',
+                value: orders == null ? '—' : '${orders.length}',
+                sub: orders == null ? null : _inr0.format(total(orders)),
+                dot: AppColors.live,
+              ),
+              ProStat(
+                label: 'This month',
+                value: thisMonth == null ? '—' : '${thisMonth.length}',
+                sub: thisMonth == null ? null : _inr0.format(total(thisMonth)),
+                dot: const Color(0xFF7FB0EC),
+              ),
+            ]),
           ],
         ),
+        children: [
+          switch (_tab) {
+            _PoTab.orders => _OrdersTab(
+                canDelete: canDelete,
+                onOpen: _open,
+                onDelete: _delete,
+                query: _q.text,
+                byValue: _byValue,
+                onToggleSort: () => setState(() => _byValue = !_byValue),
+              ),
+            _PoTab.dashboard => const _DashboardTab(),
+            _PoTab.audit => const _AuditTab(),
+          },
+        ],
       ),
     );
   }
 }
 
-class _TabChip extends StatelessWidget {
-  const _TabChip({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected ? AppColors.primary.withOpacity(0.14) : AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            border: Border.all(
-                color: selected ? AppColors.primary.withOpacity(0.4) : AppColors.hairline),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: selected ? AppColors.primary : AppColors.muted,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
+/// Rounded rupee amount for the hero figures ("₹ 1,24,500").
+final _inr0 = NumberFormat.currency(locale: 'en_IN', symbol: '₹ ', decimalDigits: 0);
 
 // ── Orders tab ──────────────────────────────────────────────────────────────
 
@@ -198,62 +209,93 @@ class _OrdersTab extends ConsumerWidget {
     required this.canDelete,
     required this.onOpen,
     required this.onDelete,
-    required this.bottomPadding,
+    required this.query,
+    required this.byValue,
+    required this.onToggleSort,
   });
 
   final bool canDelete;
   final void Function(PurchaseOrder) onOpen;
   final void Function(PurchaseOrder) onDelete;
-  final double bottomPadding;
+
+  /// Search text (PO number / supplier / GSTIN / creator), in-memory filter.
+  final String query;
+
+  /// Sort by grand total (highest first) instead of the server's order.
+  final bool byValue;
+  final VoidCallback onToggleSort;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(poListProvider);
-    return RefreshIndicator(
-      color: AppColors.primary,
-      backgroundColor: Colors.white.withOpacity(0.92),
-      onRefresh: () async => ref.invalidate(poListProvider),
-      child: ListView(
-        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
-        children: [
-          async.when(
-            data: (rows) {
-              if (rows.isEmpty) {
-                return const AppEmptyState(
-                  icon: Icons.receipt_long_rounded,
-                  message: 'No purchase orders yet. Tap "New order" to create one.',
-                );
-              }
-              return Column(
-                children: [
-                  for (final po in rows)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _PoCard(
-                        po: po,
-                        canDelete: canDelete,
-                        onTap: () => onOpen(po),
-                        onDelete: () => onDelete(po),
-                      ),
-                    ),
-                ],
-              );
-            },
-            loading: () => const AppLoadingBlock(height: 160),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(poListProvider),
+    return async.when(
+      data: (rows) {
+        if (rows.isEmpty) {
+          return const ProEmpty(
+            icon: Icons.receipt_long_rounded,
+            title: 'No purchase orders yet',
+            message: 'Tap "New order" to create one.',
+          );
+        }
+        final term = query.trim().toLowerCase();
+        final shown = rows.where((po) {
+          if (term.isEmpty) return true;
+          return po.poNumber.toLowerCase().contains(term) ||
+              (po.supplierName ?? '').toLowerCase().contains(term) ||
+              (po.supplierGstin ?? '').toLowerCase().contains(term) ||
+              (po.createdByUsername ?? '').toLowerCase().contains(term);
+        }).toList();
+        if (byValue) shown.sort((a, b) => b.grandTotal.compareTo(a.grandTotal));
+        if (shown.isEmpty) {
+          return ProEmpty(
+            icon: Icons.search_off_rounded,
+            title: 'No orders match “${query.trim()}”',
+            message: 'Search by PO number, supplier, GSTIN or creator.',
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ProSectionHeader(
+              title: '${term.isEmpty ? 'All orders' : 'Matching orders'} · ${shown.length}',
+              small: true,
+              trailing: TextButton.icon(
+                onPressed: onToggleSort,
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(0, 32),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  visualDensity: VisualDensity.compact,
+                ),
+                icon: const Icon(Icons.swap_vert_rounded, size: 17),
+                label: Text(byValue ? 'Highest value' : 'Recent'),
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 8),
+            ProListGroup(
+              children: [
+                for (final po in shown)
+                  _PoRow(
+                    po: po,
+                    canDelete: canDelete,
+                    onTap: () => onOpen(po),
+                    onDelete: () => onDelete(po),
+                  ),
+              ],
+            ),
+          ],
+        );
+      },
+      loading: () => const AppLoadingBlock(height: 160),
+      error: (e, _) => AppErrorPanel(
+        message: e.toString(),
+        onRetry: () => ref.invalidate(poListProvider),
       ),
     );
   }
 }
 
-class _PoCard extends StatelessWidget {
-  const _PoCard({
+class _PoRow extends StatelessWidget {
+  const _PoRow({
     required this.po,
     required this.canDelete,
     required this.onTap,
@@ -268,231 +310,183 @@ class _PoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final df = DateFormat('d MMM yyyy');
-    return GlassCard(
-      padding: const EdgeInsets.all(16),
-      shadow: AppShadows.soft,
+    final sub = [
+      po.poNumber,
+      po.poDate == null ? '—' : df.format(po.poDate!),
+      if (po.createdByUsername != null) 'by ${po.createdByUsername}',
+    ].join(' · ');
+    return Material(
+      color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.lg),
         onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(9),
-                    border: Border.all(color: AppColors.primary.withOpacity(0.22)),
-                  ),
-                  alignment: Alignment.center,
-                  child: Icon(poDocumentIcon, color: AppColors.primary, size: 17),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        po.poNumber,
-                        style: const TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.ink),
-                      ),
-                      if (po.createdByUsername != null)
-                        Text(
-                          'by ${po.createdByUsername}',
-                          style: const TextStyle(fontSize: 11, color: AppColors.muted),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 4, 10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ProIconWell(icon: poDocumentIcon, color: AppColors.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            po.supplierName ?? 'No supplier',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              height: 1.33,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: -0.15,
+                              color: AppColors.ink,
+                            ),
+                          ),
                         ),
-                    ],
-                  ),
+                        const SizedBox(width: 8),
+                        Text(
+                          poMoney(po.grandTotal),
+                          style: const TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.ink,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(sub,
+                        maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.caption),
+                    if (po.supplierGstin != null && po.supplierGstin!.isNotEmpty)
+                      Text('GSTIN: ${po.supplierGstin}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppText.caption),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              ProPill.neutral('Sub ${poMoney(po.subtotal)}'),
+                              ProPill.info('GST ${poMoney(po.gstTotal)}'),
+                            ],
+                          ),
+                        ),
+                        Consumer(
+                          builder: (ctx, ref, _) => IconButton(
+                            onPressed: () => downloadPoPdf(
+                                ctx, () => ref.read(poRepositoryProvider).get(po.id)),
+                            icon: Icon(Icons.picture_as_pdf_rounded,
+                                size: 19, color: AppColors.primary),
+                            tooltip: 'Download PDF',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 36, minHeight: 32),
+                          ),
+                        ),
+                        if (canDelete)
+                          IconButton(
+                            onPressed: onDelete,
+                            icon: const Icon(Icons.delete_outline_rounded,
+                                size: 19, color: AppColors.danger),
+                            tooltip: 'Delete',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 36, minHeight: 32),
+                          ),
+                      ],
+                    ),
+                  ],
                 ),
-                Consumer(
-                  builder: (ctx, ref, _) => IconButton(
-                    onPressed: () => downloadPoPdf(ctx, () => ref.read(poRepositoryProvider).get(po.id)),
-                    icon: Icon(Icons.picture_as_pdf_rounded, size: 19, color: AppColors.primary),
-                    tooltip: 'Download PDF',
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                  ),
-                ),
-                if (canDelete)
-                  IconButton(
-                    onPressed: onDelete,
-                    icon: const Icon(Icons.delete_outline_rounded,
-                        size: 19, color: AppColors.danger),
-                    tooltip: 'Delete',
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            _row(Icons.store_mall_directory_rounded, po.supplierName ?? 'No supplier'),
-            if (po.supplierGstin != null && po.supplierGstin!.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              _row(Icons.badge_rounded, 'GSTIN: ${po.supplierGstin}'),
+              ),
             ],
-            const SizedBox(height: 6),
-            _row(Icons.event_rounded, po.poDate == null ? '—' : df.format(po.poDate!)),
-            const Divider(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                _totalCol('Subtotal', po.subtotal),
-                _totalCol('GST', po.gstTotal),
-                _totalCol('Total', po.grandTotal, bold: true),
-              ],
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
-
-  Widget _row(IconData icon, String text) => Row(
-        children: [
-          Icon(icon, size: 14, color: AppColors.muted),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(text,
-                style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis),
-          ),
-        ],
-      );
-
-  Widget _totalCol(String label, double value, {bool bold = false}) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 10.5, fontWeight: FontWeight.w600, color: AppColors.muted)),
-          const SizedBox(height: 2),
-          Text(
-            poMoney(value),
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
-              color: AppColors.ink,
-            ),
-          ),
-        ],
-      );
 }
 
 // ── Dashboard tab ────────────────────────────────────────────────────────────
 
 class _DashboardTab extends ConsumerWidget {
-  const _DashboardTab({required this.bottomPadding});
-  final double bottomPadding;
+  const _DashboardTab();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(poDashboardProvider);
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: () async => ref.invalidate(poDashboardProvider),
-      child: ListView(
-        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
+    return async.when(
+      data: (data) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          async.when(
-            data: (data) => Column(
+          const ProSectionHeader(title: 'Overview'),
+          const SizedBox(height: 10),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            padding: EdgeInsets.zero,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: 1.5,
+            children: [
+              StatTileV2(
+                label: 'Total orders',
+                value: '${data.totalOrders}',
+                icon: Icons.receipt_long_rounded,
+                color: AppColors.primary,
+              ),
+              StatTileV2(
+                label: 'Total value',
+                value: poMoney(data.totalValue),
+                icon: Icons.payments_rounded,
+                color: AppColors.success,
+              ),
+              StatTileV2(
+                label: "This month's orders",
+                value: '${data.thisMonthOrders}',
+                icon: Icons.calendar_month_rounded,
+                color: AppColors.info,
+              ),
+              StatTileV2(
+                label: "This month's value",
+                value: poMoney(data.thisMonthValue),
+                icon: Icons.trending_up_rounded,
+                color: AppColors.warning,
+              ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          const ProSectionHeader(title: 'By user', subtitle: 'Order value'),
+          const SizedBox(height: 10),
+          if (data.byUser.isEmpty)
+            const ProEmpty(
+              icon: Icons.groups_rounded,
+              title: 'No data yet.',
+            )
+          else
+            ProListGroup(
               children: [
-                GridView.count(
-                  crossAxisCount: 2,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
-                  childAspectRatio: 1.5,
-                  children: [
-                    StatTileV2(
-                      label: 'Total orders',
-                      value: '${data.totalOrders}',
-                      icon: Icons.receipt_long_rounded,
-                      color: AppColors.primary,
-                    ),
-                    StatTileV2(
-                      label: 'Total value',
-                      value: poMoney(data.totalValue),
-                      icon: Icons.payments_rounded,
-                      color: AppColors.success,
-                    ),
-                    StatTileV2(
-                      label: "This month's orders",
-                      value: '${data.thisMonthOrders}',
-                      icon: Icons.calendar_month_rounded,
-                      color: AppColors.info,
-                    ),
-                    StatTileV2(
-                      label: "This month's value",
-                      value: poMoney(data.thisMonthValue),
-                      icon: Icons.trending_up_rounded,
-                      color: AppColors.warning,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                const Align(
-                    alignment: Alignment.centerLeft,
-                    child: AppSectionHeader(title: 'By user')),
-                const SizedBox(height: 8),
-                if (data.byUser.isEmpty)
-                  const AppEmptyState(
-                    icon: Icons.groups_rounded,
-                    message: 'No data yet.',
-                  )
-                else
-                  GlassCard(
-                    padding: EdgeInsets.zero,
-                    shadow: AppShadows.soft,
-                    child: Column(
-                      children: [
-                        for (int i = 0; i < data.byUser.length; i++) ...[
-                          if (i > 0) const Divider(height: 1),
-                          Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    data.byUser[i].username,
-                                    style: const TextStyle(
-                                        fontSize: 13, fontWeight: FontWeight.w700),
-                                  ),
-                                ),
-                                Text(
-                                  '${data.byUser[i].orderCount} order(s)',
-                                  style: const TextStyle(
-                                      fontSize: 11.5, color: AppColors.muted),
-                                ),
-                                const SizedBox(width: 10),
-                                Text(
-                                  poMoney(data.byUser[i].totalValue),
-                                  style: const TextStyle(
-                                      fontSize: 13, fontWeight: FontWeight.w800),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
+                for (final u in data.byUser)
+                  ProListRow(
+                    leading: ProAvatar(name: u.username, size: 36),
+                    title: u.username,
+                    subtitle: '${u.orderCount} order(s)',
+                    value: poMoney(u.totalValue),
                   ),
               ],
             ),
-            loading: () => const AppLoadingBlock(height: 200),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(poDashboardProvider),
-            ),
-          ),
         ],
+      ),
+      loading: () => const AppLoadingBlock(height: 200),
+      error: (e, _) => AppErrorPanel(
+        message: e.toString(),
+        onRetry: () => ref.invalidate(poDashboardProvider),
       ),
     );
   }
@@ -501,48 +495,35 @@ class _DashboardTab extends ConsumerWidget {
 // ── Audit trail tab ──────────────────────────────────────────────────────────
 
 class _AuditTab extends ConsumerWidget {
-  const _AuditTab({required this.bottomPadding});
-  final double bottomPadding;
+  const _AuditTab();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(poAuditTrailProvider);
     final df = DateFormat('d MMM yyyy, HH:mm');
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: () async => ref.invalidate(poAuditTrailProvider),
-      child: ListView(
-        physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-        padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
-        children: [
-          async.when(
-            data: (rows) {
-              if (rows.isEmpty) {
-                return const AppEmptyState(
-                  icon: Icons.history_rounded,
-                  message: 'No audit activity yet.',
-                );
-              }
-              return GlassCard(
-                padding: EdgeInsets.zero,
-                shadow: AppShadows.soft,
-                child: Column(
-                  children: [
-                    for (int i = 0; i < rows.length; i++) ...[
-                      if (i > 0) const Divider(height: 1),
-                      _AuditRow(entry: rows[i], df: df),
-                    ],
-                  ],
-                ),
-              );
-            },
-            loading: () => const AppLoadingBlock(height: 200),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(poAuditTrailProvider),
+    return async.when(
+      data: (rows) {
+        if (rows.isEmpty) {
+          return const ProEmpty(
+            icon: Icons.history_rounded,
+            title: 'No audit activity yet.',
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ProSectionHeader(title: 'Activity · ${rows.length}', small: true),
+            const SizedBox(height: 8),
+            ProListGroup(
+              children: [for (final r in rows) _AuditRow(entry: r, df: df)],
             ),
-          ),
-        ],
+          ],
+        );
+      },
+      loading: () => const AppLoadingBlock(height: 200),
+      error: (e, _) => AppErrorPanel(
+        message: e.toString(),
+        onRetry: () => ref.invalidate(poAuditTrailProvider),
       ),
     );
   }
@@ -553,35 +534,32 @@ class _AuditRow extends StatelessWidget {
   final PoAuditLog entry;
   final DateFormat df;
 
+  IconData get _icon {
+    switch (entry.action.toUpperCase()) {
+      case 'CREATE':
+      case 'CREATED':
+        return Icons.add_rounded;
+      case 'UPDATE':
+      case 'UPDATED':
+        return Icons.edit_rounded;
+      case 'DELETE':
+      case 'DELETED':
+        return Icons.delete_outline_rounded;
+      default:
+        return Icons.history_rounded;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final tone = poAuditActionTone(entry.action);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-      child: Row(
-        children: [
-          StatusPill(label: tone.label, color: tone.color),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${entry.entityType} #${entry.entityId ?? '—'}',
-                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  entry.createdAt == null
-                      ? (entry.actorName ?? 'system')
-                      : '${df.format(entry.createdAt!)} · ${entry.actorName ?? 'system'}',
-                  style: const TextStyle(fontSize: 11, color: AppColors.muted),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return ProListRow(
+      leading: ProIconWell(icon: _icon, color: tone.color),
+      title: '${entry.entityType} #${entry.entityId ?? '—'}',
+      subtitle: entry.createdAt == null
+          ? (entry.actorName ?? 'system')
+          : '${df.format(entry.createdAt!)} · ${entry.actorName ?? 'system'}',
+      pill: ProPill(tone.label, color: tone.color),
     );
   }
 }

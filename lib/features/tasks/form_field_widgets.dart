@@ -11,6 +11,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../files/file_repository.dart';
 
@@ -26,6 +27,9 @@ import '../files/file_repository.dart';
 /// same type, so a form filled on one side reads back on the other and in
 /// reports. Where the web offers a manual box as its fallback, the stored value
 /// is the string that box would have produced.
+
+/// Border colour of an idle input (matches the global input theme).
+const _kFieldBorder = Color(0xFFD9E2E4);
 
 // ─────────────────────────── Selection ───────────────────────────
 
@@ -103,7 +107,7 @@ class TfChoiceChips extends StatelessWidget {
       children: [
         for (final o in options)
           ChoiceChip(
-            label: Text(o, style: TextStyle(fontSize: big ? 22 : 13)),
+            label: Text(o, style: TextStyle(fontSize: big ? 22 : 13.5)),
             selected: current == o,
             onSelected: readOnly ? null : (_) => onChanged(current == o ? null : o),
           ),
@@ -128,16 +132,31 @@ class TfToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final on = value == true || value == 'true';
-    return Row(
-      children: [
-        Switch(
-          value: on,
-          onChanged: readOnly ? null : (v) => onChanged(v),
-        ),
-        const SizedBox(width: 4),
-        Text(on ? 'Yes' : 'No',
-            style: TextStyle(fontSize: 13, color: AppColors.inkSoft)),
-      ],
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 4, 6, 4),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: _kFieldBorder),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              on ? 'Yes' : 'No',
+              style: const TextStyle(
+                fontSize: 14.5,
+                fontWeight: FontWeight.w500,
+                color: AppColors.ink,
+              ),
+            ),
+          ),
+          Switch(
+            value: on,
+            onChanged: readOnly ? null : (v) => onChanged(v),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -172,36 +191,55 @@ class TfRanking extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final order = _order;
-    return ReorderableListView(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      buildDefaultDragHandles: !readOnly,
-      onReorder: (from, to) {
-        if (readOnly) return;
-        final next = [...order];
-        if (to > from) to -= 1;
-        next.insert(to, next.removeAt(from));
-        onChanged(next);
-      },
-      children: [
-        for (var i = 0; i < order.length; i++)
-          ListTile(
-            key: ValueKey(order[i]),
-            dense: true,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-            leading: CircleAvatar(
-              radius: 12,
-              backgroundColor: AppColors.primary.withOpacity(0.12),
-              child: Text('${i + 1}',
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: ReorderableListView(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        buildDefaultDragHandles: !readOnly,
+        onReorder: (from, to) {
+          if (readOnly) return;
+          final next = [...order];
+          if (to > from) to -= 1;
+          next.insert(to, next.removeAt(from));
+          onChanged(next);
+        },
+        children: [
+          for (var i = 0; i < order.length; i++)
+            ListTile(
+              key: ValueKey(order[i]),
+              dense: true,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              leading: Container(
+                width: 26,
+                height: 26,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '${i + 1}',
                   style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.primary)),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+              title: Text(order[i], style: const TextStyle(fontSize: 14.5)),
+              trailing: readOnly
+                  ? null
+                  : const Icon(Icons.drag_handle_rounded,
+                      size: 18, color: AppColors.faint),
             ),
-            title: Text(order[i], style: const TextStyle(fontSize: 13.5)),
-            trailing: readOnly ? null : const Icon(Icons.drag_handle_rounded, size: 18),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -235,15 +273,16 @@ class TfStarRating extends StatelessWidget {
             constraints: const BoxConstraints(),
             icon: Icon(
               i <= current ? Icons.star_rounded : Icons.star_border_rounded,
-              size: 30,
-              color: i <= current ? AppColors.warning : AppColors.hairline,
+              size: 32,
+              color: i <= current
+                  ? const Color(0xFFF2B347)
+                  : const Color(0xFFB9C7CA),
             ),
             onPressed: readOnly ? null : () => onChanged(i == current ? null : i),
           ),
         if (current > 0) ...[
           const SizedBox(width: 8),
-          Text('$current / $max',
-              style: TextStyle(fontSize: 12, color: AppColors.muted)),
+          ProPill.neutral('$current / $max'),
         ],
       ],
     );
@@ -272,10 +311,10 @@ class TfNpsScore extends StatelessWidget {
       children: [
         for (var i = 0; i <= 10; i++)
           SizedBox(
-            width: 38,
+            width: 40,
             child: ChoiceChip(
               labelPadding: EdgeInsets.zero,
-              label: Center(child: Text('$i', style: const TextStyle(fontSize: 12.5))),
+              label: Center(child: Text('$i', style: const TextStyle(fontSize: 13))),
               selected: current == i,
               onSelected:
                   readOnly ? null : (_) => onChanged(current == i ? null : i),
@@ -324,7 +363,12 @@ class TfSliderRating extends StatelessWidget {
           width: 36,
           child: Text(raw == null ? '—' : current.toStringAsFixed(0),
               textAlign: TextAlign.end,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.ink,
+                fontFeatures: [FontFeature.tabularFigures()],
+              )),
         ),
       ],
     );
@@ -349,16 +393,16 @@ class TfApproval extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final current = value?.toString();
-    Widget button(String key, String label, IconData icon, Color color) {
+    Widget button(String key, String label, IconData icon, Color color, Color tint) {
       final on = current == key;
       return Expanded(
         child: OutlinedButton.icon(
           onPressed: readOnly ? null : () => onChanged(on ? null : key),
           style: OutlinedButton.styleFrom(
             foregroundColor: on ? color : AppColors.inkSoft,
-            backgroundColor: on ? color.withOpacity(0.08) : null,
+            backgroundColor: on ? tint : null,
             side: BorderSide(
-                color: on ? color : AppColors.hairline, width: on ? 1.4 : 1),
+                color: on ? color : _kFieldBorder, width: on ? 1.4 : 1),
           ),
           icon: Icon(icon, size: 18),
           label: Text(label),
@@ -368,9 +412,11 @@ class TfApproval extends StatelessWidget {
 
     return Row(
       children: [
-        button('APPROVED', 'Approve', Icons.check_rounded, AppColors.success),
+        button('APPROVED', 'Approve', Icons.check_rounded, AppColors.success,
+            AppColors.successTint),
         const SizedBox(width: 10),
-        button('REJECTED', 'Reject', Icons.close_rounded, AppColors.danger),
+        button('REJECTED', 'Reject', Icons.close_rounded, AppColors.danger,
+            AppColors.dangerTint),
       ],
     );
   }
@@ -441,60 +487,89 @@ class _TfSignaturePadState extends ConsumerState<TfSignaturePad> {
     final stored = _stored;
 
     if (stored != null) {
-      return Row(
-        children: [
-          Icon(Icons.draw_rounded, size: 18, color: AppColors.primary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(stored['originalName']?.toString() ?? 'Signed',
-                style: const TextStyle(fontSize: 13.5)),
-          ),
-          if (!widget.readOnly)
-            TextButton(
-              onPressed: () => widget.onChanged(null),
-              child: const Text('Redo'),
+      return Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+        decoration: BoxDecoration(
+          color: AppColors.successTint,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+        ),
+        child: Row(
+          children: [
+            const _DoneBadge(),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(stored['originalName']?.toString() ?? 'Signed',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.ink,
+                  )),
             ),
-        ],
+            if (!widget.readOnly)
+              TextButton(
+                onPressed: () => widget.onChanged(null),
+                child: const Text('Redo'),
+              ),
+          ],
+        ),
       );
     }
 
     if (widget.readOnly) {
-      return Text('Not signed',
-          style: TextStyle(fontSize: 13, color: AppColors.muted));
+      return const Text('Not signed',
+          style: TextStyle(fontSize: 13.5, color: AppColors.muted));
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        RepaintBoundary(
-          key: _boundaryKey,
-          child: Container(
-            height: 180,
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: AppColors.hairline),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: GestureDetector(
-              onPanStart: (d) => setState(() => _strokes.add([d.localPosition])),
-              onPanUpdate: (d) => setState(() {
-                if (_strokes.isEmpty) _strokes.add([]);
-                _strokes.last.add(d.localPosition);
-              }),
-              child: CustomPaint(
-                painter: _StrokePainter(_strokes),
-                size: Size.infinite,
+        Stack(
+          children: [
+            RepaintBoundary(
+              key: _boundaryKey,
+              child: Container(
+                height: 180,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border.all(color: _kFieldBorder),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: GestureDetector(
+                  onPanStart: (d) => setState(() => _strokes.add([d.localPosition])),
+                  onPanUpdate: (d) => setState(() {
+                    if (_strokes.isEmpty) _strokes.add([]);
+                    _strokes.last.add(d.localPosition);
+                  }),
+                  child: CustomPaint(
+                    painter: _StrokePainter(_strokes),
+                    size: Size.infinite,
+                  ),
+                ),
               ),
             ),
-          ),
+            // Outside the captured boundary, so it never lands in the PNG.
+            if (_strokes.isEmpty)
+              const Positioned.fill(
+                child: IgnorePointer(
+                  child: Center(
+                    child: Text(
+                      'Draw here',
+                      style: TextStyle(fontSize: 14, color: AppColors.faint),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
         const SizedBox(height: 6),
         Row(
           children: [
-            Text(widget.hint,
-                style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
-            const Spacer(),
+            Expanded(
+              child: Text(widget.hint, style: AppText.caption),
+            ),
             TextButton(
               onPressed:
                   _strokes.isEmpty || _busy ? null : () => setState(_strokes.clear),
@@ -503,6 +578,10 @@ class _TfSignaturePadState extends ConsumerState<TfSignaturePad> {
             const SizedBox(width: 4),
             FilledButton(
               onPressed: _strokes.isEmpty || _busy ? null : _save,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, 38),
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+              ),
               child: _busy
                   ? const SizedBox(
                       width: 14,
@@ -513,6 +592,24 @@ class _TfSignaturePadState extends ConsumerState<TfSignaturePad> {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// Green check disc used by captured / saved states.
+class _DoneBadge extends StatelessWidget {
+  const _DoneBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: const BoxDecoration(
+        color: AppColors.success,
+        shape: BoxShape.circle,
+      ),
+      child: const Icon(Icons.check_rounded, size: 17, color: Colors.white),
     );
   }
 }
@@ -614,15 +711,13 @@ class _TfScannerFieldState extends State<TfScannerField> {
           readOnly: widget.readOnly,
           decoration: InputDecoration(
             hintText: widget.canScan ? 'Or enter it manually' : 'Enter the value',
-            border: const OutlineInputBorder(),
             isDense: true,
           ),
           onChanged: (s) => widget.onChanged(s.isEmpty ? null : s),
         ),
         if (widget.note != null) ...[
-          const SizedBox(height: 4),
-          Text(widget.note!,
-              style: TextStyle(fontSize: 11, color: AppColors.muted)),
+          const SizedBox(height: 5),
+          Text(widget.note!, style: AppText.caption),
         ],
       ],
     );
@@ -652,6 +747,7 @@ class _ScanSheetState extends State<_ScanSheet> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black,
       appBar: AppBar(title: Text(widget.title)),
       body: MobileScanner(
         controller: _controller,
@@ -701,35 +797,42 @@ class TfMapPointField extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (point != null)
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: SizedBox(
-              height: 150,
-              child: IgnorePointer(
-                child: FlutterMap(
-                  options: MapOptions(initialCenter: point, initialZoom: 15),
-                  children: [
-                    TileLayer(
-                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.nava360.app',
+          Container(
+            height: 150,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadii.md),
+              border: Border.all(color: AppColors.hairline),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: IgnorePointer(
+              child: FlutterMap(
+                options: MapOptions(initialCenter: point, initialZoom: 15),
+                children: [
+                  TileLayer(
+                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.nava360.app',
+                  ),
+                  MarkerLayer(markers: [
+                    Marker(
+                      point: point,
+                      width: 40,
+                      height: 40,
+                      child: const Icon(Icons.place_rounded,
+                          size: 36, color: AppColors.danger),
                     ),
-                    MarkerLayer(markers: [
-                      Marker(
-                        point: point,
-                        width: 40,
-                        height: 40,
-                        child: Icon(Icons.place_rounded,
-                            size: 36, color: AppColors.danger),
-                      ),
-                    ]),
-                  ],
-                ),
+                  ]),
+                ],
               ),
             ),
           ),
         if (point != null) ...[
           const SizedBox(height: 6),
-          Text(value, style: const TextStyle(fontSize: 12.5)),
+          Text(value,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppColors.inkSoft,
+                fontFeatures: [FontFeature.tabularFigures()],
+              )),
         ],
         if (!readOnly) ...[
           const SizedBox(height: 8),
@@ -751,7 +854,8 @@ class TfMapPointField extends StatelessWidget {
           ),
         ],
         if (point == null && readOnly)
-          Text('Not set', style: TextStyle(fontSize: 13, color: AppColors.muted)),
+          const Text('Not set',
+              style: TextStyle(fontSize: 13.5, color: AppColors.muted)),
       ],
     );
   }
@@ -806,6 +910,7 @@ class _MapPickerState extends State<_MapPicker> {
                 : () => Navigator.of(context).pop(_chosen),
             child: const Text('Use'),
           ),
+          const SizedBox(width: 6),
         ],
       ),
       body: FlutterMap(
@@ -826,7 +931,8 @@ class _MapPickerState extends State<_MapPicker> {
                 point: _chosen!,
                 width: 44,
                 height: 44,
-                child: Icon(Icons.place_rounded, size: 40, color: AppColors.danger),
+                child: const Icon(Icons.place_rounded,
+                    size: 40, color: AppColors.danger),
               ),
             ]),
         ],
@@ -878,7 +984,6 @@ class TfRepeatableRows extends StatelessWidget {
                     readOnly: readOnly,
                     decoration: InputDecoration(
                       isDense: true,
-                      border: const OutlineInputBorder(),
                       prefixText: '${i + 1}.  ',
                     ),
                     onChanged: (s) {
@@ -889,8 +994,10 @@ class TfRepeatableRows extends StatelessWidget {
                 ),
                 if (!readOnly)
                   IconButton(
+                    tooltip: 'Remove',
                     visualDensity: VisualDensity.compact,
-                    icon: Icon(Icons.close_rounded, size: 18, color: AppColors.muted),
+                    icon: const Icon(Icons.close_rounded,
+                        size: 18, color: AppColors.muted),
                     onPressed: () {
                       final next = [...rows]..removeAt(i);
                       onChanged(next.isEmpty ? null : next);
@@ -906,8 +1013,8 @@ class TfRepeatableRows extends StatelessWidget {
             label: Text(addLabel),
           ),
         if (readOnly && rows.isEmpty)
-          Text('Nothing added',
-              style: TextStyle(fontSize: 13, color: AppColors.muted)),
+          const Text('Nothing added',
+              style: TextStyle(fontSize: 13.5, color: AppColors.muted)),
       ],
     );
   }
@@ -941,8 +1048,8 @@ class TfMatrixField extends StatelessWidget {
   Widget build(BuildContext context) {
     final answers = _answers;
     if (rows.isEmpty) {
-      return Text('No rows configured for this field.',
-          style: TextStyle(fontSize: 12, color: AppColors.muted));
+      return const Text('No rows configured for this field.',
+          style: AppText.caption);
     }
     return Column(
       children: [
@@ -954,7 +1061,9 @@ class TfMatrixField extends StatelessWidget {
               children: [
                 Expanded(
                   flex: 4,
-                  child: Text(row, style: const TextStyle(fontSize: 13)),
+                  child: Text(row,
+                      style: const TextStyle(
+                          fontSize: 14, color: AppColors.inkSoft)),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -962,10 +1071,7 @@ class TfMatrixField extends StatelessWidget {
                   child: TextFormField(
                     initialValue: answers[row] ?? '',
                     readOnly: readOnly,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: const InputDecoration(isDense: true),
                     onChanged: (s) {
                       final next = {...answers, row: s};
                       next.removeWhere((_, v) => v.isEmpty);
@@ -997,46 +1103,38 @@ class TfLayoutBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (kind) {
       case 'divider':
-        return Divider(color: AppColors.hairline, height: 24);
+        return const Divider(color: AppColors.hairline, height: 24);
       case 'spacer':
         return const SizedBox(height: 16);
       case 'heading':
         return Padding(
-          padding: const EdgeInsets.only(top: 8, bottom: 2),
-          child: Text(label,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          padding: const EdgeInsets.only(top: 6, bottom: 2),
+          child: Text(label, style: AppText.section),
         );
       case 'paragraph':
         return Padding(
           padding: const EdgeInsets.only(bottom: 2),
           child: Text(label,
-              style: TextStyle(fontSize: 13, color: AppColors.inkSoft, height: 1.4)),
+              style: const TextStyle(
+                  fontSize: 14, color: AppColors.inkSoft, height: 1.45)),
         );
       case 'section':
       default:
         return Container(
           width: double.infinity,
-          margin: const EdgeInsets.only(top: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.06),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: AppColors.primary.withOpacity(0.18)),
+          margin: const EdgeInsets.only(top: 6),
+          padding: const EdgeInsets.only(top: 12),
+          decoration: const BoxDecoration(
+            border: Border(top: BorderSide(color: AppColors.hairlineSoft)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label,
-                  style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.primary)),
+              Text(label, style: AppText.section),
               if (helpText != null && helpText!.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
-                  child: Text(helpText!,
-                      style: TextStyle(
-                          fontSize: 11.5, color: AppColors.primary.withOpacity(0.8))),
+                  child: Text(helpText!, style: AppText.caption),
                 ),
             ],
           ),
@@ -1058,21 +1156,21 @@ class TfAutoFilled extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadii.md),
         border: Border.all(color: AppColors.hairline),
       ),
       child: Row(
         children: [
-          Icon(Icons.lock_outline_rounded, size: 15, color: AppColors.muted),
-          const SizedBox(width: 8),
+          const Icon(Icons.lock_outline_rounded, size: 16, color: AppColors.faint),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
               text,
               style: TextStyle(
-                fontSize: 12.5,
+                fontSize: 14,
                 color: AppColors.inkSoft,
                 fontFamily: mono ? 'monospace' : null,
               ),

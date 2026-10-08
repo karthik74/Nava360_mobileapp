@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import 'chat_controller.dart';
 import 'chat_models.dart';
 import 'chat_thread_screen.dart';
@@ -23,7 +24,16 @@ class ChatThreadByIdScreen extends ConsumerWidget {
       ),
       error: (e, _) => Scaffold(
         appBar: AppBar(title: const Text('Chat')),
-        body: Center(child: Text('Could not open chat.\n$e', textAlign: TextAlign.center)),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: ProEmpty(
+              icon: Icons.chat_bubble_outline_rounded,
+              title: 'Could not open chat.',
+              message: '$e',
+            ),
+          ),
+        ),
       ),
       data: (list) {
         Conversation? conv;
@@ -36,7 +46,15 @@ class ChatThreadByIdScreen extends ConsumerWidget {
         if (conv == null) {
           return Scaffold(
             appBar: AppBar(title: const Text('Chat')),
-            body: const Center(child: Text('Conversation not found.')),
+            body: const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: ProEmpty(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  title: 'Conversation not found.',
+                ),
+              ),
+            ),
           );
         }
         return ChatThreadScreen(conversation: conv);

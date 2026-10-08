@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'helpdesk_models.dart';
@@ -18,144 +19,203 @@ class HelpdeskDashboardScreen extends ConsumerWidget {
     return '${(h / 24).toStringAsFixed(1)}d';
   }
 
+  static const _cOpen = Color(0xFF5AA9F0);
+  static const _cProgress = Color(0xFFF2B347);
+  static const _cClosed = Color(0x8CFFFFFF);
+  static const _cOther = Color(0x40FFFFFF);
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(helpdeskDashboardProvider);
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-          title: const Text('Helpdesk Dashboard'),
+    Future<void> refresh() async => ref.invalidate(helpdeskDashboardProvider);
+    return Scaffold(
+      appBar: AppBar(title: const Text('Helpdesk dashboard')),
+      body: async.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => ProPage(
+          onRefresh: refresh,
+          children: [AppErrorPanel(message: '$e', onRetry: refresh)],
         ),
-        body: RefreshIndicator(
-          color: AppColors.primary,
-          onRefresh: () async => ref.invalidate(helpdeskDashboardProvider),
-          child: async.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
-            error: (e, _) => ListView(children: [
-              Padding(padding: const EdgeInsets.all(24), child: AppErrorPanel(message: '$e')),
-            ]),
-            data: (d) => ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 32),
+        data: (d) {
+          final done = d.resolved + d.closed;
+          final pct = d.total == 0 ? 0 : (done * 100 / d.total).round();
+          final other = (d.total - d.open - d.inProgress - d.resolved - d.closed)
+              .clamp(0, d.total);
+          return ProPage(
+            onRefresh: refresh,
+            hero: ProHero(
+              title: 'Helpdesk',
+              subtitle: 'Tickets in your scope',
+              overlap: ProKpiStrip(cells: [
+                ProKpi(value: _fmtMins(d.avgFirstResponseMins), label: 'Avg 1st response'),
+                ProKpi(value: _fmtMins(d.avgResolutionMins), label: 'Avg resolution'),
+                ProKpi(
+                  value: '${d.slaBreached}',
+                  label: 'SLA breached',
+                  valueColor: d.slaBreached > 0 ? AppColors.danger : null,
+                ),
+              ]),
               children: [
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
                   children: [
-                    _kpi('Total', d.total, AppColors.ink),
-                    _kpi('Open', d.open, AppColors.info),
-                    _kpi('In Progress', d.inProgress, AppColors.warning),
-                    _kpi('Resolved', d.resolved, AppColors.success),
-                    _kpi('Closed', d.closed, AppColors.muted),
-                    _kpi('SLA Breached', d.slaBreached, AppColors.danger),
+                    Text(
+                      '${d.total}',
+                      style: const TextStyle(
+                        fontSize: 40,
+                        height: 1.1,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -1.2,
+                        color: Colors.white,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'tickets in total',
+                        style: TextStyle(fontSize: 13.5, color: Colors.white70),
+                      ),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                Row(children: [
-                  Expanded(child: _stat('Avg 1st Response', _fmtMins(d.avgFirstResponseMins))),
-                  const SizedBox(width: 10),
-                  Expanded(child: _stat('Avg Resolution', _fmtMins(d.avgResolutionMins))),
-                ]),
-                const SizedBox(height: 16),
-                _breakdown('By Status', d.byStatus),
-                _breakdown('By Priority', d.byPriority),
-                _breakdown('By Category', d.byCategory),
-                _breakdown('By Branch', d.byBranch),
-                _breakdown('Top Agents', d.byAgent),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text('$done resolved or closed',
+                              style: const TextStyle(
+                                  fontSize: 12.5,
+                                  color: Colors.white70,
+                                  fontFeatures: [FontFeature.tabularFigures()])),
+                        ),
+                        Text('$pct%',
+                            style: const TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                                fontFeatures: [FontFeature.tabularFigures()])),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ProStackBar(parts: [
+                      MapEntry(d.open.toDouble(), _cOpen),
+                      MapEntry(d.inProgress.toDouble(), _cProgress),
+                      MapEntry(d.resolved.toDouble(), AppColors.live),
+                      MapEntry(d.closed.toDouble(), _cClosed),
+                      MapEntry(other.toDouble(), _cOther),
+                    ]),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 14,
+                      runSpacing: 8,
+                      children: [
+                        _legend('Open', d.open, _cOpen),
+                        _legend('In progress', d.inProgress, _cProgress),
+                        _legend('Resolved', d.resolved, AppColors.live),
+                        _legend('Closed', d.closed, _cClosed),
+                        if (other > 0) _legend('Other', other, _cOther),
+                      ],
+                    ),
+                  ],
+                ),
               ],
             ),
-          ),
+            children: [
+              const ProSectionHeader(title: 'Breakdown', small: true),
+              _breakdown('By status', d.byStatus),
+              _breakdown('By priority', d.byPriority),
+              _breakdown('By category', d.byCategory),
+              _breakdown('By branch', d.byBranch),
+              _breakdown('Top agents', d.byAgent),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _legend(String label, int value, Color color) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-      ),
-    );
-  }
-
-  Widget _kpi(String label, int value, Color color) {
-    return Container(
-      width: 108,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.hairline),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label.toUpperCase(), style: const TextStyle(fontSize: 10, color: AppColors.muted, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          Text('$value', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color)),
-        ],
-      ),
-    );
-  }
-
-  Widget _stat(String label, String value) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.hairline),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label.toUpperCase(), style: const TextStyle(fontSize: 10, color: AppColors.muted, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.ink)),
-        ],
-      ),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(fontSize: 12.5, color: Colors.white70)),
+        const SizedBox(width: 5),
+        Text('$value',
+            style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+                fontFeatures: [FontFeature.tabularFigures()])),
+      ],
     );
   }
 
   Widget _breakdown(String title, List<HdCount> rows) {
     final max = rows.fold<int>(1, (m, r) => r.value > m ? r.value : m);
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.hairline),
-      ),
+    final sum = rows.fold<int>(0, (a, r) => a + r.value);
+    return GlassCard(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.ink)),
+          ProSectionHeader(
+            title: title,
+            trailing: rows.isEmpty
+                ? null
+                : Text('$sum',
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.muted,
+                        fontFeatures: [FontFeature.tabularFigures()])),
+          ),
           const SizedBox(height: 10),
           if (rows.isEmpty)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('No data.', style: TextStyle(color: AppColors.muted)))
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 4),
+              child: Text('No data.', style: AppText.caption),
+            )
           else
-            ...rows.map((r) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Expanded(child: Text(r.label, style: const TextStyle(fontSize: 13, color: AppColors.ink))),
-                          Text('${r.value}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.ink)),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: r.value / max,
-                          minHeight: 6,
-                          backgroundColor: AppColors.surfaceAlt,
-                          valueColor: AlwaysStoppedAnimation(AppColors.primary),
+            for (var i = 0; i < rows.length; i++)
+              Padding(
+                padding: EdgeInsets.only(top: i == 0 ? 0 : 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(rows[i].label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: AppColors.inkSoft)),
                         ),
-                      ),
-                    ],
-                  ),
-                )),
+                        const SizedBox(width: 10),
+                        Text('${rows[i].value}',
+                            style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.ink,
+                                fontFeatures: [FontFeature.tabularFigures()])),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ProBar(value: rows[i].value / max, height: 6),
+                  ],
+                ),
+              ),
         ],
       ),
     );

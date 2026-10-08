@@ -13,6 +13,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/env.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import 'np_models.dart';
 import 'np_repository.dart';
@@ -64,7 +65,7 @@ Future<bool> npConfirm(
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
         FilledButton(
-          style: danger ? FilledButton.styleFrom(backgroundColor: AppColors.danger) : null,
+          style: danger ? npDangerButtonStyle() : null,
           onPressed: () => Navigator.pop(ctx, true),
           child: Text(confirmLabel),
         ),
@@ -100,7 +101,7 @@ Future<String?> npPrompt(
             if (label != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
-                child: Text(label, style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
+                child: Text(label, style: AppText.label),
               ),
             TextField(
               controller: ctrl,
@@ -115,7 +116,7 @@ Future<String?> npPrompt(
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
-            style: danger ? FilledButton.styleFrom(backgroundColor: AppColors.danger) : null,
+            style: danger ? npDangerButtonStyle() : null,
             onPressed: () {
               final v = ctrl.text.trim();
               if (required && v.isEmpty) {
@@ -136,12 +137,67 @@ Future<String?> npPrompt(
 
 // ── small presentational pieces ──
 
+/// Destructive filled button (tinted red), per the Pro button rules.
+ButtonStyle npDangerButtonStyle() => FilledButton.styleFrom(
+      backgroundColor: AppColors.dangerTint,
+      foregroundColor: AppColors.danger,
+    );
+
+const Color _npOrange = Color(0xFFC2410C);
+const Color _npOrangeTint = Color(0xFFFDEADF);
+const Color _npViolet = Color(0xFF6D28D9);
+const Color _npVioletTint = Color(0xFFF0EAFD);
+
+/// Workflow status as a tinted Pro pill (tones follow [npStatusColor]).
+ProPill npStatusProPill(String status, {String? label}) {
+  final l = label ?? npStatusLabel(status);
+  if (status == 'ACTIVE_NP') return ProPill.ok(l);
+  if (status.endsWith('_REJECTED')) return ProPill.bad(l);
+  if (status == 'SENT_BACK_FOR_CORRECTION') return ProPill(l, color: _npOrange, background: _npOrangeTint);
+  if (status == 'DRAFT') return ProPill.neutral(l);
+  if (status.endsWith('_PENDING')) return ProPill.warn(l);
+  if (status.endsWith('_SUBMITTED')) return ProPill(l, color: _npViolet, background: _npVioletTint);
+  if (status.endsWith('_APPROVED') ||
+      status.endsWith('_COMPLETED') ||
+      status.endsWith('_CREATED') ||
+      status.endsWith('_ACTIVATED') ||
+      status == 'INTERVIEW_PASSED') {
+    return ProPill.ok(l);
+  }
+  return ProPill.info(l);
+}
+
+/// Workflow status tone for tags on the deep hero.
+ProTagTone npStatusTagTone(String status) {
+  if (status.endsWith('_REJECTED')) return ProTagTone.bad;
+  if (status == 'SENT_BACK_FOR_CORRECTION' || status.endsWith('_PENDING')) return ProTagTone.warn;
+  if (status == 'ACTIVE_NP' ||
+      status.endsWith('_APPROVED') ||
+      status.endsWith('_COMPLETED') ||
+      status.endsWith('_CREATED') ||
+      status.endsWith('_ACTIVATED') ||
+      status == 'INTERVIEW_PASSED') {
+    return ProTagTone.ok;
+  }
+  return ProTagTone.neutral;
+}
+
+/// Pill for a status colour picked elsewhere (success / danger / warning …).
+ProPill npTonePill(String label, Color color) {
+  if (color == AppColors.success) return ProPill.ok(label);
+  if (color == AppColors.danger) return ProPill.bad(label);
+  if (color == AppColors.warning) return ProPill.warn(label);
+  if (color == AppColors.info) return ProPill.info(label);
+  if (color == AppColors.muted) return ProPill.neutral(label);
+  return ProPill(label, color: color);
+}
+
 class NpStatusPill extends StatelessWidget {
   const NpStatusPill({super.key, required this.status, this.label});
   final String status;
   final String? label;
   @override
-  Widget build(BuildContext context) => StatusPill(label: label ?? npStatusLabel(status), color: npStatusColor(status));
+  Widget build(BuildContext context) => npStatusProPill(status, label: label);
 }
 
 class NpFieldLabel extends StatelessWidget {
@@ -150,15 +206,18 @@ class NpFieldLabel extends StatelessWidget {
   final bool required;
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 4, top: 8),
-        child: Text.rich(TextSpan(
-          text: text,
-          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft),
-          children: [if (required) const TextSpan(text: ' *', style: TextStyle(color: AppColors.danger))],
-        )),
+        padding: const EdgeInsets.only(bottom: 6, top: 12),
+        child: Text.rich(
+          TextSpan(
+            text: text,
+            children: [if (required) const TextSpan(text: ' *', style: TextStyle(color: AppColors.danger))],
+          ),
+          style: AppText.label,
+        ),
       );
 }
 
+/// Key / value line (label left, value right) — the Pro key-value look.
 class NpInfoRow extends StatelessWidget {
   const NpInfoRow(this.label, this.value, {super.key});
   final String label;
@@ -167,17 +226,27 @@ class NpInfoRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final v = (value == null || value!.trim().isEmpty) ? '—' : value!;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 120,
-            child: Text(label, style: const TextStyle(fontSize: 12, color: AppColors.muted, fontWeight: FontWeight.w600)),
-          ),
-          const SizedBox(width: 8),
           Expanded(
-            child: Text(v, style: const TextStyle(fontSize: 13, color: AppColors.ink, fontWeight: FontWeight.w600)),
+            flex: 2,
+            child: Text(label, style: const TextStyle(fontSize: 13.5, color: AppColors.muted, fontWeight: FontWeight.w500)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 3,
+            child: Text(
+              v,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                fontSize: 13.5,
+                color: AppColors.ink,
+                fontWeight: FontWeight.w500,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
           ),
         ],
       ),
@@ -197,7 +266,10 @@ class NpPersonStamp extends StatelessWidget {
     final parts = <String>[];
     if (person != null) parts.add('$prefix ${person!.name}');
     if (at != null) parts.add(npFmtDateTime(at));
-    return Text(parts.join(' · '), style: const TextStyle(fontSize: 11.5, color: AppColors.muted));
+    return Text(
+      parts.join(' · '),
+      style: const TextStyle(fontSize: 12, height: 1.35, color: AppColors.muted, fontFeatures: [FontFeature.tabularFigures()]),
+    );
   }
 }
 
@@ -208,16 +280,28 @@ class NpChip extends StatelessWidget {
   final Color? color;
   @override
   Widget build(BuildContext context) {
-    final c = color ?? (on ? AppColors.success : AppColors.muted);
+    final Color fg;
+    final Color bg;
+    if (color != null) {
+      fg = color == AppColors.warning ? const Color(0xFF9A5B00) : color!;
+      bg = color == AppColors.warning ? AppColors.warningTint : Color.alphaBlend(color!.withValues(alpha: 0.12), Colors.white);
+    } else if (on) {
+      fg = AppColors.success;
+      bg = AppColors.successTint;
+    } else {
+      fg = const Color(0xFF43585D);
+      bg = AppColors.neutralTint;
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(
-        color: c.withOpacity(on ? 0.12 : 0.06),
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: c.withOpacity(on ? 0.35 : 0.2)),
-      ),
-      child: Text('${on ? '✓' : '○'} $label',
-          style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: on ? c : AppColors.inkSoft)),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(AppRadii.pill)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(on ? Icons.check_rounded : Icons.radio_button_unchecked_rounded, size: 12, color: fg),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg)),
+        ),
+      ]),
     );
   }
 }
@@ -229,20 +313,20 @@ class NpCheckLine extends StatelessWidget {
   final Color? failColor;
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
+        padding: const EdgeInsets.symmetric(vertical: 4),
         child: Row(children: [
           Icon(ok ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-              size: 16, color: ok ? AppColors.success : (failColor ?? AppColors.muted)),
-          const SizedBox(width: 8),
+              size: 18, color: ok ? AppColors.success : (failColor ?? AppColors.faint)),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(label,
-                style: TextStyle(fontSize: 13, color: ok ? AppColors.ink : AppColors.inkSoft, fontWeight: FontWeight.w500)),
+                style: TextStyle(fontSize: 13.5, height: 1.35, color: ok ? AppColors.ink : AppColors.inkSoft, fontWeight: FontWeight.w500)),
           ),
         ]),
       );
 }
 
-/// A bordered, subtly-filled box for an action form inside a step panel.
+/// A softly filled box for an action form inside a step panel.
 class NpActionBox extends StatelessWidget {
   const NpActionBox({super.key, required this.child, this.title});
   final Widget child;
@@ -250,18 +334,18 @@ class NpActionBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: AppColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: Border.all(color: AppColors.hairline),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.hairlineSoft),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (title != null) ...[
-              Text(title!, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: AppColors.ink)),
-              const SizedBox(height: 6),
+              Text(title!, style: AppText.title.copyWith(fontSize: 15)),
+              const SizedBox(height: 4),
             ],
             child,
           ],
@@ -269,6 +353,7 @@ class NpActionBox extends StatelessWidget {
       );
 }
 
+/// Tinted inline banner with an icon well, title, body and an optional action.
 class NpBanner extends StatelessWidget {
   const NpBanner({super.key, required this.icon, required this.color, required this.title, this.body, this.action});
   final IconData icon;
@@ -277,30 +362,88 @@ class NpBanner extends StatelessWidget {
   final String? body;
   final Widget? action;
   @override
-  Widget build(BuildContext context) => GlassCard(
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
         padding: const EdgeInsets.all(14),
-        color: color.withOpacity(0.07),
-        border: Border.all(color: color.withOpacity(0.35)),
+        decoration: BoxDecoration(
+          color: Color.alphaBlend(color.withValues(alpha: 0.08), Colors.white),
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+          border: Border.all(color: Color.alphaBlend(color.withValues(alpha: 0.22), Colors.white)),
+        ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Icon(icon, color: color, size: 20),
-              const SizedBox(width: 10),
+              ProIconWell(icon: icon, color: color, background: Colors.white),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(title, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: color)),
+                  Text(title, style: TextStyle(fontSize: 14.5, height: 1.35, fontWeight: FontWeight.w600, color: color)),
                   if (body != null && body!.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(body!, style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft, height: 1.4)),
+                    const SizedBox(height: 3),
+                    Text(body!, style: const TextStyle(fontSize: 13, color: AppColors.inkSoft, height: 1.45)),
                   ],
                 ]),
               ),
             ]),
-            if (action != null) ...[const SizedBox(height: 10), action!],
+            if (action != null) ...[const SizedBox(height: 12), action!],
           ],
         ),
       );
+}
+
+/// Who a form is for: avatar, name, code · mobile, status and (optionally)
+/// the address on file.
+class NpWhoCard extends StatelessWidget {
+  const NpWhoCard({super.key, required this.d, this.address});
+  final NpCandidateDetail d;
+  final String? address;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          ProAvatar(name: d.fullName.isEmpty ? '?' : d.fullName),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(d.fullName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.ink)),
+              Text('${d.candidateCode} · ${d.mobileNumber}',
+                  style: const TextStyle(fontSize: 12.5, color: AppColors.muted, fontFeatures: [FontFeature.tabularFigures()])),
+              const SizedBox(height: 6),
+              NpStatusPill(status: d.status, label: d.statusLabel),
+            ]),
+          ),
+        ]),
+        if (address != null && address!.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(12)),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Icon(Icons.place_outlined, size: 18, color: AppColors.muted),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(children: [
+                    const TextSpan(
+                        text: 'Address on file\n', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.muted)),
+                    TextSpan(text: address),
+                  ]),
+                  style: const TextStyle(fontSize: 13, height: 1.45, color: AppColors.inkSoft),
+                ),
+              ),
+            ]),
+          ),
+        ],
+      ]),
+    );
+  }
 }
 
 // ── stepper + step panel ──
@@ -334,11 +477,22 @@ class NpStepper extends StatelessWidget {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (var i = 0; i < kNpSteps.length; i++) ...[
             _dot(i),
             if (i < kNpSteps.length - 1)
-              Container(width: 14, height: 2, color: _stateOf(kNpSteps[i].step) == 'DONE' ? AppColors.success : AppColors.hairline),
+              Padding(
+                padding: const EdgeInsets.only(top: 18),
+                child: Container(
+                  width: 14,
+                  height: 2,
+                  decoration: BoxDecoration(
+                    color: _stateOf(kNpSteps[i].step) == 'DONE' ? AppColors.success : AppColors.hairline,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
           ],
         ],
       ),
@@ -360,34 +514,44 @@ class NpStepper extends StatelessWidget {
     final filled = state == 'DONE' || state == 'CURRENT' || state == 'REJECTED' || state == 'SENT_BACK';
     return InkWell(
       onTap: () => onSelect(info.step),
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Container(
-            width: 26,
-            height: 26,
+            width: 28,
+            height: 28,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: filled ? color : AppColors.surface,
-              border: Border.all(color: isSel ? AppColors.ink : color, width: isSel ? 2 : 1.5),
+              border: Border.all(color: isSel ? AppColors.ink : (filled ? color : const Color(0xFFD5DFE1)), width: isSel ? 2 : 1.5),
             ),
             alignment: Alignment.center,
             child: state == 'DONE'
-                ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+                ? const Icon(Icons.check_rounded, size: 15, color: Colors.white)
                 : Text('${i + 1}',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: filled ? Colors.white : AppColors.muted)),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: filled ? Colors.white : AppColors.muted,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    )),
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 5),
           Text(info.short,
-              style: TextStyle(fontSize: 9.5, fontWeight: isSel ? FontWeight.w800 : FontWeight.w600, color: isSel ? AppColors.ink : AppColors.muted)),
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: isSel ? FontWeight.w600 : FontWeight.w500,
+                color: isSel ? AppColors.ink : AppColors.muted,
+              )),
         ]),
       ),
     );
   }
 }
 
-/// One collapsible workflow step card.
+/// One collapsible workflow step. Flat (no card of its own) — stack the
+/// panels inside a [ProListGroup] so they read as one grouped checklist.
 class NpStepPanel extends StatelessWidget {
   const NpStepPanel({
     super.key,
@@ -409,66 +573,78 @@ class NpStepPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = view?.state ?? 'PENDING';
     final color = npStepStateColor(state);
-    return GlassCard(
-      padding: EdgeInsets.zero,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
+    final pending = state == 'PENDING';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
             onTap: onToggle,
-            borderRadius: BorderRadius.circular(AppRadii.lg),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+              padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
               child: Row(children: [
                 Container(
-                  width: 28,
-                  height: 28,
+                  width: 30,
+                  height: 30,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: color.withOpacity(state == 'PENDING' ? 0.5 : 0.15),
-                    border: Border.all(color: color.withOpacity(0.6)),
+                    color: pending ? AppColors.surfaceAlt : Color.alphaBlend(color.withValues(alpha: 0.12), Colors.white),
+                    border: Border.all(color: pending ? const Color(0xFFD5DFE1) : color, width: 1.5),
                   ),
                   alignment: Alignment.center,
                   child: state == 'DONE'
-                      ? Icon(Icons.check_rounded, size: 15, color: color)
+                      ? Icon(Icons.check_rounded, size: 16, color: color)
                       : Text('$index',
-                          style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: state == 'PENDING' ? AppColors.muted : color)),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: pending ? AppColors.muted : color,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          )),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.ink)),
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 15, height: 1.33, fontWeight: FontWeight.w500, letterSpacing: -0.15, color: AppColors.ink),
+                    ),
                     if (view != null && (view!.completedBy != null || view!.completedAt != null))
                       NpPersonStamp(person: view!.completedBy, at: view!.completedAt)
-                    else if (state != 'PENDING')
-                      Text(npTitle(state), style: TextStyle(fontSize: 11.5, color: color, fontWeight: FontWeight.w600)),
+                    else if (!pending)
+                      Text(npTitle(state), style: TextStyle(fontSize: 12.5, color: color, fontWeight: FontWeight.w600)),
                   ]),
                 ),
-                Icon(open ? Icons.expand_less_rounded : Icons.expand_more_rounded, color: AppColors.muted),
+                AnimatedRotation(
+                  turns: open ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: const Icon(Icons.expand_more_rounded, color: Color(0xFFB3C0C3)),
+                ),
               ]),
             ),
           ),
-          if (open) ...[
-            const Divider(height: 1, color: AppColors.hairline),
-            Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (view?.remarks != null && view!.remarks!.isNotEmpty) ...[
-                    Text(view!.remarks!, style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft, fontStyle: FontStyle.italic)),
-                    const SizedBox(height: 10),
-                  ],
-                  for (var i = 0; i < children.length; i++) ...[
-                    children[i],
-                    if (i < children.length - 1) const SizedBox(height: 12),
-                  ],
+        ),
+        if (open)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 2, 14, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (view?.remarks != null && view!.remarks!.isNotEmpty) ...[
+                  ProNote(view!.remarks!, icon: Icons.notes_rounded),
+                  const SizedBox(height: 12),
                 ],
-              ),
+                for (var i = 0; i < children.length; i++) ...[
+                  children[i],
+                  if (i < children.length - 1) const SizedBox(height: 12),
+                ],
+              ],
             ),
-          ],
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
@@ -485,11 +661,17 @@ class NpDocumentTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final imgUrl = doc.file.isImage ? Env.fileUrl(doc.file.url) : null;
+    final compact = TextButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      minimumSize: const Size(0, 32),
+      visualDensity: VisualDensity.compact,
+      textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+    );
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.fromLTRB(10, 10, 6, 6),
       decoration: BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.md),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.hairline),
       ),
       child: Row(
@@ -497,11 +679,12 @@ class NpDocumentTile extends StatelessWidget {
         children: [
           InkWell(
             onTap: () => npOpenFile(context, doc.file),
+            borderRadius: BorderRadius.circular(12),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(12),
               child: SizedBox(
-                width: 52,
-                height: 52,
+                width: 48,
+                height: 48,
                 child: imgUrl != null
                     ? Image.network(imgUrl, fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => _fileIcon())
@@ -509,55 +692,59 @@ class NpDocumentTile extends StatelessWidget {
               ),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
                 Expanded(
                   child: Text(doc.docTypeLabel,
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink)),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 14, height: 1.35, fontWeight: FontWeight.w600, color: AppColors.ink)),
                 ),
                 if (doc.verified)
-                  const Icon(Icons.verified_rounded, size: 16, color: AppColors.success)
+                  ProPill.ok('Verified')
                 else if (doc.superseded)
-                  const Icon(Icons.history_rounded, size: 16, color: AppColors.muted),
+                  ProPill.neutral('Replaced'),
+                const SizedBox(width: 4),
               ]),
               if (doc.documentNumber != null && doc.documentNumber!.isNotEmpty)
-                Text('No. ${doc.documentNumber}', style: const TextStyle(fontSize: 12, color: AppColors.inkSoft)),
+                Text('No. ${doc.documentNumber}',
+                    style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft, fontFeatures: [FontFeature.tabularFigures()])),
               if (doc.caption != null && doc.caption!.isNotEmpty)
-                Text(doc.caption!, style: const TextStyle(fontSize: 12, color: AppColors.inkSoft)),
+                Text(doc.caption!, style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
               NpPersonStamp(person: doc.uploadedBy, at: doc.uploadedAt),
               if (doc.verified && doc.verifiedBy != null)
                 NpPersonStamp(person: doc.verifiedBy, at: doc.verifiedAt, prefix: 'Verified by'),
+              const SizedBox(height: 2),
               Row(children: [
                 TextButton.icon(
-                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 28), visualDensity: VisualDensity.compact),
+                  style: compact,
                   onPressed: () => npOpenFile(context, doc.file),
-                  icon: const Icon(Icons.open_in_new_rounded, size: 14),
-                  label: const Text('Open', style: TextStyle(fontSize: 12)),
+                  icon: const Icon(Icons.open_in_new_rounded, size: 15),
+                  label: const Text('Open'),
                 ),
-                if (doc.latitude != null && doc.longitude != null) ...[
-                  const SizedBox(width: 8),
+                if (doc.latitude != null && doc.longitude != null)
                   TextButton.icon(
-                    style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 28), visualDensity: VisualDensity.compact),
+                    style: compact,
                     onPressed: () => npOpenMaps(doc.latitude!, doc.longitude!),
-                    icon: const Icon(Icons.place_rounded, size: 14),
-                    label: const Text('Map', style: TextStyle(fontSize: 12)),
+                    icon: const Icon(Icons.place_outlined, size: 15),
+                    label: const Text('Map'),
                   ),
-                ],
                 const Spacer(),
                 if (onVerify != null && !doc.verified)
                   TextButton(
-                    style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: const Size(0, 28), visualDensity: VisualDensity.compact),
+                    style: compact,
                     onPressed: busy ? null : onVerify,
-                    child: const Text('Verify', style: TextStyle(fontSize: 12)),
+                    child: const Text('Verify'),
                   ),
                 if (onDelete != null)
                   IconButton(
+                    tooltip: 'Remove',
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                     onPressed: busy ? null : onDelete,
-                    icon: const Icon(Icons.delete_outline_rounded, size: 18, color: AppColors.danger),
+                    icon: const Icon(Icons.delete_outline_rounded, size: 19, color: AppColors.danger),
                   ),
               ]),
             ]),
@@ -568,10 +755,10 @@ class NpDocumentTile extends StatelessWidget {
   }
 
   Widget _fileIcon() => Container(
-        color: AppColors.surfaceAlt,
+        color: AppColors.neutralTint,
         alignment: Alignment.center,
-        child: Icon(doc.file.isPdf ? Icons.picture_as_pdf_rounded : Icons.insert_drive_file_rounded,
-            color: AppColors.muted, size: 22),
+        child: Icon(doc.file.isPdf ? Icons.picture_as_pdf_outlined : Icons.insert_drive_file_outlined,
+            color: AppColors.primary, size: 22),
       );
 }
 
@@ -593,20 +780,66 @@ class NpDocumentList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (documents.isEmpty) {
-      return Text(emptyText, style: const TextStyle(fontSize: 12.5, color: AppColors.muted));
+      return Text(emptyText, style: AppText.caption.copyWith(fontSize: 13));
     }
     return Column(children: [
-      for (final d in documents)
+      for (var i = 0; i < documents.length; i++)
         Padding(
-          padding: const EdgeInsets.only(bottom: 8),
+          padding: EdgeInsets.only(bottom: i == documents.length - 1 ? 0 : 8),
           child: NpDocumentTile(
-            doc: d,
+            doc: documents[i],
             busy: busy,
-            onDelete: onDelete == null ? null : () => onDelete!(d),
-            onVerify: onVerify == null ? null : () => onVerify!(d),
+            onDelete: onDelete == null ? null : () => onDelete!(documents[i]),
+            onVerify: onVerify == null ? null : () => onVerify!(documents[i]),
           ),
         ),
     ]);
+  }
+}
+
+/// White bottom-sheet frame: 24px top radius, drag handle, optional title.
+class NpSheetFrame extends StatelessWidget {
+  const NpSheetFrame({super.key, required this.child, this.title, this.subtitle});
+  final Widget child;
+  final String? title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    // A Material (not a plain Container) so list-tile ink and selection
+    // highlights paint on the white sheet rather than behind it.
+    return Material(
+      color: AppColors.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 6),
+              width: 40,
+              height: 5,
+              decoration: BoxDecoration(color: const Color(0xFFC6D3D6), borderRadius: BorderRadius.circular(3)),
+            ),
+          ),
+          if (title != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title!,
+                    style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w600, letterSpacing: -0.35, color: AppColors.ink)),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(subtitle!, style: AppText.caption.copyWith(fontSize: 13)),
+                ],
+              ]),
+            ),
+          Flexible(child: child),
+        ],
+      ),
+    );
   }
 }
 
@@ -646,27 +879,35 @@ class NpPickedRef {
 Future<NpPickedRef?> npPickFile(BuildContext context, {bool allowPdf = true, bool imagesOnly = false}) async {
   final choice = await showModalBottomSheet<String>(
     context: context,
-    backgroundColor: AppColors.surface,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
-    builder: (_) => SafeArea(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        ListTile(
-          leading: Icon(Icons.photo_camera_rounded, color: AppColors.primary),
-          title: const Text('Take a photo'),
-          onTap: () => Navigator.pop(context, 'camera'),
+    builder: (_) => NpSheetFrame(
+      title: 'Add a file',
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              leading: ProIconWell(icon: Icons.photo_camera_outlined, color: AppColors.primary),
+              title: const Text('Take a photo', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+              onTap: () => Navigator.pop(context, 'camera'),
+            ),
+            ListTile(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              leading: ProIconWell(icon: Icons.photo_library_outlined, color: AppColors.primary),
+              title: const Text('Choose from gallery', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+              onTap: () => Navigator.pop(context, 'gallery'),
+            ),
+            if (allowPdf && !imagesOnly)
+              ListTile(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                leading: ProIconWell(icon: Icons.picture_as_pdf_outlined, color: AppColors.primary),
+                title: const Text('Pick a PDF / document', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+                onTap: () => Navigator.pop(context, 'file'),
+              ),
+          ]),
         ),
-        ListTile(
-          leading: Icon(Icons.photo_library_rounded, color: AppColors.primary),
-          title: const Text('Choose from gallery'),
-          onTap: () => Navigator.pop(context, 'gallery'),
-        ),
-        if (allowPdf && !imagesOnly)
-          ListTile(
-            leading: Icon(Icons.picture_as_pdf_rounded, color: AppColors.primary),
-            title: const Text('Pick a PDF / document'),
-            onTap: () => Navigator.pop(context, 'file'),
-          ),
-      ]),
+      ),
     ),
   );
   if (choice == null) return null;
@@ -711,8 +952,6 @@ Future<bool> npUploadDocumentSheet(
   final result = await showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: AppColors.surface,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
     builder: (_) => _UploadSheet(
       candidateId: candidateId,
       docTypes: docTypes,
@@ -815,71 +1054,66 @@ class _UploadSheetState extends State<_UploadSheet> {
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     return Padding(
-      padding: EdgeInsets.fromLTRB(16, 12, 16, 16 + bottom),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text('Upload document', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink)),
-            if (widget.captureGps)
-              const Padding(
-                padding: EdgeInsets.only(top: 2),
-                child: Text('Your current location is attached to the photo.',
-                    style: TextStyle(fontSize: 12, color: AppColors.muted)),
+      padding: EdgeInsets.only(bottom: bottom),
+      child: NpSheetFrame(
+        title: 'Upload document',
+        subtitle: widget.captureGps ? 'Your current location is attached to the photo.' : null,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(20, 4, 20, 16 + MediaQuery.of(context).padding.bottom),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const NpFieldLabel('Document type', required: true),
+              DropdownButtonFormField<String>(
+                value: _docType,
+                isExpanded: true,
+                items: [
+                  for (final t in widget.docTypes)
+                    DropdownMenuItem(value: t.code, child: Text(t.mandatory ? '${t.label} *' : t.label)),
+                ],
+                onChanged: _busy ? null : (v) => setState(() => _docType = v ?? _docType),
               ),
-            const NpFieldLabel('Document type', required: true),
-            DropdownButtonFormField<String>(
-              value: _docType,
-              isExpanded: true,
-              items: [
-                for (final t in widget.docTypes)
-                  DropdownMenuItem(value: t.code, child: Text(t.mandatory ? '${t.label} *' : t.label)),
+              const NpFieldLabel('Document number'),
+              TextField(controller: _number, decoration: const InputDecoration(hintText: 'Optional')),
+              const NpFieldLabel('Caption'),
+              TextField(
+                controller: _caption,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(hintText: 'Optional'),
+              ),
+              const NpFieldLabel('File', required: true),
+              _NpFileTile(
+                fileName: _file?.name,
+                emptyText: 'Choose file (photo or PDF)',
+                onTap: _busy
+                    ? null
+                    : () async {
+                        final f = await npPickFile(context);
+                        if (f != null) setState(() => _file = f);
+                      },
+              ),
+              if (_file != null && !_file!.name.toLowerCase().endsWith('.pdf')) ...[
+                const SizedBox(height: 10),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Image.file(File(_file!.path), height: 140, fit: BoxFit.cover),
+                ),
               ],
-              onChanged: _busy ? null : (v) => setState(() => _docType = v ?? _docType),
-            ),
-            const NpFieldLabel('Document number'),
-            TextField(controller: _number, decoration: const InputDecoration(hintText: 'Optional')),
-            const NpFieldLabel('Caption'),
-            TextField(
-              controller: _caption,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(hintText: 'Optional'),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _busy
-                  ? null
-                  : () async {
-                      final f = await npPickFile(context);
-                      if (f != null) setState(() => _file = f);
-                    },
-              icon: Icon(_file == null ? Icons.attach_file_rounded : Icons.check_rounded, size: 18),
-              label: Text(_file == null ? 'Choose file (photo or PDF)' : _file!.name, overflow: TextOverflow.ellipsis),
-            ),
-            if (_file != null && !_file!.name.toLowerCase().endsWith('.pdf')) ...[
-              const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Image.file(File(_file!.path), height: 140, fit: BoxFit.cover),
-              ),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(_error!, style: const TextStyle(color: AppColors.danger, fontSize: 12.5, fontWeight: FontWeight.w600)),
-            ],
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 48,
-              child: FilledButton.icon(
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                ProNote(_error!, tone: ProNoteTone.bad),
+              ],
+              const SizedBox(height: 18),
+              FilledButton.icon(
                 onPressed: _busy ? null : _upload,
                 icon: _busy
                     ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.cloud_upload_rounded, size: 18),
+                    : const Icon(Icons.cloud_upload_outlined, size: 18),
                 label: Text(_busy ? 'Uploading…' : 'Upload'),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -894,18 +1128,63 @@ class NpFilePickField extends StatelessWidget {
   final VoidCallback onPick;
   final bool required;
   @override
-  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         NpFieldLabel(label, required: required),
-        OutlinedButton.icon(
-          onPressed: onPick,
-          icon: Icon(fileName == null ? Icons.attach_file_rounded : Icons.check_circle_rounded,
-              size: 18, color: fileName == null ? null : AppColors.success),
-          label: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(fileName ?? 'Choose photo or PDF', overflow: TextOverflow.ellipsis),
+        _NpFileTile(fileName: fileName, emptyText: 'Choose photo or PDF', onTap: onPick),
+      ]);
+}
+
+/// Tappable file slot: icon well, chosen file name (or a prompt) and a
+/// "Choose" / "Change" affordance.
+class _NpFileTile extends StatelessWidget {
+  const _NpFileTile({required this.fileName, required this.emptyText, required this.onTap});
+  final String? fileName;
+  final String emptyText;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final has = fileName != null;
+    return Opacity(
+      opacity: onTap == null ? 0.55 : 1,
+      child: Material(
+        color: has ? AppColors.surface : AppColors.surfaceAlt,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: has ? AppColors.hairline : const Color(0xFFDBE3E5)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 9, 12, 9),
+            child: Row(children: [
+              ProIconWell(
+                icon: has ? Icons.check_rounded : Icons.attach_file_rounded,
+                color: has ? AppColors.success : AppColors.primary,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  fileName ?? emptyText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: has ? FontWeight.w500 : FontWeight.w400,
+                    color: has ? AppColors.ink : AppColors.muted,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(has ? 'Change' : 'Choose',
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppColors.primary)),
+            ]),
           ),
         ),
-      ]);
+      ),
+    );
+  }
 }
 
 /// Exposes the picker's result type for callers outside this file.

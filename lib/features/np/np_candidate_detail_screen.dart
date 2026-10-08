@@ -19,6 +19,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../../core/branding.dart';
 import '../../core/employee_lookup.dart';
 import '../../core/env.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'np_models.dart';
@@ -536,54 +537,55 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
   Widget build(BuildContext context) {
     final config = ref.watch(npConfigProvider).asData?.value ?? NpConfig.empty;
     final d = _d;
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Text(d?.candidateCode ?? 'NP candidate'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-          actions: [
-            if (d != null && d.can('EDIT'))
-              IconButton(
-                tooltip: 'Edit',
-                icon: const Icon(Icons.edit_rounded),
-                onPressed: _busy
-                    ? null
-                    : () async {
-                        final changed = await context.push<bool>('/np/candidates/$_id/edit');
-                        if (changed == true) _load();
-                      },
-              ),
-            if (d != null && d.can('DELETE'))
-              IconButton(tooltip: 'Delete', icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger), onPressed: _busy ? null : _delete),
-            IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh_rounded), onPressed: _busy ? null : _load),
-          ],
-        ),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : d == null
-                ? Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: AppErrorPanel(message: _error ?? 'NP candidate not found', onRetry: _load),
-                  )
-                : RefreshIndicator(
-                    onRefresh: _load,
-                    child: ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                      children: [
-                        _header(d),
-                        if (_error != null) ...[const SizedBox(height: 10), AppErrorPanel(message: _error!, onRetry: _load)],
-                        if (d.status == 'SENT_BACK_FOR_CORRECTION') ...[const SizedBox(height: 10), _correctionBanner(d)],
-                        if (d.rejected) ...[const SizedBox(height: 10), _rejectionBanner(d)],
-                        if (d.cbOverrideAt != null) ...[const SizedBox(height: 10), _cbOverrideBanner(d)],
-                        const SizedBox(height: 10),
-                        GlassCard(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                          child: NpStepper(steps: d.steps, selected: d.step, onSelect: (s) => setState(() => _open.add(s))),
+    final done = d == null ? 0 : d.steps.where((s) => s.state == 'DONE').length;
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(d?.candidateCode ?? 'NP candidate'),
+        actions: [
+          IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh_rounded), onPressed: _busy ? null : _load),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : d == null
+              ? Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: AppErrorPanel(message: _error ?? 'NP candidate not found', onRetry: _load),
+                )
+              : ProPage(
+                  onRefresh: _load,
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                  hero: _hero(d, done),
+                  children: [
+                    if (_error != null) AppErrorPanel(message: _error!, onRetry: _load),
+                    if (d.status == 'SENT_BACK_FOR_CORRECTION') _correctionBanner(d),
+                    if (d.rejected) _rejectionBanner(d),
+                    if (d.cbOverrideAt != null) _cbOverrideBanner(d),
+                    GlassCard(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        const ProSectionHeader(
+                          title: 'Onboarding progress',
+                          trailing: Text('Tap a step to open it', style: AppText.caption),
                         ),
                         const SizedBox(height: 10),
+                        NpStepper(steps: d.steps, selected: d.step, onSelect: (s) => setState(() => _open.add(s))),
+                      ]),
+                    ),
+                    ProSectionHeader(
+                      title: 'Onboarding checklist',
+                      small: true,
+                      trailing: Text('$done of ${kNpSteps.length} done',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.muted,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          )),
+                    ),
+                    ProListGroup(
+                      dividerIndent: 0,
+                      children: [
                         _panel(1, 'CANDIDATE', d, _candidatePanel(d)),
                         _panel(2, 'ORIENTATION', d, _orientationPanel(d, config)),
                         _panel(3, 'INTERVIEW', d, _interviewPanel(d)),
@@ -597,75 +599,123 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
                         _panel(11, 'NAVA360', d, _activationPanel(d)),
                         _panel(12, 'ESAF', d, _esafPanel(d)),
                         _panel(13, 'ACTIVATION', d, _finalPanel(d)),
-                        if (d.supersededDocuments.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          GlassCard(
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                              const AppSectionHeader(title: 'Replaced documents'),
-                              const SizedBox(height: 8),
-                              NpDocumentList(documents: d.supersededDocuments),
-                            ]),
-                          ),
-                        ],
-                        if (d.can('VIEW_AUDIT')) ...[const SizedBox(height: 10), _auditCard()],
                       ],
                     ),
-                  ),
-      ),
+                    if (d.supersededDocuments.isNotEmpty)
+                      GlassCard(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                          const ProSectionHeader(title: 'Replaced documents'),
+                          const SizedBox(height: 12),
+                          NpDocumentList(documents: d.supersededDocuments),
+                        ]),
+                      ),
+                    if (d.can('VIEW_AUDIT')) _auditCard(),
+                  ],
+                ),
     );
   }
 
   Widget _panel(int index, String step, NpCandidateDetail d, List<Widget> children) {
     final info = kNpSteps[index - 1];
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: NpStepPanel(
-        index: index,
-        title: info.label,
-        view: d.stepView(step),
-        open: _open.contains(step),
-        onToggle: () => _toggle(step),
-        children: children,
-      ),
+    return NpStepPanel(
+      index: index,
+      title: info.label,
+      view: d.stepView(step),
+      open: _open.contains(step),
+      onToggle: () => _toggle(step),
+      children: children,
     );
   }
 
-  Widget _header(NpCandidateDetail d) {
+  /// Deep hero: identity + tags, where the file stands, quick actions and the
+  /// at-a-glance KPI strip.
+  Widget _hero(NpCandidateDetail d, int done) {
     final photo = Env.fileUrl(d.photo?.url);
-    return GlassCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              width: 64,
-              height: 64,
-              color: AppColors.surfaceAlt,
-              child: photo == null
-                  ? const Icon(Icons.person_rounded, size: 32, color: AppColors.muted)
-                  : Image.network(photo, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.person_rounded, color: AppColors.muted)),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(d.fullName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.ink)),
-              const SizedBox(height: 2),
-              Text('${d.candidateCode} · ${d.mobileNumber}', style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
-              if (d.orgLine.isNotEmpty) Text(d.orgLine, style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-            ]),
-          ),
-        ]),
-        const SizedBox(height: 10),
-        Wrap(spacing: 6, runSpacing: 6, children: [
-          NpStatusPill(status: d.status, label: d.statusLabel),
-          if (d.npId != null) StatusPill(label: 'NP ID ${d.npId}', color: AppColors.primary, icon: Icons.badge_rounded),
-          if (d.esafId != null) StatusPill(label: 'ESAF ${d.esafId}', color: AppColors.info),
-          if (d.activationException) const StatusPill(label: 'Activation exception', color: AppColors.warning),
-        ]),
+    var stepNo = kNpSteps.indexWhere((s) => s.step == d.step);
+    final stepLabel = stepNo < 0 ? npTitle(d.step) : kNpSteps[stepNo].label;
+    stepNo = stepNo < 0 ? 0 : stepNo + 1;
+
+    final String live;
+    final Color liveColor;
+    if (d.finalActivatedAt != null) {
+      live = 'Active NP since ${npFmtDateTime(d.finalActivatedAt)}';
+      liveColor = AppColors.live;
+    } else if (d.rejected) {
+      live = '${npStatusLabel(d.status)} · ${npFmtDateTime(d.rejectedAt)}';
+      liveColor = const Color(0xFFE5484D);
+    } else {
+      live = '${stepNo > 0 ? 'Step $stepNo of ${kNpSteps.length} · ' : ''}$stepLabel'
+          '${d.updatedAt != null ? ' · updated ${npFmtDate(d.updatedAt)}' : ''}';
+      liveColor = d.status == 'SENT_BACK_FOR_CORRECTION' || d.status.endsWith('_PENDING')
+          ? const Color(0xFFF2B347)
+          : AppColors.live;
+    }
+
+    String? lastScore(bool spouse) {
+      for (final cb in d.cbChecks.reversed) {
+        if ((cb.subject == 'SPOUSE') == spouse && cb.score != null && cb.score!.isNotEmpty) return cb.score;
+      }
+      return null;
+    }
+
+    final cbScore = lastScore(false);
+    final spouseScore = lastScore(true);
+
+    final actions = <ProAction>[
+      if (d.can('RESUBMIT')) ProAction(icon: Icons.replay_rounded, label: 'Resubmit', onTap: _busy ? null : _resubmit),
+      if (d.can('BGV_DRAFT') || d.can('BGV_SUBMIT'))
+        ProAction(icon: Icons.home_work_outlined, label: 'BGV visit', onTap: _busy ? null : _openBgv),
+      if (d.can('SUBMIT_AGREEMENT'))
+        ProAction(icon: Icons.description_outlined, label: 'Agreement', onTap: _busy ? null : _openAgreement),
+      if (d.can('EDIT'))
+        ProAction(
+          icon: Icons.edit_outlined,
+          label: 'Edit',
+          onTap: _busy
+              ? null
+              : () async {
+                  final changed = await context.push<bool>('/np/candidates/$_id/edit');
+                  if (changed == true) _load();
+                },
+        ),
+      if (d.can('DELETE')) ProAction(icon: Icons.delete_outline_rounded, label: 'Delete', onTap: _busy ? null : _delete),
+    ];
+
+    return ProHero(
+      overlap: ProKpiStrip(cells: [
+        ProKpi(value: '$done / ${kNpSteps.length}', label: 'Steps done', progress: done / kNpSteps.length),
+        ProKpi(value: '${d.documents.length}', label: 'Documents'),
+        ProKpi(value: cbScore ?? '—', label: 'CB score'),
+        if (spouseScore != null) ProKpi(value: spouseScore, label: 'Spouse CB score'),
       ]),
+      children: [
+        _CandidateIdentity(
+          name: d.fullName,
+          photoUrl: photo,
+          lines: [
+            '${d.candidateCode} · ${d.mobileNumber}',
+            if (d.orgLine.isNotEmpty) d.orgLine,
+          ],
+          tags: [
+            ProHeroTag(d.statusLabel, tone: npStatusTagTone(d.status)),
+            if (d.npId != null) ProHeroTag('NP ID ${d.npId}', icon: Icons.badge_outlined),
+            if (d.esafId != null) ProHeroTag('ESAF ${d.esafId}'),
+            if (d.activationException) const ProHeroTag('Activation exception', tone: ProTagTone.warn),
+          ],
+        ),
+        ProLiveLine(text: live, color: liveColor),
+        if (actions.isNotEmpty) ProHeroActions(actions: [for (var i = 0; i < actions.length; i++) _primaryIf(actions[i], i == 0)]),
+      ],
     );
   }
+
+  static ProAction _primaryIf(ProAction a, bool primary) =>
+      ProAction(icon: a.icon, label: a.label, onTap: a.onTap, primary: primary);
+
+  /// Key / value block; empty values read "—".
+  Widget _kv(List<(String, String?)> rows) => ProKeyValue(rows: [
+        for (final r in rows) MapEntry(r.$1, (r.$2 == null || r.$2!.trim().isEmpty) ? '—' : r.$2!),
+      ]);
 
   Widget _correctionBanner(NpCandidateDetail d) => NpBanner(
         icon: Icons.undo_rounded,
@@ -696,7 +746,7 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
         ].join('\n'),
         action: d.can('CB_OVERRIDE')
             ? FilledButton.icon(
-                style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+                style: npDangerButtonStyle(),
                 onPressed: _busy ? null : _overrideCb,
                 icon: const Icon(Icons.gavel_rounded, size: 18),
                 label: const Text('Override CB rejection & continue to BGV'),
@@ -719,48 +769,48 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
   List<Widget> _candidatePanel(NpCandidateDetail d) {
     final branch = Branding.current.term('branch');
     return [
-      Column(children: [
-        NpInfoRow('Gender', npTitle(d.gender)),
-        NpInfoRow('Date of birth', npFmtDate(d.dateOfBirth)),
-        NpInfoRow("Father's name", d.fatherOrSpouseName),
-        NpInfoRow('Marital status', npTitle(d.maritalStatus)),
-        if (d.spouseName != null) NpInfoRow('Spouse', d.spouseName),
-        if (d.spouseDateOfBirth != null) NpInfoRow('Spouse DOB', npFmtDate(d.spouseDateOfBirth)),
-        if (d.spouseMobile != null) NpInfoRow('Spouse mobile', d.spouseMobile),
-        if (d.spouseOccupation != null) NpInfoRow('Spouse occupation', d.spouseOccupation),
-        if (d.spouseFatherName != null) NpInfoRow("Spouse's father", d.spouseFatherName),
-        if (d.spouseAadhaarLast4 != null) NpInfoRow('Spouse Aadhaar', '•••• ${d.spouseAadhaarLast4}'),
-        if (d.spousePanNumber != null) NpInfoRow('Spouse PAN', d.spousePanNumber),
-        if (d.spouseDrivingLicenceNumber != null) NpInfoRow('Spouse driving licence', d.spouseDrivingLicenceNumber),
-        NpInfoRow('Alternate mobile', d.alternateMobile),
-        NpInfoRow('Email', d.email),
-        NpInfoRow('Education', d.education),
-        NpInfoRow('Occupation', d.occupation),
-        NpInfoRow('Experience', d.experienceYears == null ? null : '${d.experienceYears} yr'),
-        NpInfoRow('Two-wheeler', d.hasTwoWheeler == true ? 'Yes' : 'No'),
-        NpInfoRow('Smartphone', d.hasSmartphone == true ? 'Yes' : 'No'),
-        NpInfoRow('Aadhaar', d.aadhaarLast4 == null ? null : '•••• ${d.aadhaarLast4}'),
-        NpInfoRow('PAN', d.panNumber),
-        NpInfoRow('Driving licence', d.drivingLicenceNumber),
-        NpInfoRow('Bank', d.bankName),
-        NpInfoRow('Account', d.bankAccountNumber),
-        NpInfoRow('IFSC', d.bankIfsc),
-        NpInfoRow('Name as per bank', d.bankAccountHolderName),
-        NpInfoRow('Permanent address', d.permanentAddress),
-        NpInfoRow('Comm. address', d.communicationAddress),
-        NpInfoRow(branch, d.branchName),
+      _kv([
+        ('Gender', npTitle(d.gender)),
+        ('Date of birth', npFmtDate(d.dateOfBirth)),
+        ("Father's name", d.fatherOrSpouseName),
+        ('Marital status', npTitle(d.maritalStatus)),
+        if (d.spouseName != null) ('Spouse', d.spouseName),
+        if (d.spouseDateOfBirth != null) ('Spouse DOB', npFmtDate(d.spouseDateOfBirth)),
+        if (d.spouseMobile != null) ('Spouse mobile', d.spouseMobile),
+        if (d.spouseOccupation != null) ('Spouse occupation', d.spouseOccupation),
+        if (d.spouseFatherName != null) ("Spouse's father", d.spouseFatherName),
+        if (d.spouseAadhaarLast4 != null) ('Spouse Aadhaar', '•••• ${d.spouseAadhaarLast4}'),
+        if (d.spousePanNumber != null) ('Spouse PAN', d.spousePanNumber),
+        if (d.spouseDrivingLicenceNumber != null) ('Spouse driving licence', d.spouseDrivingLicenceNumber),
+        ('Alternate mobile', d.alternateMobile),
+        ('Email', d.email),
+        ('Education', d.education),
+        ('Occupation', d.occupation),
+        ('Experience', d.experienceYears == null ? null : '${d.experienceYears} yr'),
+        ('Two-wheeler', d.hasTwoWheeler == true ? 'Yes' : 'No'),
+        ('Smartphone', d.hasSmartphone == true ? 'Yes' : 'No'),
+        ('Aadhaar', d.aadhaarLast4 == null ? null : '•••• ${d.aadhaarLast4}'),
+        ('PAN', d.panNumber),
+        ('Driving licence', d.drivingLicenceNumber),
+        ('Bank', d.bankName),
+        ('Account', d.bankAccountNumber),
+        ('IFSC', d.bankIfsc),
+        ('Name as per bank', d.bankAccountHolderName),
+        ('Permanent address', d.permanentAddress),
+        ('Comm. address', d.communicationAddress),
+        (branch, d.branchName),
       ]),
       if (d.eligibility.isNotEmpty)
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const NpFieldLabel('Eligibility'),
           Wrap(spacing: 6, runSpacing: 6, children: [for (final e in d.eligibility.entries) NpChip(e.key, on: e.value)]),
           if (d.eligibilityNotes != null) ...[
-            const SizedBox(height: 6),
-            Text(d.eligibilityNotes!, style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
+            const SizedBox(height: 8),
+            Text(d.eligibilityNotes!, style: const TextStyle(fontSize: 13, height: 1.45, color: AppColors.inkSoft)),
           ],
         ]),
       if (d.remarks != null && d.remarks!.isNotEmpty)
-        Text(d.remarks!, style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
+        Text(d.remarks!, style: const TextStyle(fontSize: 13, height: 1.45, color: AppColors.inkSoft)),
       if (d.can('IDENTIFY'))
         FilledButton.icon(
           onPressed: _busy ? null : _identify,
@@ -776,11 +826,12 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
     return [
       if (d.orientationCompleted)
         Row(children: [
-          const Icon(Icons.check_circle_rounded, size: 16, color: AppColors.success),
-          const SizedBox(width: 6),
+          const ProIconWell(icon: Icons.check_rounded, color: AppColors.success),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Completed on ${npFmtDate(d.orientationDate)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.ink)),
+              Text('Completed on ${npFmtDate(d.orientationDate)}',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.ink)),
               NpPersonStamp(person: d.orientationBy, at: d.orientationAt),
             ]),
           ),
@@ -790,13 +841,13 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
           title: 'Cover each orientation item',
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             if (items.isEmpty)
-              const Text('No orientation items configured.', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+              const Text('No orientation items configured.', style: _muted),
             for (final item in items)
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
                 controlAffinity: ListTileControlAffinity.leading,
-                title: Text(item, style: const TextStyle(fontSize: 13.5)),
+                title: Text(item, style: const TextStyle(fontSize: 14)),
                 value: _orientItems[item] ?? false,
                 onChanged: (v) => setState(() => _orientItems[item] = v ?? false),
               ),
@@ -816,13 +867,10 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
   // ── 3. Interview ──
   List<Widget> _interviewPanel(NpCandidateDetail d) => [
         if (d.interviews.isEmpty && !d.can('INTERVIEW'))
-          const Text('No interview recorded yet.', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+          const Text('No interview recorded yet.', style: _muted),
         for (final iv in d.interviews)
           _historyCard(
-            leading: StatusPill(
-              label: iv.result == 'PASS' ? 'PASS' : 'FAIL',
-              color: iv.result == 'PASS' ? AppColors.success : AppColors.danger,
-            ),
+            leading: iv.result == 'PASS' ? ProPill.ok('Pass') : ProPill.bad('Fail'),
             title: 'Attempt ${iv.attemptNo} · ${npFmtDate(iv.interviewDate)}',
             lines: [
               if (iv.interviewer != null) 'Interviewer: ${iv.interviewer!.name}',
@@ -858,7 +906,7 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
               ),
               const SizedBox(height: 12),
               FilledButton(
-                style: _ivResult == 'REJECT' ? FilledButton.styleFrom(backgroundColor: AppColors.danger) : null,
+                style: _ivResult == 'REJECT' ? npDangerButtonStyle() : null,
                 onPressed: (_busy || _ivResult == null) ? null : _interview,
                 child: Text(_ivResult == 'REJECT' ? 'Record as failed' : 'Record interview'),
               ),
@@ -872,7 +920,7 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
     return [
       if (d.missingKycDocs.isNotEmpty)
         Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          const Text('Missing mandatory:', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.warning)),
+          const Text('Missing mandatory:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF9A5B00))),
           for (final code in d.missingKycDocs) NpChip(config.docTypeLabel(code), color: AppColors.warning),
         ]),
       if (d.can('UPLOAD_KYC'))
@@ -899,7 +947,7 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text('Still missing: ${d.missingKycDocs.map(config.docTypeLabel).join(', ')}',
-                  style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+                  textAlign: TextAlign.center, style: AppText.caption),
             ),
         ]),
     ];
@@ -908,12 +956,12 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
   // ── 5. CB check ──
   List<Widget> _cbPanel(NpCandidateDetail d) => [
         if (d.cbChecks.isEmpty)
-          const Text('No CB check has been raised yet.', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+          const Text('No CB check has been raised yet.', style: _muted),
         for (final cb in d.cbChecks)
           _historyCard(
-            leading: StatusPill(
-              label: cb.status,
-              color: cb.status == 'APPROVED'
+            leading: npTonePill(
+              npTitle(cb.status),
+              cb.status == 'APPROVED'
                   ? AppColors.success
                   : (cb.status == 'REJECTED' || cb.status == 'ERROR')
                       ? AppColors.danger
@@ -932,8 +980,9 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
             trailing: cb.report == null
                 ? null
                 : TextButton.icon(
+                    style: TextButton.styleFrom(minimumSize: const Size(0, 32), visualDensity: VisualDensity.compact),
                     onPressed: () => npOpenFile(context, cb.report),
-                    icon: const Icon(Icons.description_rounded, size: 16),
+                    icon: const Icon(Icons.description_outlined, size: 16),
                     label: const Text('Report'),
                   ),
           ),
@@ -945,7 +994,7 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
           ),
         if (d.can('CB_OVERRIDE'))
           FilledButton.icon(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            style: npDangerButtonStyle(),
             onPressed: _busy ? null : _overrideCb,
             icon: const Icon(Icons.gavel_rounded, size: 18),
             label: const Text('Override CB rejection & continue to BGV'),
@@ -965,9 +1014,8 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
                   onChanged: (v) => setState(() => _cbSubject = v ?? 'CANDIDATE'),
                 ),
                 const Padding(
-                  padding: EdgeInsets.only(top: 4, bottom: 4),
-                  child: Text('The file moves on only once both the candidate and the spouse are approved.',
-                      style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
+                  padding: EdgeInsets.only(top: 5, bottom: 2),
+                  child: Text('The file moves on only once both the candidate and the spouse are approved.', style: AppText.caption),
                 ),
               ],
               const NpFieldLabel('Result'),
@@ -987,7 +1035,7 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
               TextField(controller: _cbRemarks, minLines: 2, maxLines: 4, textCapitalization: TextCapitalization.sentences),
               const SizedBox(height: 12),
               FilledButton(
-                style: _cbResult == 'REJECTED' ? FilledButton.styleFrom(backgroundColor: AppColors.danger) : null,
+                style: _cbResult == 'REJECTED' ? npDangerButtonStyle() : null,
                 onPressed: _busy ? null : _cbResultAction,
                 child: const Text('Record CB result'),
               ),
@@ -1001,7 +1049,7 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
     final draft = d.bgvDraft;
     return [
       if (submitted.isEmpty && draft == null)
-        const Text('No BGV report submitted yet.', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+        const Text('No BGV report submitted yet.', style: _muted),
       for (final r in submitted) _bgvReportCard(r),
       if (draft != null && d.can('BGV_DRAFT'))
         NpBanner(
@@ -1018,8 +1066,8 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
           label: Text(draft == null ? 'Start visit report' : 'Continue visit report'),
         ),
       if (d.can('BGV_REJECT'))
-        OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+        FilledButton.icon(
+          style: npDangerButtonStyle(),
           onPressed: _busy ? null : _rejectBgv,
           icon: const Icon(Icons.block_rounded, size: 18),
           label: const Text('Reject at BGV'),
@@ -1028,38 +1076,41 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
   }
 
   Widget _bgvReportCard(NpBgvReport r) => Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(AppRadii.md), border: Border.all(color: AppColors.hairline)),
+        padding: const EdgeInsets.all(14),
+        decoration: _boxDecoration,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Expanded(
               child: Text('Visit #${r.attemptNo} · ${npFmtDateTime(r.visitAt)}',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink)),
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.ink, fontFeatures: [FontFeature.tabularFigures()])),
             ),
             if (r.recommendation != null)
-              StatusPill(
-                label: r.recommendation == 'RECOMMENDED' ? 'Recommended' : 'Not recommended',
-                color: r.recommendation == 'RECOMMENDED' ? AppColors.success : AppColors.danger,
-              ),
+              r.recommendation == 'RECOMMENDED' ? ProPill.ok('Recommended') : ProPill.bad('Not recommended'),
           ]),
           const SizedBox(height: 6),
-          NpInfoRow('Address verified', r.addressVerified == true ? 'Yes' : 'No'),
-          NpInfoRow('Address as found', r.addressAsFound),
-          NpInfoRow('Residence type', npTitle(r.residenceType)),
-          NpInfoRow('Years at address', r.yearsAtAddress?.toString()),
+          _kv([
+            ('Address verified', r.addressVerified == true ? 'Yes' : 'No'),
+            ('Address as found', r.addressAsFound),
+            ('Residence type', npTitle(r.residenceType)),
+            ('Years at address', r.yearsAtAddress?.toString()),
+          ]),
           if (r.latitude != null && r.longitude != null)
             TextButton.icon(
-              style: TextButton.styleFrom(padding: EdgeInsets.zero, visualDensity: VisualDensity.compact),
+              style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(0, 34), visualDensity: VisualDensity.compact),
               onPressed: () => npOpenMaps(r.latitude!, r.longitude!),
-              icon: const Icon(Icons.place_rounded, size: 16),
+              icon: const Icon(Icons.place_outlined, size: 16),
               label: Text('${r.latitude!.toStringAsFixed(5)}, ${r.longitude!.toStringAsFixed(5)}'
                   '${r.locationAccuracyM != null ? ' (±${r.locationAccuracyM!.round()} m)' : ''}'),
             ),
           if (r.familyMembers.isNotEmpty) ...[
             const NpFieldLabel('Family members'),
             for (final m in r.familyMembers)
-              Text('• ${m.name} — ${m.relation}${m.age != null ? ', ${m.age} yrs' : ''}${m.occupation != null && m.occupation!.isNotEmpty ? ', ${m.occupation}' : ''}',
-                  style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Text(
+                    '• ${m.name} — ${m.relation}${m.age != null ? ', ${m.age} yrs' : ''}${m.occupation != null && m.occupation!.isNotEmpty ? ', ${m.occupation}' : ''}',
+                    style: const TextStyle(fontSize: 13, height: 1.4, color: AppColors.inkSoft)),
+              ),
           ],
           if (r.background.isNotEmpty) ...[
             const NpFieldLabel('Background'),
@@ -1071,11 +1122,12 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
             Wrap(spacing: 6, runSpacing: 6, children: [for (final e in r.checklist.entries) NpChip(e.key, on: e.value)]),
           ],
           if (r.amRemarks != null && r.amRemarks!.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(r.amRemarks!, style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
+            const SizedBox(height: 8),
+            Text(r.amRemarks!, style: const TextStyle(fontSize: 13, height: 1.45, color: AppColors.inkSoft)),
           ],
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           NpDocumentList(documents: r.photos, emptyText: 'No visit photos.'),
+          const SizedBox(height: 6),
           NpPersonStamp(person: r.submittedBy, at: r.submittedAt, prefix: 'Submitted by'),
         ]),
       );
@@ -1094,8 +1146,8 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
           NpActionBox(
             title: 'Your decision',
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              const SizedBox(height: 6),
               FilledButton.icon(
-                style: FilledButton.styleFrom(backgroundColor: AppColors.success),
                 onPressed: _busy ? null : _dmApprove,
                 icon: const Icon(Icons.check_rounded, size: 18),
                 label: const Text('Approve'),
@@ -1107,8 +1159,8 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
                 label: const Text('Send back to BGV'),
               ),
               const SizedBox(height: 8),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+              FilledButton.icon(
+                style: npDangerButtonStyle(),
                 onPressed: _busy ? null : _dmReject,
                 icon: const Icon(Icons.block_rounded, size: 18),
                 label: const Text('Reject'),
@@ -1120,64 +1172,71 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
   // ── 8. Agreement & PDC ──
   List<Widget> _agreementPanel(NpCandidateDetail d) => [
         if (d.agreements.isEmpty)
-          const Text('No agreement submitted yet.', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+          const Text('No agreement submitted yet.', style: _muted),
         for (final ag in d.agreements)
           Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(AppRadii.md), border: Border.all(color: AppColors.hairline)),
+            padding: const EdgeInsets.fromLTRB(14, 10, 8, 12),
+            decoration: _boxDecoration,
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(children: [
                 Expanded(
                   child: Text('Agreement #${ag.attemptNo} · ${npFmtDate(ag.agreementDate)}',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink)),
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.ink, fontFeatures: [FontFeature.tabularFigures()])),
                 ),
                 if (ag.file != null)
                   TextButton.icon(
-                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                    style: TextButton.styleFrom(minimumSize: const Size(0, 32), visualDensity: VisualDensity.compact),
                     onPressed: () => npOpenFile(context, ag.file),
-                    icon: const Icon(Icons.open_in_new_rounded, size: 14),
+                    icon: const Icon(Icons.open_in_new_rounded, size: 15),
                     label: const Text('Open'),
                   ),
               ]),
               for (final p in ag.pdcs)
                 Padding(
-                  padding: const EdgeInsets.only(top: 6),
+                  padding: const EdgeInsets.only(top: 8),
                   child: Row(children: [
+                    const ProIconWell(icon: Icons.payments_outlined, size: 30),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('PDC ${p.seqNo} · Cheque ${p.chequeNumber}', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.ink)),
+                        Text('PDC ${p.seqNo} · Cheque ${p.chequeNumber}',
+                            style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, color: AppColors.ink, fontFeatures: [FontFeature.tabularFigures()])),
                         Text([p.bankName, p.ifsc, p.accountNumber].whereType<String>().where((s) => s.isNotEmpty).join(' · '),
-                            style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+                            style: const TextStyle(fontSize: 12, color: AppColors.muted, fontFeatures: [FontFeature.tabularFigures()])),
                       ]),
                     ),
                     if (p.file != null)
                       IconButton(
+                        tooltip: 'Open cheque scan',
                         visualDensity: VisualDensity.compact,
                         onPressed: () => npOpenFile(context, p.file),
-                        icon: Icon(Icons.image_rounded, size: 18, color: AppColors.primary),
+                        icon: Icon(Icons.image_outlined, size: 19, color: AppColors.primary),
                       ),
                   ]),
                 ),
               if (ag.verificationVideo != null)
                 Padding(
-                  padding: const EdgeInsets.only(top: 6),
+                  padding: const EdgeInsets.only(top: 8),
                   child: Row(children: [
+                    const ProIconWell(icon: Icons.videocam_outlined, size: 30),
+                    const SizedBox(width: 10),
                     const Expanded(
                       child: Text('Customer verification video',
-                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.ink)),
+                          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, color: AppColors.ink)),
                     ),
                     IconButton(
+                      tooltip: 'Play video',
                       visualDensity: VisualDensity.compact,
                       onPressed: () => npOpenFile(context, ag.verificationVideo),
-                      icon: Icon(Icons.play_circle_rounded, size: 20, color: AppColors.primary),
+                      icon: Icon(Icons.play_circle_outline_rounded, size: 21, color: AppColors.primary),
                     ),
                   ]),
                 ),
               if (ag.remarks != null && ag.remarks!.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(ag.remarks!, style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
+                const SizedBox(height: 8),
+                Text(ag.remarks!, style: const TextStyle(fontSize: 13, height: 1.45, color: AppColors.inkSoft)),
               ],
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               NpPersonStamp(person: ag.submittedBy, at: ag.submittedAt, prefix: 'Submitted by'),
             ]),
           ),
@@ -1218,7 +1277,6 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
               ),
               const SizedBox(height: 12),
               FilledButton.icon(
-                style: FilledButton.styleFrom(backgroundColor: AppColors.success),
                 onPressed: (_busy || !kNpOpsChecklistKeys.every((k) => _opsChecks[k] == true)) ? null : _opsApprove,
                 icon: const Icon(Icons.check_rounded, size: 18),
                 label: const Text('Approve & generate NP ID'),
@@ -1230,8 +1288,8 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
                 label: const Text('Send back'),
               ),
               const SizedBox(height: 8),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+              FilledButton.icon(
+                style: npDangerButtonStyle(),
                 onPressed: _busy ? null : _opsReject,
                 icon: const Icon(Icons.block_rounded, size: 18),
                 label: const Text('Reject'),
@@ -1243,11 +1301,11 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
   // ── 10. NP ID ──
   List<Widget> _npIdPanel(NpCandidateDetail d) => [
         if (d.npId == null)
-          const Text('Generated automatically on OPS approval.', style: TextStyle(fontSize: 12.5, color: AppColors.muted))
+          const Text('Generated automatically on OPS approval.', style: _muted)
         else
-          Column(children: [
-            NpInfoRow('NP ID', d.npId),
-            NpInfoRow('Generated at', npFmtDateTime(d.npIdGeneratedAt)),
+          _kv([
+            ('NP ID', d.npId),
+            ('Generated at', npFmtDateTime(d.npIdGeneratedAt)),
           ]),
       ];
 
@@ -1256,12 +1314,12 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
     final pending = d.activations.where((a) => a.verifiedAt == null).isNotEmpty;
     return [
       if (d.activations.isEmpty)
-        const Text('The app has not been activated yet.', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+        const Text('The app has not been activated yet.', style: _muted),
       for (final a in d.activations)
         _historyCard(
-          leading: StatusPill(
-            label: a.verifiedAt != null ? 'Verified' : (a.exceptionReason != null ? 'Exception' : 'OTP sent'),
-            color: a.verifiedAt != null ? AppColors.success : (a.exceptionReason != null ? AppColors.warning : AppColors.info),
+          leading: npTonePill(
+            a.verifiedAt != null ? 'Verified' : (a.exceptionReason != null ? 'Exception' : 'OTP sent'),
+            a.verifiedAt != null ? AppColors.success : (a.exceptionReason != null ? AppColors.warning : AppColors.info),
           ),
           title: 'Attempt ${a.attemptNo} · ${a.mobileNumber}',
           lines: [
@@ -1300,12 +1358,11 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
               controller: _otpCode,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
-              style: const TextStyle(letterSpacing: 6, fontWeight: FontWeight.w700),
+              style: const TextStyle(fontSize: 18, letterSpacing: 6, fontWeight: FontWeight.w600, fontFeatures: [FontFeature.tabularFigures()]),
               decoration: const InputDecoration(hintText: '6 digits'),
             ),
             const SizedBox(height: 6),
-            Text('Device: ${[_deviceModel, _deviceOs, _appVersion].whereType<String>().join(' · ')}',
-                style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
+            Text('Device: ${[_deviceModel, _deviceOs, _appVersion].whereType<String>().join(' · ')}', style: AppText.caption),
             const SizedBox(height: 12),
             FilledButton.icon(
               onPressed: _busy ? null : _verifyOtp,
@@ -1325,10 +1382,10 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
 
   // ── 12. ESAF ──
   List<Widget> _esafPanel(NpCandidateDetail d) => [
-        Column(children: [
-          NpInfoRow('ESAF ID', d.esafId),
-          NpInfoRow('Created at', npFmtDateTime(d.esafIdCreatedAt)),
-          if (d.esafIdBy != null) NpInfoRow('Created by', d.esafIdBy!.name),
+        _kv([
+          ('ESAF ID', d.esafId),
+          ('Created at', npFmtDateTime(d.esafIdCreatedAt)),
+          if (d.esafIdBy != null) ('Created by', d.esafIdBy!.name),
         ]),
         if (d.can('CREATE_ESAF_ID'))
           NpActionBox(
@@ -1349,43 +1406,77 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
           NpCheckLine(ok: d.esafId != null, label: 'ESAF ID${d.esafId != null ? ' — ${d.esafId}' : ''}'),
         ]),
         if (d.finalActivatedAt != null)
-          Row(children: [
-            const Icon(Icons.verified_rounded, color: AppColors.success, size: 18),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text('Active NP since ${npFmtDateTime(d.finalActivatedAt)}${d.finalActivatedBy != null ? ' · by ${d.finalActivatedBy!.name}' : ''}',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.success)),
-            ),
-          ]),
+          ProNote(
+            'Active NP since ${npFmtDateTime(d.finalActivatedAt)}${d.finalActivatedBy != null ? ' · by ${d.finalActivatedBy!.name}' : ''}',
+            tone: ProNoteTone.ok,
+            icon: Icons.verified_rounded,
+          ),
         if (d.can('FINAL_ACTIVATE'))
           FilledButton.icon(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.success),
             onPressed: _busy ? null : _finalActivate,
             icon: const Icon(Icons.rocket_launch_rounded, size: 18),
             label: const Text('Mark as Active NP'),
           ),
       ];
 
+  /// Audit trail as a vertical timeline.
   Widget _auditCard() => GlassCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          const AppSectionHeader(title: 'Audit trail'),
-          const SizedBox(height: 8),
-          if (_audit.isEmpty)
-            const Text('No audit entries.', style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
-          for (final a in _audit)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  Expanded(child: Text(npTitle(a.action), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink))),
-                  Text(npFmtDateTime(a.createdAt), style: const TextStyle(fontSize: 11, color: AppColors.muted)),
-                ]),
-                Text('${npStatusLabel(a.previousStatus)} → ${npStatusLabel(a.newStatus)}',
-                    style: const TextStyle(fontSize: 11.5, color: AppColors.inkSoft)),
-                Text([a.performedBy ?? '—', if (a.roles != null && a.roles!.isNotEmpty) a.roles!].join(' · '),
-                    style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                if ((a.remarks ?? a.detail) != null)
-                  Text((a.remarks ?? a.detail)!, style: const TextStyle(fontSize: 12, color: AppColors.inkSoft)),
+          const ProSectionHeader(title: 'Audit trail'),
+          const SizedBox(height: 12),
+          if (_audit.isEmpty) const Text('No audit entries.', style: _muted),
+          for (var i = 0; i < _audit.length; i++)
+            IntrinsicHeight(
+              child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                SizedBox(
+                  width: 18,
+                  child: Column(children: [
+                    const SizedBox(height: 4),
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: i == 0 ? AppColors.primary : AppColors.surface,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: i == 0 ? AppColors.primary : const Color(0xFFC6D3D6), width: 2),
+                      ),
+                    ),
+                    if (i < _audit.length - 1)
+                      Expanded(child: Container(width: 2, margin: const EdgeInsets.only(top: 3), color: AppColors.hairlineSoft)),
+                  ]),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: i < _audit.length - 1 ? 14 : 0),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Expanded(
+                          child: Text(npTitle(_audit[i].action),
+                              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.ink)),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(npFmtDateTime(_audit[i].createdAt),
+                            style: const TextStyle(fontSize: 12, color: AppColors.muted, fontFeatures: [FontFeature.tabularFigures()])),
+                      ]),
+                      const SizedBox(height: 1),
+                      Text('${npStatusLabel(_audit[i].previousStatus)} → ${npStatusLabel(_audit[i].newStatus)}',
+                          style: const TextStyle(fontSize: 13, height: 1.4, color: AppColors.inkSoft)),
+                      Text(
+                          [_audit[i].performedBy ?? '—', if (_audit[i].roles != null && _audit[i].roles!.isNotEmpty) _audit[i].roles!]
+                              .join(' · '),
+                          style: AppText.caption),
+                      if ((_audit[i].remarks ?? _audit[i].detail) != null)
+                        Container(
+                          margin: const EdgeInsets.only(top: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(color: AppColors.surfaceAlt, borderRadius: BorderRadius.circular(10)),
+                          child: Text((_audit[i].remarks ?? _audit[i].detail)!,
+                              style: const TextStyle(fontSize: 12.5, height: 1.4, color: AppColors.inkSoft)),
+                        ),
+                    ]),
+                  ),
+                ),
               ]),
             ),
         ]),
@@ -1393,14 +1484,22 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
 
   // ── helpers ──
 
+  static const _muted = TextStyle(fontSize: 13, height: 1.4, color: AppColors.muted);
+
+  static final _boxDecoration = BoxDecoration(
+    color: AppColors.surfaceAlt,
+    borderRadius: BorderRadius.circular(14),
+    border: Border.all(color: AppColors.hairlineSoft),
+  );
+
   Widget _approvalHistory(List<NpApproval> approvals, String emptyText) {
-    if (approvals.isEmpty) return Text(emptyText, style: const TextStyle(fontSize: 12.5, color: AppColors.muted));
+    if (approvals.isEmpty) return Text(emptyText, style: _muted);
     return Column(children: [
       for (final a in approvals)
         _historyCard(
-          leading: StatusPill(
-            label: npTitle(a.action),
-            color: a.action == 'APPROVE' ? AppColors.success : (a.action == 'REJECT' ? AppColors.danger : AppColors.warning),
+          leading: npTonePill(
+            npTitle(a.action),
+            a.action == 'APPROVE' ? AppColors.success : (a.action == 'REJECT' ? AppColors.danger : AppColors.warning),
           ),
           title: 'Attempt ${a.attemptNo}${a.sendBackStage != null ? ' · back to ${npTitle(a.sendBackStage)}' : ''}',
           lines: [
@@ -1415,17 +1514,24 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
   Widget _historyCard({required Widget leading, required String title, List<String> lines = const [], Widget? stamp, Widget? trailing}) =>
       Container(
         margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(borderRadius: BorderRadius.circular(AppRadii.md), border: Border.all(color: AppColors.hairline)),
+        padding: EdgeInsets.fromLTRB(12, trailing == null ? 11 : 6, trailing == null ? 12 : 4, 11),
+        decoration: _boxDecoration,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             leading,
             const SizedBox(width: 8),
-            Expanded(child: Text(title, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.ink))),
+            Expanded(
+              child: Text(title,
+                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: AppColors.ink, fontFeatures: [FontFeature.tabularFigures()])),
+            ),
             if (trailing != null) trailing,
           ]),
-          for (final l in lines) Padding(padding: const EdgeInsets.only(top: 3), child: Text(l, style: const TextStyle(fontSize: 12, color: AppColors.inkSoft))),
-          if (stamp != null) Padding(padding: const EdgeInsets.only(top: 3), child: stamp),
+          for (final l in lines)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(l, style: const TextStyle(fontSize: 13, height: 1.4, color: AppColors.inkSoft)),
+            ),
+          if (stamp != null) Padding(padding: const EdgeInsets.only(top: 4), child: stamp),
         ]),
       );
 
@@ -1436,13 +1542,77 @@ class _NpCandidateDetailScreenState extends ConsumerState<NpCandidateDetailScree
         },
         borderRadius: BorderRadius.circular(AppRadii.md),
         child: InputDecorator(
-          decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_rounded, size: 18)),
-          child: Text(npFmtDate(value), style: const TextStyle(fontSize: 14, color: AppColors.ink)),
+          decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_outlined, size: 18)),
+          child: Text(npFmtDate(value), style: const TextStyle(fontSize: 15, color: AppColors.ink)),
         ),
       );
 }
 
-/// Employee autocomplete backed by `/api/employees/lookup` (interviewer picker).
+/// Identity block for the candidate hero: photo (or initials) in a white
+/// squircle with a lime ring, name, code / org lines and status tags.
+class _CandidateIdentity extends StatelessWidget {
+  const _CandidateIdentity({required this.name, required this.photoUrl, required this.lines, required this.tags});
+  final String name;
+  final String? photoUrl;
+  final List<String> lines;
+  final List<ProHeroTag> tags;
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = Text(
+      ProAvatar.initialsOf(name),
+      style: TextStyle(fontSize: 21, fontWeight: FontWeight.w600, letterSpacing: -0.4, color: AppColors.deep),
+    );
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(
+        width: 64,
+        height: 64,
+        margin: const EdgeInsets.only(top: 4, left: 4),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(color: AppColors.deep, spreadRadius: 3),
+            const BoxShadow(color: AppColors.live, spreadRadius: 5),
+          ],
+        ),
+        alignment: Alignment.center,
+        child: photoUrl == null
+            ? initials
+            : ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Image.network(photoUrl!, width: 64, height: 64, fit: BoxFit.cover, errorBuilder: (_, __, ___) => initials),
+              ),
+      ),
+      const SizedBox(width: 16),
+      Expanded(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(
+            name,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 22, height: 1.22, fontWeight: FontWeight.w600, letterSpacing: -0.55, color: Colors.white),
+          ),
+          for (final l in lines)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(l,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13, height: 1.35, color: Colors.white70, fontFeatures: [FontFeature.tabularFigures()])),
+            ),
+          if (tags.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 9),
+              child: Wrap(spacing: 6, runSpacing: 6, children: tags),
+            ),
+        ]),
+      ),
+    ]);
+  }
+}
+
+// Employee autocomplete backed by `/api/employees/lookup` (interviewer picker).
 class _EmployeeField extends ConsumerStatefulWidget {
   const _EmployeeField({required this.value, required this.onChanged});
   final EmployeeLookup? value;

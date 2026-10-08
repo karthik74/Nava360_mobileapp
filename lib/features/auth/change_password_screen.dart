@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
-import '../../core/widgets.dart';
+import 'auth_controller.dart';
 import 'auth_repository.dart';
+import 'login_screen.dart' show AuthPasswordRules, AuthVisibilityToggle;
 
 /// Lets a signed-in user change their password (verifies the current one).
 class ChangePasswordScreen extends ConsumerStatefulWidget {
@@ -64,98 +66,242 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final user = ref.watch(authUserProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Change password')),
-      body: GlassBackdrop(
-        child: SafeArea(
-          child: SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: 'Change password',
+        subtitle: 'Account · Security',
+      ),
+      body: Form(
+        key: _formKey,
+        child: Column(
+          children: [
+            Expanded(
+              child: ListView(
+                physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics()),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                 children: [
-                  const AppPageHeader(
-                    title: 'Change password',
-                    subtitle: 'Use at least 6 characters for your new password',
-                  ),
-                  const SizedBox(height: 18),
+                  if (user != null) ...[
+                    _AccountRow(
+                      name: user.displayName,
+                      meta: [user.username, _roleLabel(user.role)]
+                          .where((e) => e.isNotEmpty)
+                          .join(' · '),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
                   GlassCard(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _PasswordField(
-                          controller: _current,
+                        const ProSectionHeader(title: 'Your password'),
+                        const SizedBox(height: 12),
+                        ProField(
                           label: 'Current password',
-                          obscure: _oCurrent,
-                          onToggle: () =>
-                              setState(() => _oCurrent = !_oCurrent),
-                          textInputAction: TextInputAction.next,
-                          validator: (v) => (v == null || v.isEmpty)
-                              ? 'Enter your current password'
-                              : null,
+                          child: _PasswordField(
+                            controller: _current,
+                            hint: 'Enter your current password',
+                            obscure: _oCurrent,
+                            onToggle: () =>
+                                setState(() => _oCurrent = !_oCurrent),
+                            textInputAction: TextInputAction.next,
+                            validator: (v) => (v == null || v.isEmpty)
+                                ? 'Enter your current password'
+                                : null,
+                          ),
                         ),
                         const SizedBox(height: 14),
-                        _PasswordField(
-                          controller: _next,
+                        ProField(
                           label: 'New password',
-                          obscure: _oNext,
-                          onToggle: () => setState(() => _oNext = !_oNext),
-                          textInputAction: TextInputAction.next,
-                          validator: (v) {
-                            if (v == null || v.length < 6) {
-                              return 'At least 6 characters';
-                            }
-                            if (v == _current.text) {
-                              return 'New password must differ from current';
-                            }
-                            return null;
-                          },
+                          helper:
+                              'Use at least 6 characters for your new password.',
+                          child: _PasswordField(
+                            controller: _next,
+                            hint: 'At least 6 characters',
+                            obscure: _oNext,
+                            onToggle: () => setState(() => _oNext = !_oNext),
+                            textInputAction: TextInputAction.next,
+                            validator: (v) {
+                              if (v == null || v.length < 6) {
+                                return 'At least 6 characters';
+                              }
+                              if (v == _current.text) {
+                                return 'New password must differ from current';
+                              }
+                              return null;
+                            },
+                          ),
                         ),
                         const SizedBox(height: 14),
-                        _PasswordField(
-                          controller: _confirm,
+                        ProField(
                           label: 'Confirm new password',
-                          obscure: _oConfirm,
-                          onToggle: () =>
-                              setState(() => _oConfirm = !_oConfirm),
-                          textInputAction: TextInputAction.done,
-                          onSubmit: (_) => _submit(),
-                          validator: (v) => (v != _next.text)
-                              ? 'Passwords do not match'
-                              : null,
+                          child: _PasswordField(
+                            controller: _confirm,
+                            hint: 'Re-enter new password',
+                            obscure: _oConfirm,
+                            onToggle: () =>
+                                setState(() => _oConfirm = !_oConfirm),
+                            textInputAction: TextInputAction.done,
+                            onSubmit: (_) => _submit(),
+                            validator: (v) => (v != _next.text)
+                                ? 'Passwords do not match'
+                                : null,
+                          ),
                         ),
                       ],
                     ),
                   ),
+                  const SizedBox(height: 14),
+                  _PasswordChecks(
+                    current: _current,
+                    next: _next,
+                    confirm: _confirm,
+                  ),
                   if (_error != null) ...[
                     const SizedBox(height: 14),
-                    AppErrorPanel(message: _error!),
+                    ProNote(_error!, tone: ProNoteTone.bad),
                   ],
-                  const SizedBox(height: 22),
-                  SizedBox(
-                    height: 50,
-                    child: FilledButton(
-                      onPressed: _loading ? null : _submit,
-                      child: _loading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.4,
-                                valueColor:
-                                    AlwaysStoppedAnimation(Colors.white),
-                              ),
-                            )
-                          : const Text('Update password'),
-                    ),
-                  ),
                 ],
               ),
             ),
-          ),
+            ProBottomBar(
+              children: [
+                FilledButton.icon(
+                  onPressed: _loading ? null : _submit,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                    disabledBackgroundColor:
+                        _loading ? AppColors.primary : null,
+                    disabledForegroundColor: _loading ? Colors.white : null,
+                  ),
+                  icon: _loading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.4,
+                            valueColor: AlwaysStoppedAnimation(Colors.white),
+                          ),
+                        )
+                      : const Icon(Icons.lock_reset_rounded, size: 19),
+                  label: const Text('Update password'),
+                ),
+              ],
+            ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+/// Turns a role code such as BRANCH_MANAGER into "Branch manager".
+String _roleLabel(String role) {
+  final s = role.replaceAll('_', ' ').trim().toLowerCase();
+  if (s.isEmpty) return '';
+  return s[0].toUpperCase() + s.substring(1);
+}
+
+/// Compact identity row: whose password is being changed.
+class _AccountRow extends StatelessWidget {
+  const _AccountRow({required this.name, required this.meta});
+  final String name;
+  final String meta;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassCard(
+      padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+      child: Row(
+        children: [
+          ProAvatar(name: name, size: 42, dark: true),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.15,
+                    color: AppColors.ink,
+                  ),
+                ),
+                if (meta.isNotEmpty)
+                  Text(
+                    meta,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.caption,
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          const ProIconWell(
+            icon: Icons.verified_user_outlined,
+            color: AppColors.success,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Live checklist for the new password (mirrors the form validators; the
+/// form still validates on submit exactly as before).
+class _PasswordChecks extends StatelessWidget {
+  const _PasswordChecks({
+    required this.current,
+    required this.next,
+    required this.confirm,
+  });
+
+  final TextEditingController current;
+  final TextEditingController next;
+  final TextEditingController confirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final rules = <(String, bool Function())>[
+      ('At least 6 characters', () => next.text.length >= 6),
+      (
+        'Different from your current password',
+        () => next.text.isNotEmpty && next.text != current.text
+      ),
+      (
+        'Both new passwords match',
+        () => confirm.text.isNotEmpty && confirm.text == next.text
+      ),
+    ];
+    final all = Listenable.merge([current, next, confirm]);
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListenableBuilder(
+            listenable: all,
+            builder: (context, _) {
+              final met = rules.where((r) => r.$2()).length;
+              final label = '$met of ${rules.length}';
+              return ProSectionHeader(
+                title: 'Password checks',
+                trailing: met == rules.length
+                    ? ProPill.ok(label)
+                    : ProPill.neutral(label),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          AuthPasswordRules(listenable: all, rules: rules),
+        ],
       ),
     );
   }
@@ -164,7 +310,7 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
 class _PasswordField extends StatelessWidget {
   const _PasswordField({
     required this.controller,
-    required this.label,
+    required this.hint,
     required this.obscure,
     required this.onToggle,
     this.validator,
@@ -173,7 +319,7 @@ class _PasswordField extends StatelessWidget {
   });
 
   final TextEditingController controller;
-  final String label;
+  final String hint;
   final bool obscure;
   final VoidCallback onToggle;
   final FormFieldValidator<String>? validator;
@@ -188,20 +334,15 @@ class _PasswordField extends StatelessWidget {
       textInputAction: textInputAction,
       onFieldSubmitted: onSubmit,
       validator: validator,
+      style: const TextStyle(
+        fontSize: 15,
+        color: AppColors.ink,
+        fontWeight: FontWeight.w500,
+      ),
       decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: const Icon(Icons.lock_outline_rounded, size: 20),
-        suffixIcon: IconButton(
-          splashRadius: 18,
-          icon: Icon(
-            obscure
-                ? Icons.visibility_outlined
-                : Icons.visibility_off_outlined,
-            color: AppColors.muted,
-            size: 20,
-          ),
-          onPressed: onToggle,
-        ),
+        hintText: hint,
+        prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18),
+        suffixIcon: AuthVisibilityToggle(obscure: obscure, onPressed: onToggle),
       ),
     );
   }

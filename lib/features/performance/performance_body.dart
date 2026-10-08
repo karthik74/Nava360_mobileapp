@@ -10,6 +10,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'performance_models.dart';
@@ -21,12 +22,17 @@ class PerformanceScorecardBody extends ConsumerWidget {
     super.key,
     required this.detail,
     this.selectedPeriod,
+    this.showSummary = true,
   });
 
   final PerformanceDetail detail;
 
   /// The currently-selected period (drives the month-over-month comparison).
   final PeriodOption? selectedPeriod;
+
+  /// Show the summary header + rank cards. My Performance turns this off
+  /// because its hero already shows the overall score and both ranks.
+  final bool showSummary;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -41,185 +47,172 @@ class PerformanceScorecardBody extends ConsumerWidget {
 
     final name = s.employeeName ?? detail.employeeName ?? '—';
     final code = s.employeeCode ?? detail.employeeCode;
+    final dbRatio = (s.dbPercentage ?? 0).clamp(0.0, 1.0).toDouble();
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // ── Summary header ──
-        GlassCard(
-          shadow: AppShadows.card,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              PerfRingProgress(
-                ratio: s.overallPercentage,
-                size: 84,
-                label: 'OVERALL',
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 15.5,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                    if (s.hierarchyLabel.isNotEmpty) ...[
-                      const SizedBox(height: 2),
+        if (showSummary) ...[
+          // ── Summary header ──
+          GlassCard(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                PerfRingProgress(
+                  ratio: s.overallPercentage,
+                  size: 84,
+                  label: 'Overall',
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        s.hierarchyLabel,
-                        maxLines: 2,
+                        name,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.muted,
-                          height: 1.3,
+                        style: AppText.title,
+                      ),
+                      if (s.hierarchyLabel.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          s.hierarchyLabel,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppText.caption,
                         ),
+                      ],
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          if ((code ?? '').isNotEmpty) ProPill.neutral(code!),
+                          if ((s.monthLabel ?? '').isNotEmpty)
+                            ProPill.info(s.monthLabel!),
+                          if ((s.branchGrade ?? '').isNotEmpty)
+                            PerfGradeChip(grade: s.branchGrade!),
+                        ],
                       ),
                     ],
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: [
-                        if ((code ?? '').isNotEmpty)
-                          StatusPill(
-                            label: code!,
-                            color: AppColors.primary,
-                            icon: Icons.badge_rounded,
-                          ),
-                        if ((s.monthLabel ?? '').isNotEmpty)
-                          StatusPill(
-                            label: s.monthLabel!,
-                            color: AppColors.info,
-                            icon: Icons.calendar_month_rounded,
-                          ),
-                        if ((s.branchGrade ?? '').isNotEmpty)
-                          PerfGradeChip(grade: s.branchGrade!),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
+          const SizedBox(height: 12),
 
-        // ── Rank cards ──
-        perfGrid([
-          PerfRankBadge(
-            label: 'NLPL Rank',
-            rank: s.nlplRank,
-            icon: Icons.emoji_events_rounded,
-            color: AppColors.warning,
-          ),
-          PerfRankBadge(
-            label: 'Branch Rank',
-            rank: s.branchRank,
-            icon: Icons.leaderboard_rounded,
-            color: AppColors.primary,
-          ),
-        ]),
+          // ── Rank cards ──
+          perfGrid([
+            PerfRankBadge(
+              label: 'NLPL rank',
+              rank: s.nlplRank,
+              icon: Icons.emoji_events_rounded,
+              color: AppColors.warning,
+            ),
+            PerfRankBadge(
+              label: 'Branch rank',
+              rank: s.branchRank,
+              icon: Icons.leaderboard_rounded,
+              color: AppColors.primary,
+            ),
+          ]),
+          const SizedBox(height: 2),
+        ],
 
         // ── Target vs achievement ──
         PerfSectionCard(
           title: 'Disbursement (DB)',
           icon: Icons.track_changes_rounded,
-          trailing: _PctBadge(ratio: s.dbPercentage),
+          trailing: perfPctPill(s.dbPercentage),
           children: [
-            perfGrid([
-              PerfKpiCard(
-                label: 'Target',
-                value: perfIntOrDash(s.dbTarget),
-                icon: Icons.flag_rounded,
-                color: AppColors.info,
-              ),
-              PerfKpiCard(
-                label: 'Achievement',
-                value: perfIntOrDash(s.dbAchievement),
-                icon: Icons.check_circle_rounded,
-                color: perfTone(s.dbPercentage),
-              ),
-            ]),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(AppRadii.pill),
-              child: LinearProgressIndicator(
-                value: (s.dbPercentage ?? 0).clamp(0.0, 1.0).toDouble(),
-                minHeight: 7,
-                backgroundColor: AppColors.hairline,
-                valueColor: AlwaysStoppedAnimation(perfTone(s.dbPercentage)),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: _Figure(
+                    label: 'Target',
+                    value: perfIntOrDash(s.dbTarget),
+                  ),
+                ),
+                Expanded(
+                  child: _Figure(
+                    label: 'Achievement',
+                    value: perfIntOrDash(s.dbAchievement),
+                    color: perfTone(s.dbPercentage),
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 12),
+            ProBar(value: dbRatio, color: perfTone(s.dbPercentage), height: 6),
+            const SizedBox(height: 4),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
 
         // ── Collection performance ──
-        const AppSectionHeader(title: 'Collection performance'),
+        const ProSectionHeader(title: 'Collection performance'),
         const SizedBox(height: 10),
-        PerfMetricCard(
-          label: 'Regular collection',
-          ratio: s.regularCollectionPercentage,
-          icon: Icons.payments_rounded,
+        ProListGroup(
+          children: [
+            _metric('Regular collection', s.regularCollectionPercentage,
+                Icons.payments_rounded),
+            _metric('1–90 collection', s.oneToNinetyPercentage,
+                Icons.schedule_rounded),
+            _metric('On-date collection', s.onDatePercentage,
+                Icons.event_available_rounded),
+            _metric('NPA recovery', s.npaRecoveryPercentage,
+                Icons.restore_rounded),
+          ],
         ),
-        const SizedBox(height: 10),
-        PerfMetricCard(
-          label: '1–90 collection',
-          ratio: s.oneToNinetyPercentage,
-          icon: Icons.schedule_rounded,
-        ),
-        const SizedBox(height: 10),
-        PerfMetricCard(
-          label: 'On-date collection',
-          ratio: s.onDatePercentage,
-          icon: Icons.event_available_rounded,
-        ),
-        const SizedBox(height: 10),
-        PerfMetricCard(
-          label: 'NPA recovery',
-          ratio: s.npaRecoveryPercentage,
-          icon: Icons.restore_rounded,
-        ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
 
         // ── Month-over-month comparison ──
         _ComparisonCard(detail: detail, selectedPeriod: selectedPeriod),
       ],
     );
   }
+
+  Widget _metric(String label, double? ratio, IconData icon) => ProProgressRow(
+        icon: icon,
+        label: label,
+        value: perfPct(ratio),
+        progress: (ratio ?? 0).clamp(0.0, 1.0).toDouble(),
+        color: perfTone(ratio),
+      );
 }
 
-/// A small tinted % badge used as a section trailing element.
-class _PctBadge extends StatelessWidget {
-  const _PctBadge({required this.ratio});
-  final double? ratio;
+/// Label above a big number (target / achievement).
+class _Figure extends StatelessWidget {
+  const _Figure({required this.label, required this.value, this.color});
+  final String label;
+  final String value;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    final tone = perfTone(ratio);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: tone.withValues(alpha: 0.30)),
-      ),
-      child: Text(
-        perfPct(ratio),
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w800,
-          color: tone,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
+        const SizedBox(height: 2),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 22,
+              height: 1.2,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.5,
+              color: color ?? AppColors.ink,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 }

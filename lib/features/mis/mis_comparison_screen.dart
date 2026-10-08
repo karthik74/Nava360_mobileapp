@@ -11,10 +11,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import 'mis_charts.dart' show MisPalette;
 import 'mis_comparison_tables.dart';
 import 'mis_format.dart';
+import 'mis_matrix_table.dart' show MisFootNote;
 import 'mis_models.dart';
 import 'mis_repository.dart';
 import 'mis_widgets.dart';
@@ -356,6 +359,30 @@ final _disbCompareProvider =
 
 // ── screen ──────────────────────────────────────────────────────────────────
 
+/// The collection card view's paired day, derived from the model + the
+/// selected index (exactly the walk the card view always did).
+class _CollDayView {
+  final _CollModel model;
+  final int idx, lastIdx;
+  final _LabeledDay curDay;
+  final _LabeledDay? prevDay;
+
+  /// (name, colour, prev demand, prev collection, cur demand, cur collection).
+  final List<(String, Color, double, double, double, double)> buckets;
+
+  const _CollDayView(this.model, this.idx, this.lastIdx, this.curDay,
+      this.prevDay, this.buckets);
+}
+
+/// The disbursement card view's paired day.
+class _DisbDayView {
+  final _DisbModel model;
+  final int idx, lastIdx, day;
+  final _DisbDay? p, c;
+  const _DisbDayView(
+      this.model, this.idx, this.lastIdx, this.day, this.p, this.c);
+}
+
 class MisComparisonScreen extends ConsumerStatefulWidget {
   const MisComparisonScreen({super.key});
 
@@ -381,53 +408,206 @@ class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
         branch: _branch?.name,
       );
 
+  _CollDayView? _collView(_CollModel? model) {
+    if (model == null || model.curDays.isEmpty) return null;
+    final lastIdx = model.curDays.length - 1;
+    final idx = _dayIdx < 0 ? lastIdx : _dayIdx.clamp(0, lastIdx);
+    final curDay = model.curDays[idx];
+    final prevDay = model.prevLabelMap[curDay.label];
+    final cur = model.curCumMap[curDay.label];
+    final prev = model.prevCumMap[curDay.label];
+
+    final buckets = <(String, Color, double, double, double, double)>[
+      ('Regular (FTOD)', MisPalette.risk('regular'),
+          _num(prev, 'regular_demand'), _num(prev, 'regular_collection'),
+          _num(cur, 'regular_demand'), _num(cur, 'regular_collection')),
+      ('SMA-0 (1-30)', MisPalette.risk('1_30'), _num(prev, 'demand_1_30'),
+          _num(prev, 'collection_1_30'), _num(cur, 'demand_1_30'),
+          _num(cur, 'collection_1_30')),
+      ('SMA-1 (31-60)', MisPalette.risk('31_60'), _num(prev, 'demand_31_60'),
+          _num(prev, 'collection_31_60'), _num(cur, 'demand_31_60'),
+          _num(cur, 'collection_31_60')),
+      ('Pre-NPA', MisPalette.risk('61_90'), _num(prev, 'pnpa_demand'),
+          _num(prev, 'pnpa_collection'), _num(cur, 'pnpa_demand'),
+          _num(cur, 'pnpa_collection')),
+      ('NPA', MisPalette.risk('npa'), _num(prev, 'npa_cases'),
+          _num(prev, 'npa_act_acc'), _num(cur, 'npa_cases'),
+          _num(cur, 'npa_act_acc')),
+    ];
+    return _CollDayView(model, idx, lastIdx, curDay, prevDay, buckets);
+  }
+
+  _DisbDayView? _disbView(_DisbModel? model) {
+    if (model == null || model.days.isEmpty) return null;
+    // Default to the latest current-month day with data.
+    var def = model.days.length - 1;
+    for (var i = model.days.length - 1; i >= 0; i--) {
+      if (model.curMap.containsKey(model.days[i])) {
+        def = i;
+        break;
+      }
+    }
+    final lastIdx = model.days.length - 1;
+    final idx = _dayIdx < 0 ? def : _dayIdx.clamp(0, lastIdx);
+    final day = model.days[idx];
+    return _DisbDayView(
+        model, idx, lastIdx, day, model.prevMap[day], model.curMap[day]);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final collAsync = _disb ? null : ref.watch(_collCompareProvider(_scope));
+    final disbAsync = _disb ? ref.watch(_disbCompareProvider(_scope)) : null;
+    final collView = _collView(collAsync?.valueOrNull);
+    final disbView = _disbView(disbAsync?.valueOrNull);
+
+    // Day navigator + headline figures for the paired day (cards and table
+    // alike; the navigator only walks in the card view).
+    String? navLabel, navSub, navPos, heroKey;
+    int idx = 0, lastIdx = 0;
+    List<ProStat>? stats;
+    if (collView != null) {
+      final m = collView.model;
+      idx = collView.idx;
+      lastIdx = collView.lastIdx;
+      navLabel = collView.curDay.label;
+      navSub =
+          '${collView.prevDay != null ? _fmtDate(collView.prevDay!.date) : 'No data'}  vs  ${_fmtDate(collView.curDay.date)}';
+      navPos = 'Day ${idx + 1} of ${m.curDays.length} with data this month';
+      heroKey = 'Regular (FTOD) balance';
+      final r = collView.buckets.first;
+      final pBal = r.$3 - r.$4, cBal = r.$5 - r.$6;
+      final diff = cBal - pBal;
+      final improved = diff <= 0;
+      stats = [
+        ProStat(
+          label: m.months.prev.name,
+          value: _fmtNum(pBal),
+          sub: '${_pctStr(r.$3, r.$4)} collected',
+          dot: _prevDot,
+        ),
+        ProStat(
+          label: m.months.cur.name,
+          value: _fmtNum(cBal),
+          sub: '${_pctStr(r.$5, r.$6)} collected',
+          dot: Color.lerp(AppColors.primary, Colors.white, 0.45),
+        ),
+        ProStat(
+          label: 'Change',
+          value:
+              '${diff < 0 ? '▼ ' : diff > 0 ? '▲ ' : ''}${_fmtNum(diff.abs())}',
+          sub: improved ? 'Improved' : 'Higher',
+          dot: improved ? AppColors.live : _badDot,
+        ),
+      ];
+    } else if (disbView != null) {
+      final m = disbView.model;
+      final day = disbView.day;
+      final p = disbView.p, c = disbView.c;
+      idx = disbView.idx;
+      lastIdx = disbView.lastIdx;
+      navLabel = 'Day $day';
+      navSub =
+          '${p != null ? '${_ordinal(day)} ${_monthNames[m.months.prev.month]}' : 'No data'}  vs  ${c != null ? '${_ordinal(day)} ${_monthNames[m.months.cur.month]}' : 'No data'}';
+      navPos = '${idx + 1} of ${m.days.length} days';
+      heroKey = 'Disbursement amount';
+      final change = _disbChange(p?.amount, c?.amount);
+      stats = [
+        ProStat(
+          label: m.months.prev.name,
+          value: p != null ? _fmtCr(p.amount) : '-',
+          sub: p != null ? '${_fmtNum(p.accounts)} accounts' : 'No data',
+          dot: _prevDot,
+        ),
+        ProStat(
+          label: m.months.cur.name,
+          value: c != null ? _fmtCr(c.amount) : '-',
+          sub: c != null ? '${_fmtNum(c.accounts)} accounts' : 'No data',
+          dot: Color.lerp(AppColors.primary, Colors.white, 0.45),
+        ),
+        ProStat(
+          label: 'Change',
+          value: change.$1,
+          sub: change.$2,
+          dot: change.$3,
+        ),
+      ];
+    }
+
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: AppBar(title: const Text('Comparison')),
-      body: ListView(
-        padding: EdgeInsets.fromLTRB(
-            16, 14, 16, MediaQuery.of(context).padding.bottom + 24),
-        children: [
-          const Text(
-            'Month-over-month — previous vs current, day by day.',
-            style: TextStyle(fontSize: 12.5, color: AppColors.muted),
-          ),
-          const SizedBox(height: 12),
-          // Scope filter (above the sub-tabs).
-          _scopeFilter(),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: MisSegmented<bool>(
-                    options: const [
-                      (false, 'Collection'),
-                      (true, 'Disbursement')
-                    ],
-                    value: _disb,
-                    onChanged: (v) => setState(() {
-                      _disb = v;
+      body: ProPage(
+        onRefresh: () async {
+          if (_disb) {
+            ref.invalidate(_disbCompareProvider(_scope));
+          } else {
+            ref.invalidate(_collCompareProvider(_scope));
+          }
+        },
+        hero: ProHero(
+          title: 'Comparison',
+          subtitle: 'Month-over-month — previous vs current, day by day.',
+          children: [
+            // Scope filter (above the sub-tabs).
+            _scopeFilter(),
+            Row(
+              children: [
+                Expanded(
+                  child: ProHeroSegmented(
+                    labels: const ['Collection', 'Disbursement'],
+                    selected: _disb ? 1 : 0,
+                    onChanged: (i) => setState(() {
+                      _disb = i == 1;
                       _dayIdx = -1;
                     }),
                   ),
                 ),
+                const SizedBox(width: 8),
+                _HeroViewToggle(
+                  table: _table,
+                  onChanged: (t) => setState(() => _table = t),
+                ),
+              ],
+            ),
+            if (!_table && navLabel != null)
+              _navigator(navLabel, navSub ?? '', navPos ?? '', idx, lastIdx),
+            if (stats != null)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _HeroKicker(left: heroKey ?? '', right: navSub ?? ''),
+                  const SizedBox(height: 8),
+                  ProHeroStats(stats: stats),
+                ],
               ),
-              const SizedBox(width: 10),
-              MisViewToggle(
-                table: _table,
-                onChanged: (t) => setState(() => _table = t),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (_disb) _disbursement() else _collection(),
+          ],
+        ),
+        children: [
+          if (_disb)
+            ..._disbursement(disbAsync!, disbView)
+          else
+            ..._collection(collAsync!, collView),
         ],
       ),
     );
+  }
+
+  /// The disbursement "Change" figure — the card row's own rule: % change in
+  /// amount, "new" / "missing" when only one month has the day.
+  (String, String, Color) _disbChange(double? pVal, double? cVal) {
+    if (pVal != null && cVal != null) {
+      final d = pVal != 0 ? (cVal - pVal) / pVal * 100 : 0.0;
+      final higher = (cVal - pVal) >= 0;
+      return (
+        '${d > 0 ? '▲ ' : d < 0 ? '▼ ' : ''}${d.abs().toStringAsFixed(1)}%',
+        higher ? 'Higher' : 'Lower',
+        higher ? AppColors.live : _badDot,
+      );
+    }
+    if (pVal == null && cVal != null) return ('new', 'Amount', _prevDot);
+    if (pVal != null && cVal == null) return ('missing', 'Amount', _badDot);
+    return ('-', 'Amount', _prevDot);
   }
 
   // ── Cascading scope filter ──────────────────────────────────────────────────
@@ -472,7 +652,7 @@ class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
     ];
 
     return LayoutBuilder(builder: (context, c) {
-      const gap = 10.0;
+      const gap = 8.0;
       final w = (c.maxWidth - gap) / 2;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -483,23 +663,20 @@ class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
             children: [for (final cell in cells) SizedBox(width: w, child: cell)],
           ),
           if (_region != null) ...[
-            const SizedBox(height: 8),
-            GestureDetector(
-              onTap: () => setState(() {
+            const SizedBox(height: 4),
+            TextButton.icon(
+              onPressed: () => setState(() {
                 _region = _division = _area = _branch = null;
               }),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.close_rounded, size: 14, color: AppColors.primary),
-                  SizedBox(width: 4),
-                  Text('Reset filter',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary)),
-                ],
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xD1FFFFFF),
+                minimumSize: const Size(0, 32),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                textStyle: const TextStyle(
+                    fontSize: 12.5, fontWeight: FontWeight.w600),
               ),
+              icon: const Icon(Icons.close_rounded, size: 15),
+              label: const Text('Reset filter'),
             ),
           ],
         ],
@@ -512,7 +689,7 @@ class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
     final list = opts.asData?.value ?? const <HierOption>[];
     final ids = list.map((o) => o.id).toSet();
     final current = (value != null && ids.contains(value.id)) ? value.id : '';
-    return MisDropdown<String>(
+    return _HeroDropdown<String>(
       label: label,
       value: current,
       items: [
@@ -533,107 +710,132 @@ class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
     );
   }
 
-  Widget _navigator(String label, String sub, int idx, int lastIdx) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        IconButton.outlined(
-          onPressed: idx <= 0 ? null : () => setState(() => _dayIdx = idx - 1),
-          icon: const Icon(Icons.chevron_left_rounded),
-        ),
-        Expanded(
-          child: Column(
-            children: [
-              Text(label,
+  Widget _navigator(
+      String label, String sub, String pos, int idx, int lastIdx) {
+    Widget arrow(IconData icon, String tip, VoidCallback? onTap) => Opacity(
+          opacity: onTap == null ? 0.4 : 1,
+          child: ProHeroIconButton(icon: icon, tooltip: tip, onTap: onTap),
+        );
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      child: Row(
+        children: [
+          arrow(Icons.chevron_left_rounded, 'Previous day',
+              idx <= 0 ? null : () => setState(() => _dayIdx = idx - 1)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.ink)),
-              const SizedBox(height: 2),
-              Text(sub,
+                    fontSize: 20,
+                    height: 1.3,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.4,
+                    color: Colors.white,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                Text(
+                  sub,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 11, color: AppColors.muted)),
-            ],
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xD6FFFFFF),
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                if (pos.isNotEmpty)
+                  Text(
+                    pos,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: Color(0x99FFFFFF),
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+              ],
+            ),
           ),
-        ),
-        IconButton.outlined(
-          onPressed:
-              idx >= lastIdx ? null : () => setState(() => _dayIdx = idx + 1),
-          icon: const Icon(Icons.chevron_right_rounded),
-        ),
-      ],
+          const SizedBox(width: 10),
+          arrow(Icons.chevron_right_rounded, 'Next day',
+              idx >= lastIdx ? null : () => setState(() => _dayIdx = idx + 1)),
+        ],
+      ),
     );
   }
 
   // Collection -----------------------------------------------------------------
 
-  Widget _collection() {
-    final async = ref.watch(_collCompareProvider(_scope));
+  List<Widget> _collection(
+      AsyncValue<_CollModel?> async, _CollDayView? view) {
     return async.when(
-      loading: () => const AppLoadingBlock(height: 280),
-      error: (e, _) => AppErrorPanel(
-        message: e.toString(),
-        onRetry: () => ref.invalidate(_collCompareProvider(_scope)),
-      ),
+      loading: () => const [AppLoadingBlock(height: 280)],
+      error: (e, _) => [
+        AppErrorPanel(
+          message: e.toString(),
+          onRetry: () => ref.invalidate(_collCompareProvider(_scope)),
+        ),
+      ],
       data: (model) {
-        if (model == null || model.curDays.isEmpty) {
-          return const MisInlineEmpty('No daily collection data available.');
+        if (model == null || model.curDays.isEmpty || view == null) {
+          return const [MisInlineEmpty('No daily collection data available.')];
         }
         if (_table) return _collectionTable(model);
-        final lastIdx = model.curDays.length - 1;
-        final idx = _dayIdx < 0 ? lastIdx : _dayIdx.clamp(0, lastIdx);
-        final curDay = model.curDays[idx];
-        final prevDay = model.prevLabelMap[curDay.label];
-        final cur = model.curCumMap[curDay.label];
-        final prev = model.prevCumMap[curDay.label];
-
-        final buckets = <(String, Color, double, double, double, double)>[
-          ('Regular (FTOD)', AppColors.success, _num(prev, 'regular_demand'),
-              _num(prev, 'regular_collection'), _num(cur, 'regular_demand'),
-              _num(cur, 'regular_collection')),
-          ('SMA-0 (1-30)', const Color(0xFF34D399), _num(prev, 'demand_1_30'),
-              _num(prev, 'collection_1_30'), _num(cur, 'demand_1_30'),
-              _num(cur, 'collection_1_30')),
-          ('SMA-1 (31-60)', AppColors.warning, _num(prev, 'demand_31_60'),
-              _num(prev, 'collection_31_60'), _num(cur, 'demand_31_60'),
-              _num(cur, 'collection_31_60')),
-          ('Pre-NPA', const Color(0xFFFB923C), _num(prev, 'pnpa_demand'),
-              _num(prev, 'pnpa_collection'), _num(cur, 'pnpa_demand'),
-              _num(cur, 'pnpa_collection')),
-          ('NPA', AppColors.danger, _num(prev, 'npa_cases'),
-              _num(prev, 'npa_act_acc'), _num(cur, 'npa_cases'),
-              _num(cur, 'npa_act_acc')),
+        return [
+          GlassCard(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _CompareHeader(
+                    head: 'Bucket',
+                    prev: model.months.prev.name,
+                    cur: model.months.cur.name),
+                for (final b in view.buckets)
+                  _CollBucketRow(
+                    name: b.$1,
+                    color: b.$2,
+                    pD: b.$3,
+                    pC: b.$4,
+                    cD: b.$5,
+                    cC: b.$6,
+                  ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(0, 12, 0, 10),
+                  child: Text(
+                    'Figures are the month-to-date balance (demand minus '
+                    'collection) up to the paired day, with collection % '
+                    'below. Days are paired by weekday: the 1st Monday '
+                    'against the 1st Monday.',
+                    style: TextStyle(
+                        fontSize: 12, height: 1.42, color: AppColors.muted),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ];
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _navigator(
-                curDay.label,
-                '${prevDay != null ? _fmtDate(prevDay.date) : 'No data'}  vs  ${_fmtDate(curDay.date)}',
-                idx,
-                lastIdx),
-            const SizedBox(height: 14),
-            _CompareHeader(prev: model.months.prev.name, cur: model.months.cur.name),
-            const SizedBox(height: 8),
-            for (final b in buckets)
-              _CollBucketRow(
-                name: b.$1,
-                color: b.$2,
-                pD: b.$3,
-                pC: b.$4,
-                cD: b.$5,
-                cC: b.$6,
-              ),
-          ],
-        );
       },
     );
   }
 
   /// The whole month at once: every weekday-occurrence label, each month's date
   /// and cumulative regular demand / collection. Sortable by Day or either date.
-  Widget _collectionTable(_CollModel model) {
+  List<Widget> _collectionTable(_CollModel model) {
     const dowOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     final m = model.months;
     final rows = <MisCompareCollRow>[];
@@ -684,19 +886,31 @@ class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
     }
 
     if (rows.isEmpty) {
-      return const MisInlineEmpty('No daily collection data available.');
+      return const [MisInlineEmpty('No daily collection data available.')];
     }
-    return MisCompareCollectionTable(
-      rows: rows,
-      prevMonth: m.prev.name,
-      curMonth: m.cur.name,
-      numberFormat: _fmtNum,
-    );
+    return [
+      ProSectionHeader(
+        title: 'Collection · ${m.prev.name} vs ${m.cur.name}',
+        trailing: const _SwipeHint(),
+      ),
+      MisCompareCollectionTable(
+        rows: rows,
+        prevMonth: m.prev.name,
+        curMonth: m.cur.name,
+        numberFormat: _fmtNum,
+      ),
+      const MisFootNote(
+        'RD regular demand · RC regular collection · FTOD the gap, all '
+        'month-to-date. Faded figures: the current month has not reached that '
+        'day yet, so last month shows for reference only. Tap Day or Date to '
+        'sort.',
+      ),
+    ];
   }
 
   /// Day-of-month rows with each month's accounts and CUMULATIVE amount, so the
   /// last row doubles as the month-to-date total, plus a month-over-month diff.
-  Widget _disbursementTable(_DisbModel model) {
+  List<Widget> _disbursementTable(_DisbModel model) {
     final m = model.months;
     var prevLastDay = 0, curLastDay = 0;
     for (final d in model.prevMap.keys) {
@@ -735,115 +949,375 @@ class _MisComparisonScreenState extends ConsumerState<MisComparisonScreen> {
       ));
     }
 
-    return MisCompareDisbursementTable(
-      rows: rows,
-      prevMonth: m.prev.name,
-      curMonth: m.cur.name,
-      totalPrevAccounts: totPAcc,
-      totalCurAccounts: totCAcc,
-      totalPrevAmount: totPAmt,
-      totalCurAmount: totCAmt,
-      numberFormat: _fmtNum,
-      croreFormat: _fmtCr,
-    );
+    return [
+      ProSectionHeader(
+        title: 'Disbursement · ${m.prev.name} vs ${m.cur.name}',
+        trailing: const _SwipeHint(),
+      ),
+      MisCompareDisbursementTable(
+        rows: rows,
+        prevMonth: m.prev.name,
+        curMonth: m.cur.name,
+        totalPrevAccounts: totPAcc,
+        totalCurAccounts: totCAcc,
+        totalPrevAmount: totPAmt,
+        totalCurAmount: totCAmt,
+        numberFormat: _fmtNum,
+        croreFormat: _fmtCr,
+      ),
+      const MisFootNote(
+        'Amounts are cumulative through the month, so the last row is the '
+        'month total.',
+      ),
+    ];
   }
 
   // Disbursement ---------------------------------------------------------------
 
-  Widget _disbursement() {
-    final async = ref.watch(_disbCompareProvider(_scope));
+  List<Widget> _disbursement(
+      AsyncValue<_DisbModel?> async, _DisbDayView? view) {
     return async.when(
-      loading: () => const AppLoadingBlock(height: 240),
-      error: (e, _) => AppErrorPanel(
-        message: e.toString(),
-        onRetry: () => ref.invalidate(_disbCompareProvider(_scope)),
-      ),
+      loading: () => const [AppLoadingBlock(height: 240)],
+      error: (e, _) => [
+        AppErrorPanel(
+          message: e.toString(),
+          onRetry: () => ref.invalidate(_disbCompareProvider(_scope)),
+        ),
+      ],
       data: (model) {
-        if (model == null || model.days.isEmpty) {
-          return const MisInlineEmpty('No disbursement data available.');
+        if (model == null || model.days.isEmpty || view == null) {
+          return const [MisInlineEmpty('No disbursement data available.')];
         }
         if (_table) return _disbursementTable(model);
-        // Default to the latest current-month day with data.
-        var def = model.days.length - 1;
-        for (var i = model.days.length - 1; i >= 0; i--) {
-          if (model.curMap.containsKey(model.days[i])) {
-            def = i;
-            break;
-          }
-        }
-        final lastIdx = model.days.length - 1;
-        final idx = _dayIdx < 0 ? def : _dayIdx.clamp(0, lastIdx);
-        final day = model.days[idx];
-        final p = model.prevMap[day];
-        final c = model.curMap[day];
+        final p = view.p;
+        final c = view.c;
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _navigator(
-                'Day $day',
-                '${p != null ? '${_ordinal(day)} ${_monthNames[model.months.prev.month]}' : 'No data'}  vs  ${c != null ? '${_ordinal(day)} ${_monthNames[model.months.cur.month]}' : 'No data'}',
-                idx,
-                lastIdx),
-            const SizedBox(height: 14),
-            _CompareHeader(
-                prev: model.months.prev.name, cur: model.months.cur.name),
-            const SizedBox(height: 8),
-            _DisbBucketRow(
-              name: 'Accounts',
-              color: AppColors.primary,
-              pVal: p?.accounts,
-              cVal: c?.accounts,
-              fmt: _fmtNum,
+        return [
+          GlassCard(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _CompareHeader(
+                    head: 'Measure',
+                    prev: model.months.prev.name,
+                    cur: model.months.cur.name),
+                _DisbBucketRow(
+                  name: 'Accounts',
+                  color: AppColors.primary,
+                  pVal: p?.accounts,
+                  cVal: c?.accounts,
+                  fmt: _fmtNum,
+                ),
+                _DisbBucketRow(
+                  name: 'Amount',
+                  color: const Color(0xFFF2B347),
+                  pVal: p?.amount,
+                  cVal: c?.amount,
+                  fmt: _fmtCr,
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(0, 12, 0, 10),
+                  child: Text(
+                    'Disbursement pairs days by date: the 5th against the 5th.',
+                    style: TextStyle(
+                        fontSize: 12, height: 1.42, color: AppColors.muted),
+                  ),
+                ),
+              ],
             ),
-            _DisbBucketRow(
-              name: 'Amount',
-              color: AppColors.warning,
-              pVal: p?.amount,
-              cVal: c?.amount,
-              fmt: _fmtCr,
-            ),
-          ],
-        );
+          ),
+        ];
       },
     );
   }
 }
 
+/// Stat dots: the previous month in a quiet grey, a worse change in red.
+const Color _prevDot = Color(0xFFB9C7CA);
+const Color _badDot = Color(0xFFE5484D);
+
+/// "Regular (FTOD) balance · 3 Sep vs 1 Oct" line above the hero stats.
+class _HeroKicker extends StatelessWidget {
+  const _HeroKicker({required this.left, required this.right});
+  final String left, right;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(
+          child: Text(
+            left,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: Color(0xBDFFFFFF),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Text(
+            right,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+              color: Color(0x94FFFFFF),
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Cards ↔ table toggle on the deep hero.
+class _HeroViewToggle extends StatelessWidget {
+  const _HeroViewToggle({required this.table, required this.onChanged});
+  final bool table;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget btn(IconData icon, bool active, String tip, VoidCallback onTap) =>
+        Tooltip(
+          message: tip,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              width: 38,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: active ? Colors.white : Colors.transparent,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Icon(icon,
+                  size: 18,
+                  color: active ? AppColors.deep : Colors.white70),
+            ),
+          ),
+        );
+    return Container(
+      height: 42,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          btn(Icons.view_agenda_outlined, !table, 'One day at a time',
+              () => onChanged(false)),
+          const SizedBox(width: 2),
+          btn(Icons.table_rows_rounded, table, 'Whole month table',
+              () => onChanged(true)),
+        ],
+      ),
+    );
+  }
+}
+
+/// A labelled dropdown styled for the deep hero: translucent box, small label
+/// above the white value; the open menu stays a plain white list.
+class _HeroDropdown<T> extends StatelessWidget {
+  const _HeroDropdown({
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+  });
+  final String label;
+  final T value;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 50),
+      padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+      alignment: Alignment.centerLeft,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<T>(
+          value: value,
+          isExpanded: true,
+          itemHeight: null,
+          focusColor: Colors.transparent,
+          dropdownColor: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          icon: const Icon(Icons.keyboard_arrow_down_rounded,
+              size: 20, color: Color(0x99FFFFFF)),
+          style: const TextStyle(
+            fontFamily: 'Geist',
+            fontSize: 14.5,
+            fontWeight: FontWeight.w500,
+            color: AppColors.ink,
+          ),
+          selectedItemBuilder: (context) => [
+            for (final item in items)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    maxLines: 1,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      height: 1.3,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0x9EFFFFFF),
+                    ),
+                  ),
+                  DefaultTextStyle.merge(
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      height: 1.36,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                    child: item.child,
+                  ),
+                ],
+              ),
+          ],
+          items: items,
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+}
+
+/// "Swipe for more" hint beside a wide table's title.
+class _SwipeHint extends StatelessWidget {
+  const _SwipeHint();
+
+  @override
+  Widget build(BuildContext context) => const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.swipe_rounded, size: 14, color: AppColors.faint),
+          SizedBox(width: 4),
+          Text('Swipe for more',
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.faint)),
+        ],
+      );
+}
+
 class _CompareHeader extends StatelessWidget {
-  const _CompareHeader({required this.prev, required this.cur});
-  final String prev, cur;
+  const _CompareHeader({
+    required this.head,
+    required this.prev,
+    required this.cur,
+  });
+  final String head, prev, cur;
 
   @override
   Widget build(BuildContext context) {
     Widget h(String t, Color c) => Expanded(
           child: Text(t,
               textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: c,
-                  letterSpacing: 0.5)),
+                  fontSize: 12, fontWeight: FontWeight.w600, color: c)),
         );
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(0, 12, 0, 10),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppColors.hairline)),
+      ),
       child: Row(
         children: [
-          const SizedBox(width: 96),
-          h(prev.toUpperCase(), AppColors.pink),
-          h(cur.toUpperCase(), AppColors.success),
-          const SizedBox(width: 66,
-              child: Text('Δ',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.muted))),
+          SizedBox(
+            width: 96,
+            child: Text(head,
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.muted)),
+          ),
+          h(prev, const Color(0xFF43585D)),
+          h(cur, AppColors.primary),
+          const SizedBox(
+            width: 72,
+            child: Text('Change',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.muted)),
+          ),
         ],
       ),
     );
   }
 }
+
+/// Name cell of a compare row: a short colour bar + the bucket name.
+class _CompareName extends StatelessWidget {
+  const _CompareName({required this.name, required this.color});
+  final String name;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: 96,
+        child: Row(
+          children: [
+            Container(
+              width: 4,
+              height: 30,
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(name,
+                  style: const TextStyle(
+                      fontSize: 13,
+                      height: 1.3,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink)),
+            ),
+          ],
+        ),
+      );
+}
+
+const TextStyle _bigFigure = TextStyle(
+  fontSize: 17,
+  height: 1.3,
+  fontWeight: FontWeight.w600,
+  letterSpacing: -0.3,
+  color: AppColors.ink,
+  fontFeatures: [FontFeature.tabularFigures()],
+);
 
 class _CollBucketRow extends StatelessWidget {
   const _CollBucketRow({
@@ -868,16 +1342,16 @@ class _CollBucketRow extends StatelessWidget {
     Widget side(double bal, double d, double c) => Expanded(
           child: Column(
             children: [
-              Text(_fmtNum(bal),
-                  style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFFEA8C3F))),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(_fmtNum(bal), style: _bigFigure),
+              ),
               Text(_pctStr(d, c),
                   style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: _pctColor(d, c))),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: _pctColor(d, c),
+                      fontFeatures: const [FontFeature.tabularFigures()])),
             ],
           ),
         );
@@ -885,41 +1359,33 @@ class _CollBucketRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.hairline)),
+        border: Border(bottom: BorderSide(color: AppColors.hairlineSoft)),
       ),
       child: Row(
         children: [
-          SizedBox(
-            width: 96,
-            child: Row(
-              children: [
-                Container(width: 4, height: 30, color: color),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(name,
-                      style: const TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.ink)),
-                ),
-              ],
-            ),
-          ),
+          _CompareName(name: name, color: color),
           side(pBal, pD, pC),
           side(cBal, cD, cC),
           SizedBox(
-            width: 66,
+            width: 72,
             child: Column(
               children: [
-                Text(
-                  '${diff < 0 ? '▼ ' : diff > 0 ? '▲ ' : ''}${_fmtNum(diff.abs())}',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: dColor),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    '${diff < 0 ? '▼ ' : diff > 0 ? '▲ ' : ''}${_fmtNum(diff.abs())}',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: dColor,
+                        fontFeatures: const [FontFeature.tabularFigures()]),
+                  ),
                 ),
                 Text(improved ? 'Improved' : 'Higher',
-                    style: TextStyle(fontSize: 8.5, color: dColor)),
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                        color: dColor)),
               ],
             ),
           ),
@@ -945,12 +1411,11 @@ class _DisbBucketRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget side(double? v) => Expanded(
-          child: Text(v != null ? fmt(v) : '-',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFFEA8C3F))),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(v != null ? fmt(v) : '-',
+                textAlign: TextAlign.center, style: _bigFigure),
+          ),
         );
 
     Widget diff() {
@@ -962,53 +1427,44 @@ class _DisbBucketRow extends StatelessWidget {
           children: [
             Text('${d > 0 ? '▲ ' : d < 0 ? '▼ ' : ''}${d.abs().toStringAsFixed(1)}%',
                 style: TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w800, color: color)),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: color,
+                    fontFeatures: const [FontFeature.tabularFigures()])),
             Text(higher ? 'Higher' : 'Lower',
-                style: TextStyle(fontSize: 8.5, color: color)),
+                style: TextStyle(
+                    fontSize: 11.5, fontWeight: FontWeight.w500, color: color)),
           ],
         );
       }
       if (pVal == null && cVal != null) {
         return Text('new',
             style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
                 color: AppColors.primary));
       }
       if (pVal != null && cVal == null) {
         return const Text('missing',
             style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
                 color: AppColors.danger));
       }
-      return const Text('-', style: TextStyle(color: AppColors.muted));
+      return const Text('-', style: TextStyle(color: AppColors.faint));
     }
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.hairline)),
+        border: Border(bottom: BorderSide(color: AppColors.hairlineSoft)),
       ),
       child: Row(
         children: [
-          SizedBox(
-            width: 96,
-            child: Row(
-              children: [
-                Container(width: 4, height: 30, color: color),
-                const SizedBox(width: 8),
-                Text(name,
-                    style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.ink)),
-              ],
-            ),
-          ),
+          _CompareName(name: name, color: color),
           side(pVal),
           side(cVal),
-          SizedBox(width: 66, child: Center(child: diff())),
+          SizedBox(width: 72, child: Center(child: diff())),
         ],
       ),
     );

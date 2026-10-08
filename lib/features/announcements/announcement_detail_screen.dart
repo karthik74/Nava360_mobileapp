@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/env.dart';
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -77,153 +78,168 @@ class AnnouncementDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(announcementDetailProvider(announcementId));
+    final loaded = async.valueOrNull;
+    // Sticky acknowledge bar while an acknowledgement is still owed.
+    final showAckBar = loaded != null &&
+        loaded.requiresAcknowledgement &&
+        !loaded.acknowledged;
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Announcement'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        body: async.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Padding(
-            padding: const EdgeInsets.all(16),
-            child: AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(announcementDetailProvider(announcementId)),
-            ),
+    return Scaffold(
+      appBar: AppBar(title: const Text('Announcement')),
+      body: async.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(announcementDetailProvider(announcementId)),
           ),
-          data: (a) {
-            final images = a.attachments.where(_isImage).toList();
-            final otherAttachments =
-                a.attachments.where((t) => !_isImage(t)).toList();
-            return ListView(
+        ),
+        data: (a) {
+          final images = a.attachments.where(_isImage).toList();
+          final otherAttachments =
+              a.attachments.where((t) => !_isImage(t)).toList();
+          final p = a.priority;
+          return ProPage(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-            children: [
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  if (a.pinned) const StatusPill(label: '📌 Pinned', color: AppColors.pink),
-                  StatusPill(label: a.priority, color: priorityColor(a.priority)),
-                  StatusPill(label: a.category.replaceAll('_', ' '), color: AppColors.muted),
-                  if (a.mandatory) const StatusPill(label: 'Mandatory', color: AppColors.danger),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                a.title,
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.ink),
-              ),
-              const SizedBox(height: 6),
-              Text('Published ${_fmt(a.publishedAt)}',
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-              // ── Image attachments preview FIRST (poster before the body) ──
-              if (images.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                for (final att in images)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _ImageAttachment(
-                      att: att,
-                      // Opens the in-app fullscreen viewer (no browser redirect).
-                      onView: () => _viewImage(context, att),
-                      onOpenExternally: () => _open(context, att),
+            hero: ProHero(
+              children: [
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    if (a.pinned)
+                      const ProHeroTag('Pinned',
+                          tone: ProTagTone.ok, icon: Icons.push_pin_rounded),
+                    ProHeroTag(
+                      _sentence(p),
+                      tone: p == 'URGENT'
+                          ? ProTagTone.bad
+                          : (p == 'HIGH' ? ProTagTone.warn : ProTagTone.neutral),
                     ),
+                    ProHeroTag(_sentence(a.category)),
+                    if (a.mandatory)
+                      const ProHeroTag('Mandatory', tone: ProTagTone.bad),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      a.title,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        height: 1.25,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.55,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Published ${_fmt(a.publishedAt)}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Colors.white70,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+                if (a.requiresAcknowledgement)
+                  ProLiveLine(
+                    text: a.acknowledged
+                        ? 'Acknowledged on ${_fmt(a.acknowledgedAt)}'
+                        : 'Please read and acknowledge this announcement',
+                    color: a.acknowledged
+                        ? AppColors.live
+                        : const Color(0xFFF2B347),
                   ),
               ],
-              const SizedBox(height: 16),
+            ),
+            children: [
+              // ── Image attachments preview FIRST (poster before the body) ──
+              for (final att in images)
+                _ImageAttachment(
+                  att: att,
+                  // Opens the in-app fullscreen viewer (no browser redirect).
+                  onView: () => _viewImage(context, att),
+                  onOpenExternally: () => _open(context, att),
+                ),
               if (a.description != null && a.description!.trim().isNotEmpty)
                 GlassCard(
-                  shadow: AppShadows.soft,
+                  padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
                   // The body is HTML (rich text with inline styles) — render it so
                   // headings, lists, colours and links show as intended. Links open
                   // in the external browser.
                   child: HtmlWidget(
                     a.description!,
-                    textStyle: const TextStyle(fontSize: 14, height: 1.5, color: AppColors.inkSoft),
+                    textStyle: const TextStyle(
+                        fontSize: 15, height: 1.6, color: AppColors.inkSoft),
                     onTapUrl: (url) =>
                         launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
                   ),
                 ),
-              if (otherAttachments.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                const AppSectionHeader(title: 'Attachments'),
-                const SizedBox(height: 8),
-                for (final att in otherAttachments)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: GlassCard(
-                      padding: const EdgeInsets.all(12),
-                      shadow: AppShadows.soft,
-                      child: InkWell(
-                        onTap: () => _open(context, att),
-                        child: Row(
-                          children: [
-                            Icon(att.kind == 'LINK' ? Icons.link_rounded : Icons.description_rounded,
-                                color: AppColors.primary),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(att.fileName ?? att.url,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w600, color: AppColors.ink)),
-                                  if (att.caption != null && att.caption!.isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 2),
-                                      child: Text(att.caption!,
-                                          style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-                                    ),
-                                ],
-                              ),
-                            ),
-                            const Icon(Icons.open_in_new_rounded, size: 18, color: AppColors.muted),
-                          ],
-                        ),
-                      ),
+              if (otherAttachments.isNotEmpty)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ProSectionHeader(
+                      title: 'Attachments · ${otherAttachments.length}',
+                      small: true,
                     ),
-                  ),
-              ],
-              const SizedBox(height: 20),
-              if (a.requiresAcknowledgement)
-                a.acknowledged
-                    ? Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.success.withOpacity(0.08),
-                          borderRadius: BorderRadius.circular(AppRadii.md),
-                          border: Border.all(color: AppColors.success.withOpacity(0.2)),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.verified_rounded, color: AppColors.success, size: 18),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text('Acknowledged on ${_fmt(a.acknowledgedAt)}',
-                                  style: const TextStyle(
-                                      color: AppColors.success, fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 10),
+                    ProListGroup(
+                      children: [
+                        for (final att in otherAttachments)
+                          ProListRow(
+                            leading: ProIconWell(
+                              icon: att.kind == 'LINK'
+                                  ? Icons.link_rounded
+                                  : Icons.description_rounded,
+                              color: att.kind == 'LINK'
+                                  ? AppColors.info
+                                  : AppColors.danger,
                             ),
-                          ],
-                        ),
-                      )
-                    : _AckButton(announcementId: announcementId),
-              if (a.allowComments) ...[
-                const SizedBox(height: 20),
+                            title: att.fileName ?? att.url,
+                            subtitle: att.caption != null &&
+                                    att.caption!.isNotEmpty
+                                ? att.caption
+                                : null,
+                            chevron: false,
+                            trailing: const Icon(Icons.open_in_new_rounded,
+                                size: 18, color: AppColors.faint),
+                            onTap: () => _open(context, att),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              if (a.requiresAcknowledgement && a.acknowledged)
+                ProNote(
+                  'Acknowledged on ${_fmt(a.acknowledgedAt)}',
+                  tone: ProNoteTone.ok,
+                  icon: Icons.verified_rounded,
+                ),
+              if (a.allowComments)
                 _CommentsSection(announcementId: announcementId),
-              ],
             ],
           );
-          },
-        ),
+        },
       ),
+      bottomNavigationBar: showAckBar
+          ? ProBottomBar(
+              children: [_AckButton(announcementId: announcementId)],
+            )
+          : null,
     );
+  }
+
+  /// "HR_NOTICE" → "HR notice", "URGENT" → "Urgent".
+  static String _sentence(String code) {
+    var t = code.replaceAll('_', ' ').toLowerCase();
+    t = t.replaceFirst(RegExp(r'^hr\b'), 'HR');
+    return t.isEmpty ? t : t[0].toUpperCase() + t.substring(1);
   }
 }
 
@@ -250,8 +266,13 @@ class _ImageAttachment extends StatelessWidget {
       children: [
         GestureDetector(
           onTap: onView,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadii.md),
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.hairline),
+            ),
+            clipBehavior: Clip.antiAlias,
             child: Container(
               width: double.infinity,
               constraints: const BoxConstraints(maxHeight: _maxHeight),
@@ -281,8 +302,9 @@ class _ImageAttachment extends StatelessWidget {
                     padding: const EdgeInsets.all(12),
                     child: Row(
                       children: [
-                        const Icon(Icons.image_rounded, color: AppColors.muted),
-                        const SizedBox(width: 8),
+                        const ProIconWell(
+                            icon: Icons.image_rounded, color: AppColors.info),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             att.fileName ?? 'Image',
@@ -304,9 +326,8 @@ class _ImageAttachment extends StatelessWidget {
         ),
         if (att.caption != null && att.caption!.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(top: 4, left: 2),
-            child: Text(att.caption!,
-                style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+            padding: const EdgeInsets.only(top: 6, left: 2),
+            child: Text(att.caption!, style: AppText.caption),
           ),
       ],
     );
@@ -468,61 +489,91 @@ class _CommentsSectionState extends ConsumerState<_CommentsSection> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const AppSectionHeader(title: 'Comments'),
-        const SizedBox(height: 8),
-        if (_loading)
-          const AppLoadingBlock(height: 60)
-        else if (_comments.isEmpty)
-          const Text('No comments yet.', style: TextStyle(color: AppColors.muted))
-        else
-          for (final c in _comments)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: GlassCard(
-                padding: const EdgeInsets.all(12),
-                shadow: AppShadows.soft,
-                child: Column(
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ProSectionHeader(
+            title: 'Comments',
+            trailing: _loading ? null : ProPill.neutral('${_comments.length}'),
+          ),
+          const SizedBox(height: 12),
+          if (_loading)
+            const AppLoadingBlock(height: 60)
+          else if (_comments.isEmpty)
+            const Text('No comments yet.', style: AppText.caption)
+          else
+            for (final c in _comments)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(c.employeeName ?? 'Someone',
-                        style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.ink)),
-                    const SizedBox(height: 2),
-                    Text(c.comment, style: const TextStyle(color: AppColors.inkSoft)),
+                    ProAvatar(name: c.employeeName ?? 'Someone', size: 32),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 9),
+                        decoration: BoxDecoration(
+                          color: AppColors.surfaceAlt,
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(5),
+                            topRight: Radius.circular(14),
+                            bottomRight: Radius.circular(14),
+                            bottomLeft: Radius.circular(14),
+                          ),
+                          border: Border.all(color: AppColors.hairlineSoft),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              c.employeeName ?? 'Someone',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.ink,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              c.comment,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                height: 1.4,
+                                color: AppColors.inkSoft,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
-            ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _ctrl,
-                textCapitalization: TextCapitalization.words,
-                inputFormatters: const [TitleCaseTextFormatter()],
-                decoration: InputDecoration(
-                  hintText: 'Write a comment…',
-                  filled: true,
-                  fillColor: AppColors.surface,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    borderSide: const BorderSide(color: AppColors.hairline),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _ctrl,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [TitleCaseTextFormatter()],
+                  decoration: const InputDecoration(
+                    hintText: 'Write a comment…',
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filled(
-              onPressed: _posting ? null : _post,
-              icon: const Icon(Icons.send_rounded, size: 18),
-            ),
-          ],
-        ),
-      ],
+              const SizedBox(width: 8),
+              IconButton.filled(
+                tooltip: 'Post comment',
+                onPressed: _posting ? null : _post,
+                icon: const Icon(Icons.send_rounded, size: 18),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

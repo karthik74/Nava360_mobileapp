@@ -8,8 +8,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
-import '../../core/widgets.dart';
 import 'whistleblower_models.dart';
 
 /// Evidence picker: record voice, capture/select images, attach PDFs — with
@@ -24,10 +24,7 @@ class EvidenceSection extends StatelessWidget {
     final result = await showModalBottomSheet<EvidenceFile>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.xl)),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (_) => const _RecordVoiceSheet(),
     );
     if (result != null) {
@@ -39,20 +36,47 @@ class EvidenceSection extends StatelessWidget {
   Future<void> _addImage(BuildContext context) async {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
-      backgroundColor: AppColors.surface,
-      builder: (_) => SafeArea(
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: EdgeInsets.fromLTRB(16, 10, 16, MediaQuery.of(context).padding.bottom + 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ListTile(
-              leading: Icon(Icons.photo_camera_rounded, color: AppColors.primary),
-              title: const Text('Take a photo'),
-              onTap: () => Navigator.pop(context, ImageSource.camera),
+            const Center(child: _SheetHandle()),
+            const SizedBox(height: 14),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Text('Add image',
+                  style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.35,
+                      color: AppColors.ink)),
             ),
-            ListTile(
-              leading: Icon(Icons.photo_library_rounded, color: AppColors.primary),
-              title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            const SizedBox(height: 12),
+            ProListGroup(
+              children: [
+                ProListRow(
+                  leading: ProIconWell(icon: Icons.photo_camera_outlined, color: AppColors.primary),
+                  title: 'Take a photo',
+                  onTap: () => Navigator.pop(context, ImageSource.camera),
+                ),
+                ProListRow(
+                  leading: const ProIconWell(icon: Icons.photo_library_outlined, color: AppColors.info),
+                  title: 'Choose from gallery',
+                  onTap: () => Navigator.pop(context, ImageSource.gallery),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
             ),
           ],
         ),
@@ -84,24 +108,45 @@ class EvidenceSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const AppSectionHeader(title: 'Add Proof / Evidence', subtitle: 'Optional — keep it genuine and relevant'),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        const ProSectionHeader(
+          title: 'Add proof or evidence',
+          subtitle: 'Optional — keep it genuine and relevant',
+        ),
+        const SizedBox(height: 12),
+        Row(
           children: [
-            _EvidenceButton(icon: Icons.mic_rounded, label: 'Record Voice', onTap: () => _recordVoice(context)),
-            _EvidenceButton(icon: Icons.add_a_photo_rounded, label: 'Add Image', onTap: () => _addImage(context)),
-            _EvidenceButton(icon: Icons.attach_file_rounded, label: 'Add Document', onTap: () => _addDocument(context)),
+            Expanded(
+              child: _EvidenceButton(
+                  icon: Icons.mic_none_rounded,
+                  label: 'Record voice',
+                  color: AppColors.primary,
+                  onTap: () => _recordVoice(context)),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _EvidenceButton(
+                  icon: Icons.add_a_photo_outlined,
+                  label: 'Add image',
+                  color: AppColors.info,
+                  onTap: () => _addImage(context)),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _EvidenceButton(
+                  icon: Icons.attach_file_rounded,
+                  label: 'Add document',
+                  color: const Color(0xFF4253A8),
+                  onTap: () => _addDocument(context)),
+            ),
           ],
         ),
         if (evidence.isNotEmpty) ...[
           const SizedBox(height: 12),
           for (int i = 0; i < evidence.length; i++)
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: EdgeInsets.only(top: i == 0 ? 0 : 8),
               child: _EvidenceTile(
                 file: evidence[i],
                 onRemove: () {
@@ -116,18 +161,55 @@ class EvidenceSection extends StatelessWidget {
   }
 }
 
+/// White hairline tile with a tinted icon well (Record voice / Add image / …).
 class _EvidenceButton extends StatelessWidget {
-  const _EvidenceButton({required this.icon, required this.label, required this.onTap});
+  const _EvidenceButton({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
   final IconData icon;
   final String label;
+  final Color color;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: onTap,
-      icon: Icon(icon, size: 18),
-      label: Text(label),
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: const BorderSide(color: AppColors.hairline),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 84),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(6, 12, 6, 10),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ProIconWell(icon: icon, color: color, size: 40),
+                const SizedBox(height: 8),
+                Text(
+                  label,
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.inkSoft,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -137,45 +219,91 @@ class _EvidenceTile extends StatelessWidget {
   final EvidenceFile file;
   final VoidCallback onRemove;
 
+  String get _sub {
+    switch (file.category) {
+      case 'image':
+        return 'Photo';
+      case 'audio':
+        final s = file.durationSeconds;
+        if (s == null) return 'Voice message';
+        final m = (s ~/ 60).toString().padLeft(2, '0');
+        final r = (s % 60).toString().padLeft(2, '0');
+        return 'Voice message · $m:$r';
+      default:
+        return 'PDF document';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.all(10),
-      shadow: AppShadows.soft,
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 8, 4, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFA),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.hairline),
+      ),
       child: Row(
         children: [
           if (file.category == 'image')
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
               child: Image.file(File(file.path), width: 44, height: 44, fit: BoxFit.cover),
             )
+          else if (file.category == 'audio')
+            ProIconWell(icon: Icons.graphic_eq_rounded, color: AppColors.primary, size: 44)
           else
             Container(
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(8),
+                color: AppColors.infoTint,
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(
-                file.category == 'audio' ? Icons.graphic_eq_rounded : Icons.picture_as_pdf_rounded,
-                color: AppColors.primary,
+              alignment: Alignment.center,
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.picture_as_pdf_outlined, size: 18, color: AppColors.info),
+                  Text('PDF',
+                      style: TextStyle(
+                          fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.info)),
+                ],
               ),
             ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: file.category == 'audio'
-                ? WbAudioPlayer(path: file.path, label: 'Voice message')
-                : Text(
-                    file.fileName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      WbAudioPlayer(path: file.path, label: 'Voice message'),
+                      if (file.durationSeconds != null)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 38),
+                          child: Text(_sub, style: AppText.caption),
+                        ),
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        file.fileName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 14.5, fontWeight: FontWeight.w500, color: AppColors.ink),
+                      ),
+                      Text(_sub, style: AppText.caption),
+                    ],
                   ),
           ),
           IconButton(
             onPressed: onRemove,
-            icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
+            icon: const Icon(Icons.close_rounded, color: AppColors.muted, size: 20),
             tooltip: 'Remove',
           ),
         ],
@@ -226,17 +354,20 @@ class _WbAudioPlayerState extends State<WbAudioPlayer> {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        InkWell(
-          onTap: _toggle,
-          borderRadius: BorderRadius.circular(20),
-          child: Icon(_playing ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
-              color: AppColors.primary, size: 30),
+        Tooltip(
+          message: _playing ? 'Pause' : 'Play',
+          child: InkWell(
+            onTap: _toggle,
+            borderRadius: BorderRadius.circular(20),
+            child: Icon(_playing ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
+                color: AppColors.primary, size: 30),
+          ),
         ),
         const SizedBox(width: 8),
         Flexible(
           child: Text(widget.label,
               maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink)),
+              style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w500, color: AppColors.ink)),
         ),
       ],
     );
@@ -334,49 +465,95 @@ class _RecordVoiceSheetState extends State<_RecordVoiceSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 10, 20, MediaQuery.of(context).padding.bottom + 24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          const _SheetHandle(),
+          const SizedBox(height: 16),
           if (_error != null) ...[
-            AppErrorPanel(message: _error!),
+            ProNote(_error!, tone: ProNoteTone.warn),
             const SizedBox(height: 14),
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+            ),
           ] else ...[
             const Text('Recording voice message',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.ink)),
+                style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.35,
+                    color: AppColors.ink)),
             const SizedBox(height: 18),
             Container(
-              width: 76,
-              height: 76,
+              width: 84,
+              height: 84,
               decoration: BoxDecoration(
-                color: AppColors.danger.withOpacity(0.12),
+                color: AppColors.primary.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.mic_rounded, color: AppColors.danger, size: 34),
+              child: Icon(Icons.mic_rounded, color: AppColors.primary, size: 36),
             ),
             const SizedBox(height: 12),
             Text(_elapsed,
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.ink)),
+                style: const TextStyle(
+                  fontSize: 32,
+                  height: 1.1,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.6,
+                  color: AppColors.ink,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                )),
+            const SizedBox(height: 6),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_started) const ProPulseDot(color: AppColors.live, size: 7),
+                const SizedBox(width: 4),
+                Text(_started ? 'Recording' : 'Starting…', style: AppText.caption),
+              ],
+            ),
             const SizedBox(height: 20),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton(onPressed: _cancel, child: const Text('Cancel')),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: FilledButton.icon(
                     onPressed: _started ? _stop : null,
                     icon: const Icon(Icons.stop_rounded, size: 18),
-                    label: const Text('Stop & Save'),
+                    label: const Text('Stop & save'),
                   ),
                 ),
               ],
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// 40×5 drag handle for the white bottom sheets.
+class _SheetHandle extends StatelessWidget {
+  const _SheetHandle();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 40,
+      height: 5,
+      decoration: BoxDecoration(
+        color: const Color(0xFFC6D3D6),
+        borderRadius: BorderRadius.circular(5),
       ),
     );
   }

@@ -9,9 +9,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_charts.dart';
+import 'mis_collection_widgets.dart';
 import 'mis_format.dart';
 import 'mis_matrix_table.dart';
 import 'mis_models.dart';
@@ -114,15 +116,37 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
       ];
 
   String get _metricLabel => _money ? 'Amount' : 'Accounts';
+  String get _rangeLabel => _range == 'mtd' ? 'Month-to-date' : 'For the day';
+
+  DisbQuery _overviewQuery(String? activeMonth) => DisbQuery(
+        month: activeMonth,
+        product: _product,
+        region: _region,
+        division: _division,
+        area: _area,
+        branch: _branch,
+      );
+
+  DisbDailyQuery _dailyQuery(String active) => DisbDailyQuery(
+        date: active,
+        range: _range,
+        product: _product,
+        region: _region,
+        division: _division,
+        area: _area,
+        branch: _branch,
+      );
 
   @override
   Widget build(BuildContext context) {
     final monthsAsync = ref.watch(misDisbMonthsProvider);
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('Disbursement')),
+      appBar: AppBar(title: const Text('MIS')),
       body: monthsAsync.when(
-        loading: () => const AppLoadingBlock(height: 240),
+        loading: () => const Padding(
+          padding: EdgeInsets.all(16),
+          child: AppLoadingBlock(height: 240),
+        ),
         error: (e, _) => Padding(
           padding: const EdgeInsets.all(16),
           child: AppErrorPanel(
@@ -139,51 +163,161 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
   }
 
   Widget _scaffold(List<String> months, String? activeMonth) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: EdgeInsets.fromLTRB(
-          16, 12, 16, MediaQuery.of(context).padding.bottom + 24),
-      children: [
-        // Tab + (overview only) month picker. Like the web there is no
-        // cards/table toggle: the drill is always the table, because Accounts,
-        // Amount and ATS only mean something read side by side.
-        Align(
-          alignment: Alignment.centerLeft,
-          child: MisSegmented<bool>(
+    // The hero's headline figures read the SAME summary provider (same family
+    // key) the tab body uses, so they cost no extra request.
+    final dailyDates = _daily
+        ? (ref.watch(misDisbDailyDatesProvider).valueOrNull ?? const <String>[])
+        : const <String>[];
+    final activeDate =
+        dailyDates.isEmpty ? null : (_date ?? dailyDates.first);
+    final DisbSummary? summary = _daily
+        ? (activeDate == null
+            ? null
+            : ref.watch(misDisbDailySummaryProvider(_dailyQuery(activeDate)))
+                .valueOrNull)
+        : ref.watch(misDisbSummaryProvider(_overviewQuery(activeMonth)))
+            .valueOrNull;
+
+    return ProPage(
+      hero: ProHero(
+        titleWidget: MisDeepTitle(title: 'Disbursement', crumbs: _crumbs()),
+        children: [
+          // Tab + (overview only) month picker. Like the web there is no
+          // cards/table toggle: the drill is always the table, because Accounts,
+          // Amount and ATS only mean something read side by side.
+          MisDeepSegmented<bool>(
             options: const [(false, 'Overview'), (true, 'Daily')],
             value: _daily,
             onChanged: (v) => setState(() => _daily = v),
           ),
-        ),
-        const SizedBox(height: 12),
-        if (!_daily)
-          MisMonthPicker(
-            value: activeMonth,
-            available: months,
-            onChanged: (v) => setState(() => _month = v),
+          if (!_daily)
+            MisMonthPicker(
+              value: activeMonth,
+              available: months,
+              onChanged: (v) => setState(() => _month = v),
+            )
+          else if (activeDate != null)
+            _dailyDateRow(dailyDates, activeDate),
+          // Product + metric toggles
+          Row(
+            children: [
+              Expanded(
+                flex: 13,
+                child: MisDeepSegmented<String>(
+                  options: _products,
+                  value: _product,
+                  onChanged: (v) => setState(() => _product = v),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 11,
+                child: MisDeepSegmented<bool>(
+                  options: const [(true, 'Amount'), (false, 'Accounts')],
+                  value: _money,
+                  onChanged: (v) => setState(() => _money = v),
+                ),
+              ),
+            ],
           ),
-        if (!_daily) const SizedBox(height: 12),
-        // Metric + product toggles
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            MisSegmented<bool>(
-              options: const [(true, 'Amount'), (false, 'Accounts')],
-              value: _money,
-              onChanged: (v) => setState(() => _money = v),
+          _heroFigures(summary, _daily ? activeDate : activeMonth),
+        ],
+      ),
+      children: [
+        if (_daily) _dailyTab() else _overviewTab(activeMonth),
+      ],
+    );
+  }
+
+  /// Previous / next day with data, the date picker and the FTD/MTD range.
+  Widget _dailyDateRow(List<String> dates, String active) {
+    final idx = dates.indexOf(active);
+    final older = idx < dates.length - 1;
+    final newer = idx > 0;
+    return Row(
+      children: [
+        Opacity(
+          opacity: older ? 1 : 0.4,
+          child: ProHeroIconButton(
+            icon: Icons.chevron_left_rounded,
+            iconSize: 22,
+            tooltip: 'Previous day',
+            onTap: older ? () => setState(() => _date = dates[idx + 1]) : null,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: MisDatePicker(
+            value: active,
+            available: dates,
+            onChanged: (v) => setState(() => _date = v),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Opacity(
+          opacity: newer ? 1 : 0.4,
+          child: ProHeroIconButton(
+            icon: Icons.chevron_right_rounded,
+            iconSize: 22,
+            tooltip: 'Next day',
+            onTap: newer ? () => setState(() => _date = dates[idx - 1]) : null,
+          ),
+        ),
+        const SizedBox(width: 6),
+        SizedBox(
+          width: 96,
+          child: MisDeepSegmented<String>(
+            options: const [('ftd', 'FTD'), ('mtd', 'MTD')],
+            value: _range,
+            onChanged: (v) => setState(() => _range = v),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Amount (large), Accounts and ATS for the open tab. "—" while loading.
+  Widget _heroFigures(DisbSummary? s, String? period) {
+    final periodLabel = period == null ? null : misPrettyDate(period);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        MisDeepLabel(
+          _daily ? 'Amount · $_rangeLabel' : 'Amount',
+          trailing: periodLabel,
+        ),
+        const SizedBox(height: 2),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            s == null ? '—' : misRupees(s.totalAmount),
+            style: const TextStyle(
+              fontSize: 34,
+              height: 1.2,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -1,
+              color: Colors.white,
+              fontFeatures: [FontFeature.tabularFigures()],
             ),
-            MisSegmented<String>(
-              options: _products,
-              value: _product,
-              onChanged: (v) => setState(() => _product = v),
-            ),
-          ],
+          ),
         ),
         const SizedBox(height: 12),
-        MisBreadcrumb(crumbs: _crumbs()),
-        const SizedBox(height: 14),
-        if (_daily) _dailyTab() else _overviewTab(activeMonth),
+        ProHeroStats(stats: [
+          ProStat(
+            label: _daily ? 'Accounts · $_rangeLabel' : 'Accounts',
+            value: s == null ? '—' : misNum(s.totalCount),
+            sub: periodLabel,
+            dot: const Color(0xFF6CBCCB),
+          ),
+          ProStat(
+            label: _daily ? 'Avg ticket size' : 'ATS',
+            value: s == null ? '—' : misRupees(s.ats),
+            sub: 'Amount ÷ accounts',
+            dot: AppColors.live,
+          ),
+        ]),
       ],
     );
   }
@@ -191,14 +325,7 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
   // ── Overview tab ────────────────────────────────────────────────────────────
 
   Widget _overviewTab(String? activeMonth) {
-    final q = DisbQuery(
-      month: activeMonth,
-      product: _product,
-      region: _region,
-      division: _division,
-      area: _area,
-      branch: _branch,
-    );
+    final q = _overviewQuery(activeMonth);
     final summaryAsync = ref.watch(misDisbSummaryProvider(q));
     final productAsync = ref.watch(misDisbByProductProvider(q));
     final trendAsync = ref.watch(misDisbDailyTrendProvider(DisbTrendQuery(
@@ -209,35 +336,16 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
     )));
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        summaryAsync.when(
-          loading: () => const AppLoadingBlock(height: 120),
-          error: (e, _) => AppErrorPanel(
-            message: e.toString(),
+        // The figures themselves sit in the hero; a failed summary still says so.
+        if (summaryAsync.hasError) ...[
+          AppErrorPanel(
+            message: summaryAsync.error.toString(),
             onRetry: () => ref.invalidate(misDisbSummaryProvider(q)),
           ),
-          data: (s) => MisSnapshotGrid(cards: [
-            MisSnapshotCard(
-                accent: 'sky',
-                icon: Icons.tag_rounded,
-                label: 'Accounts',
-                value: misNum(s.totalCount),
-                sub: misPrettyDate(activeMonth)),
-            MisSnapshotCard(
-                accent: 'amber',
-                icon: Icons.currency_rupee_rounded,
-                label: 'Amount',
-                value: misRupees(s.totalAmount),
-                sub: misPrettyDate(activeMonth)),
-            MisSnapshotCard(
-                accent: 'indigo',
-                icon: Icons.receipt_long_rounded,
-                label: 'ATS',
-                value: misRupees(s.ats)),
-          ]),
-        ),
-        const SizedBox(height: 14),
+          const SizedBox(height: 14),
+        ],
         productAsync.when(
           loading: () => const SizedBox.shrink(),
           error: (_, __) => const SizedBox.shrink(),
@@ -254,31 +362,39 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
             ];
             if (bars.isEmpty) return const SizedBox.shrink();
             return Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: 4),
-              child: GlassCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Daily $_metricLabel',
-                        style: const TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.ink)),
-                    const SizedBox(height: 12),
-                    MisBarChart(bars: bars, money: _money),
-                  ],
-                ),
-              ),
+              padding: const EdgeInsets.only(bottom: 14),
+              child: _chartCard('Daily $_metricLabel', null,
+                  MisBarChart(
+                      bars: bars, money: _money, color: AppColors.primary)),
             );
           },
         ),
-        const SizedBox(height: 14),
-        MisSectionTitle('By ${_levelLabel[_level]!.toLowerCase()}'),
+        const SizedBox(height: 8),
+        _gridHeader('By ${_levelLabel[_level]!.toLowerCase()}'),
+        const SizedBox(height: 10),
         _unitGrid(ref.watch(misDisbUnitsProvider(q)),
             onRetry: () => ref.invalidate(misDisbUnitsProvider(q))),
       ],
     );
   }
+
+  Widget _chartCard(String title, String? subtitle, Widget chart) {
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ProSectionHeader(title: title, subtitle: subtitle),
+          const SizedBox(height: 12),
+          chart,
+        ],
+      ),
+    );
+  }
+
+  Widget _gridHeader(String title) => ProSectionHeader(
+        title: title,
+        subtitle: _canDrill ? 'Tap a row to drill down.' : null,
+      );
 
   Widget _productBreakdown(List<DisbProductRow> products) {
     final rows = products
@@ -302,91 +418,74 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
     final maxV = rows.fold<double>(
         0, (m, p) => (_money ? p.amount : p.count) > m ? (_money ? p.amount : p.count) : m);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (donut.any((s) => s.value > 0))
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (donut.any((s) => s.value > 0)) ...[
+            _chartCard('By product', _metricLabel,
+                MisDonutChart(data: donut, money: _money)),
+            const SizedBox(height: 14),
+          ],
           GlassCard(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('By product · $_metricLabel',
-                    style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.ink)),
-                const SizedBox(height: 12),
-                MisDonutChart(data: donut, money: _money),
+                const ProSectionHeader(title: 'Product breakdown'),
+                const SizedBox(height: 14),
+                for (var i = 0; i < rows.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Container(
+                        width: 9,
+                        height: 9,
+                        decoration: BoxDecoration(
+                            color: rows[i].color, shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(rows[i].name,
+                            style: const TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.ink)),
+                      ),
+                      Text('${misNum(rows[i].count)} · ',
+                          style: const TextStyle(
+                              fontSize: 12.5,
+                              color: AppColors.muted,
+                              fontFeatures: [FontFeature.tabularFigures()])),
+                      Text(misRupees(rows[i].amount),
+                          style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.ink,
+                              fontFeatures: [FontFeature.tabularFigures()])),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ProBar(
+                    value: maxV > 0
+                        ? ((_money ? rows[i].amount : rows[i].count) / maxV)
+                            .clamp(0.0, 1.0)
+                        : 0,
+                    color: rows[i].color,
+                    height: 5,
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    '${total > 0 ? ((_money ? rows[i].amount : rows[i].count) / total * 100).toStringAsFixed(1) : '0'}% of total · ATS ${misRupees(rows[i].ats)}',
+                    textAlign: TextAlign.right,
+                    style: AppText.caption,
+                  ),
+                ],
               ],
             ),
           ),
-        const SizedBox(height: 12),
-        GlassCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Product breakdown',
-                  style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.ink)),
-              const SizedBox(height: 12),
-              for (final p in rows) ...[
-                Row(
-                  children: [
-                    Container(
-                      width: 9,
-                      height: 9,
-                      decoration: BoxDecoration(
-                          color: p.color, shape: BoxShape.circle),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(p.name,
-                          style: const TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.ink)),
-                    ),
-                    Text('${misNum(p.count)} · ',
-                        style: const TextStyle(
-                            fontSize: 11.5, color: AppColors.muted)),
-                    Text(misRupees(p.amount),
-                        style: const TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.ink)),
-                  ],
-                ),
-                const SizedBox(height: 5),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadii.pill),
-                  child: LinearProgressIndicator(
-                    value: maxV > 0
-                        ? ((_money ? p.amount : p.count) / maxV).clamp(0.0, 1.0)
-                        : 0,
-                    minHeight: 5,
-                    backgroundColor: AppColors.hairline,
-                    valueColor: AlwaysStoppedAnimation(p.color),
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Text(
-                      '${total > 0 ? ((_money ? p.amount : p.count) / total * 100).toStringAsFixed(1) : '0'}% of total · ATS ${misRupees(p.ats)}',
-                      style: const TextStyle(
-                          fontSize: 10.5, color: AppColors.muted),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-              ],
-            ],
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -402,87 +501,29 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
       ),
       data: (dates) {
         if (dates.isEmpty) {
-          return const MisInlineEmpty('No daily disbursement data yet.');
+          return const ProEmpty(
+            icon: Icons.event_busy_rounded,
+            title: 'No daily disbursement data yet.',
+          );
         }
         final active = _date ?? dates.first;
-        final idx = dates.indexOf(active);
         final month = active.length >= 7 ? active.substring(0, 7) : null;
-        final dq = DisbDailyQuery(
-          date: active,
-          range: _range,
-          product: _product,
-          region: _region,
-          division: _division,
-          area: _area,
-          branch: _branch,
-        );
+        final dq = _dailyQuery(active);
         final summaryAsync = ref.watch(misDisbDailySummaryProvider(dq));
         final trendAsync = ref.watch(misDisbDailyTrendProvider(
             DisbTrendQuery(month: month, product: _product)));
-        final rangeLabel = _range == 'mtd' ? 'Month-to-date' : 'For the day';
 
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                IconButton(
-                  onPressed: idx < dates.length - 1
-                      ? () => setState(() => _date = dates[idx + 1])
-                      : null,
-                  icon: const Icon(Icons.chevron_left_rounded),
-                ),
-                Expanded(
-                  child: MisDatePicker(
-                    value: active,
-                    available: dates,
-                    onChanged: (v) => setState(() => _date = v),
-                  ),
-                ),
-                IconButton(
-                  onPressed:
-                      idx > 0 ? () => setState(() => _date = dates[idx - 1]) : null,
-                  icon: const Icon(Icons.chevron_right_rounded),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: MisSegmented<String>(
-                options: const [('ftd', 'FTD'), ('mtd', 'MTD')],
-                value: _range,
-                onChanged: (v) => setState(() => _range = v),
-              ),
-            ),
-            const SizedBox(height: 14),
-            summaryAsync.when(
-              loading: () => const AppLoadingBlock(height: 120),
-              error: (e, _) => AppErrorPanel(
-                message: e.toString(),
+            // The figures sit in the hero; a failed summary still says so.
+            if (summaryAsync.hasError) ...[
+              AppErrorPanel(
+                message: summaryAsync.error.toString(),
                 onRetry: () => ref.invalidate(misDisbDailySummaryProvider(dq)),
               ),
-              data: (s) => MisSnapshotGrid(cards: [
-                MisSnapshotCard(
-                    accent: 'sky',
-                    icon: Icons.tag_rounded,
-                    label: 'Accounts · $rangeLabel',
-                    value: misNum(s.totalCount),
-                    sub: misPrettyDate(active)),
-                MisSnapshotCard(
-                    accent: 'amber',
-                    icon: Icons.currency_rupee_rounded,
-                    label: 'Amount · $rangeLabel',
-                    value: misRupees(s.totalAmount),
-                    sub: misPrettyDate(active)),
-                MisSnapshotCard(
-                    accent: 'indigo',
-                    icon: Icons.receipt_long_rounded,
-                    label: 'Avg ticket size',
-                    value: misRupees(s.ats)),
-              ]),
-            ),
-            const SizedBox(height: 14),
+              const SizedBox(height: 14),
+            ],
             trendAsync.when(
               loading: () => const SizedBox.shrink(),
               error: (_, __) => const SizedBox.shrink(),
@@ -493,25 +534,20 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
                         _money ? r.amount : r.count),
                 ];
                 if (bars.isEmpty) return const SizedBox.shrink();
-                return GlassCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Daily disbursement · $_metricLabel',
-                          style: const TextStyle(
-                              fontSize: 13.5,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.ink)),
-                      const SizedBox(height: 12),
-                      MisBarChart(bars: bars, money: _money),
-                    ],
-                  ),
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: _chartCard('Daily disbursement', _metricLabel,
+                      MisBarChart(
+                          bars: bars,
+                          money: _money,
+                          color: AppColors.primary)),
                 );
               },
             ),
-            const SizedBox(height: 14),
-            MisSectionTitle(
-                'By ${_levelLabel[_level]!.toLowerCase()} · $rangeLabel'),
+            const SizedBox(height: 8),
+            _gridHeader(
+                'By ${_levelLabel[_level]!.toLowerCase()} · $_rangeLabel'),
+            const SizedBox(height: 10),
             _unitGrid(ref.watch(misDisbDailyUnitsProvider(dq)),
                 onRetry: () => ref.invalidate(misDisbDailyUnitsProvider(dq))),
           ],
@@ -530,7 +566,10 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
           AppErrorPanel(message: e.toString(), onRetry: onRetry),
       data: (rows) {
         if (rows.isEmpty) {
-          return const MisInlineEmpty('No disbursement at this level.');
+          return const ProEmpty(
+            icon: Icons.table_rows_outlined,
+            title: 'No disbursement at this level.',
+          );
         }
         final isEmp = _level == 'employee';
 
@@ -580,19 +619,18 @@ class _MisDisbursementScreenState extends ConsumerState<MisDisbursementScreen> {
                     MisCell(r.managerName ?? '—', muted: true),
                   MisCell(misNum(r.count)),
                   MisCell(misRupees(r.amount),
-                      color: const Color(0xFF059669),
-                      weight: FontWeight.w700),
+                      color: AppColors.success, weight: FontWeight.w600),
                   MisCell(misRupees(ats(r.amount, r.count))),
                   // Share is BY AMOUNT, disbursement's reporting unit. Accounts
                   // stay on the row, so a branch disbursing many small loans is
                   // visible as a low share against a high count.
                   MisCell(
                     share(r.amount),
-                    weight: FontWeight.w700,
+                    weight: FontWeight.w600,
                     track: totAmount > 0
                         ? (r.amount / totAmount).clamp(0.0, 1.0)
                         : 0,
-                    trackColor: AppColors.warning,
+                    trackColor: AppColors.primary,
                   ),
                 ],
               ),

@@ -16,6 +16,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_charts.dart';
@@ -96,43 +97,49 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
     final async = ref.watch(
         misBranchMatrixProvider(BranchMatrixQuery(fy: _fy, product: _product)));
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 28),
+    return GlassCard(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
               const Expanded(
-                child: Text('Branch Matrix',
-                    style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.ink)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Branch matrix', style: AppText.section),
+                    Text('CEO / Director view · full access only',
+                        style: AppText.caption),
+                  ],
+                ),
               ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Checkbox(
-                    value: _show,
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    onChanged: (v) => setState(() => _show = v ?? false),
-                  ),
-                  const Text('Show data',
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.inkSoft)),
-                ],
+              const SizedBox(width: 8),
+              // Purely a display toggle (see [_show]).
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() => _show = !_show),
+                child: const Text('Show data',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.inkSoft)),
+              ),
+              const SizedBox(width: 6),
+              Switch(
+                value: _show,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onChanged: (v) => setState(() => _show = v),
               ),
             ],
           ),
           if (_show)
             async.when(
-              loading: () => const AppLoadingBlock(height: 240),
+              loading: () => const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: AppLoadingBlock(height: 240),
+              ),
               error: (e, _) => Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.only(top: 12),
                 child: AppErrorPanel(
                   message: e.toString(),
                   onRetry: () => ref.invalidate(misBranchMatrixProvider(
@@ -150,7 +157,7 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
     final metrics = data.metrics;
     if (metrics.isEmpty) {
       return const Padding(
-        padding: EdgeInsets.only(top: 8),
+        padding: EdgeInsets.only(top: 12),
         child: MisInlineEmpty('No branch matrix data available yet.'),
       );
     }
@@ -221,15 +228,15 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
         : list;
 
     return Padding(
-      padding: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.only(top: 12),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
             '${rows.where((b) => !b.isTotal).length} of ${data.branchCount} branches'
             '${data.fyLabel != null ? ' · ${data.fyLabel}' : ''}',
-            style: const TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.muted),
+            style: AppText.caption
+                .copyWith(fontFeatures: const [FontFeature.tabularFigures()]),
           ),
           const SizedBox(height: 10),
 
@@ -250,7 +257,7 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
               if (data.availableFys.length > 1)
                 Expanded(
                   child: MisDropdown<int>(
-                    label: 'Financial Year',
+                    label: 'Financial year',
                     value: _fy ?? data.fy ?? data.availableFys.first,
                     items: [
                       for (final y in data.availableFys)
@@ -259,7 +266,7 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
                     onChanged: (v) => setState(() => _fy = v),
                   ),
                 ),
-              if (data.availableFys.length > 1) const SizedBox(width: 10),
+              if (data.availableFys.length > 1) const SizedBox(width: 8),
               Expanded(
                 child: MisDropdown<String>(
                   label: 'Parameter',
@@ -273,7 +280,7 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
 
           // Two-month comparison — same MisMonthPicker the Dashboard's own
           // Month Highlights table uses. Only these two months (+ Total)
@@ -289,7 +296,7 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
                     onChanged: pickLeft,
                   ),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 8),
                 Expanded(
                   child: MisMonthPicker(
                     label: 'Month 2',
@@ -300,28 +307,15 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
                 ),
               ],
             ),
-          if (months.isNotEmpty) const SizedBox(height: 10),
+          if (months.isNotEmpty) const SizedBox(height: 8),
 
           // Search.
-          TextField(
+          ProSearchField(
             controller: _searchCtrl,
             onChanged: (v) => setState(() => _query = v),
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: 'Search branch / area / division / region…',
-              prefixIcon: const Icon(Icons.search_rounded, size: 18),
-              suffixIcon: _searchCtrl.text.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.close_rounded, size: 16),
-                      onPressed: () {
-                        _searchCtrl.clear();
-                        setState(() => _query = '');
-                      },
-                    ),
-            ),
+            hint: 'Branch, area, division or region',
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
 
           // Region → Division → Area — narrows the branches in the table,
           // same cascading pattern as the rest of the app.
@@ -332,7 +326,7 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
             MisInlineEmpty('No branches match "$_query".')
           else
             Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 _fixedTable(
                     monthCols: shownMonths,
@@ -374,16 +368,18 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
     Widget headerCell(String text, int flex, {bool left = false}) => Expanded(
           flex: flex,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+            padding: EdgeInsets.fromLTRB(left ? 12 : 6, 10, left ? 6 : 10, 10),
             child: Text(
               text,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: left ? TextAlign.left : TextAlign.right,
               style: const TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.muted,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
           ),
         );
@@ -392,20 +388,20 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
       String text,
       int flex, {
       bool left = false,
-      FontWeight weight = FontWeight.w600,
+      FontWeight weight = FontWeight.w400,
       Color? color,
     }) =>
         Expanded(
           flex: flex,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+            padding: EdgeInsets.fromLTRB(left ? 12 : 6, 12, left ? 6 : 10, 12),
             child: Text(
               text,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: left ? TextAlign.left : TextAlign.right,
               style: TextStyle(
-                fontSize: 11.5,
+                fontSize: 13,
                 fontWeight: weight,
                 color: color ?? AppColors.inkSoft,
                 fontFeatures: const [FontFeature.tabularFigures()],
@@ -415,16 +411,17 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
         );
 
     return ClipRRect(
-      borderRadius: BorderRadius.circular(AppRadii.lg),
+      borderRadius: BorderRadius.circular(AppRadii.md),
       child: Container(
         decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadii.md),
           border: Border.all(color: AppColors.hairline),
         ),
         child: Column(
           children: [
-            // AppColors.primary is runtime-brandable, so this can't be const.
             Container(
-              color: AppColors.primary,
+              color: _headBg,
               child: Row(
                 children: [
                   headerCell('Branch', branchFlex, left: true),
@@ -437,11 +434,14 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
             for (var i = 0; i < rows.length; i++)
               Container(
                 decoration: BoxDecoration(
-                  color: rows[i].isTotal
-                      ? const Color(0xFFF4B084)
-                      : (i.isOdd ? AppColors.surfaceAlt : AppColors.surface),
-                  border: const Border(
-                      top: BorderSide(color: Colors.black12)),
+                  color: rows[i].isTotal ? _headBg : AppColors.surface,
+                  border: Border(
+                    top: BorderSide(
+                      color: rows[i].isTotal
+                          ? AppColors.hairline
+                          : AppColors.hairlineSoft,
+                    ),
+                  ),
                 ),
                 child: Row(
                   children: [
@@ -450,8 +450,8 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
                       branchFlex,
                       left: true,
                       weight: rows[i].isTotal
-                          ? FontWeight.w800
-                          : FontWeight.w700,
+                          ? FontWeight.w600
+                          : FontWeight.w500,
                       color: AppColors.ink,
                     ),
                     for (final m in monthCols)
@@ -459,12 +459,13 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
                         _fmtCell(rows[i].cell(m, metric.key), metric.type),
                         numFlex,
                         weight:
-                            rows[i].isTotal ? FontWeight.w800 : FontWeight.w500,
+                            rows[i].isTotal ? FontWeight.w600 : FontWeight.w400,
                       ),
                     dataCell(
                       _fmtCell(rows[i].totals[metric.key], metric.type),
                       numFlex,
-                      weight: FontWeight.w800,
+                      weight: FontWeight.w600,
+                      color: AppColors.ink,
                     ),
                   ],
                 ),
@@ -557,7 +558,7 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
     }
 
     return LayoutBuilder(builder: (context, c) {
-      const gap = 10.0;
+      const gap = 8.0;
       final w = (c.maxWidth - gap) / 2;
       final cells = <Widget>[
         hierDropdown('Region', _region, regions, (o) {
@@ -587,23 +588,17 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
             children: [for (final cell in cells) SizedBox(width: w, child: cell)],
           ),
           if (_region != null) ...[
-            const SizedBox(height: 8),
-            GestureDetector(
-              onTap: () => setState(() {
+            const SizedBox(height: 4),
+            TextButton.icon(
+              onPressed: () => setState(() {
                 _region = _division = _area = null;
               }),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.close_rounded, size: 14, color: AppColors.primary),
-                  const SizedBox(width: 4),
-                  Text('Reset filter',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary)),
-                ],
+              style: TextButton.styleFrom(
+                minimumSize: const Size(0, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 6),
               ),
+              icon: const Icon(Icons.close_rounded, size: 15),
+              label: const Text('Reset filter'),
             ),
           ],
         ],
@@ -611,3 +606,6 @@ class _MisBranchMatrixState extends ConsumerState<MisBranchMatrix> {
     });
   }
 }
+
+/// Header-row fill of the Pro tables.
+const Color _headBg = Color(0xFFF6F8F8);

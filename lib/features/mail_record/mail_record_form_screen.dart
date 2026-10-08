@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
-import '../../core/widgets.dart';
+import '../../core/pro_ui.dart';
 import 'mail_list_screen.dart' show mailBranchesProvider, mailMyBranchIdProvider, mailNewRecordTypeProvider, mailRecordsProvider;
 import 'mail_models.dart';
 import 'mail_repository.dart';
@@ -208,155 +208,199 @@ class _MailRecordFormScreenState extends ConsumerState<MailRecordFormScreen> {
   Widget build(BuildContext context) {
     final df = DateFormat('d MMM yyyy');
     final branchesAsync = ref.watch(mailBranchesProvider);
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Text(_isEdit ? 'Edit Mail Record' : 'New Mail Record'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-          actions: [
-            if (_isEdit)
-              IconButton(
-                onPressed: _delete,
-                icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
-                tooltip: 'Delete',
-              ),
-          ],
-        ),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  _label('Type *'),
-                  SizedBox(
-                    width: double.infinity,
-                    child: SegmentedButton<String>(
-                      segments: const [
-                        ButtonSegment(value: MailType.inward, label: Text('Inward')),
-                        ButtonSegment(value: MailType.outward, label: Text('Outward')),
-                      ],
-                      selected: {_mailType},
-                      onSelectionChanged: (s) => setState(() => _mailType = s.first),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  _label('Date *'),
-                  InkWell(
-                    onTap: _pickDate,
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(AppRadii.md),
-                        border: Border.all(color: AppColors.hairline),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.calendar_today_rounded, size: 15, color: AppColors.primary),
-                          const SizedBox(width: 8),
-                          Text(df.format(_date), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  _label(_mailType == MailType.outward ? 'To *' : 'From *'),
-                  SizedBox(
-                    width: double.infinity,
-                    child: SegmentedButton<bool>(
-                      segments: const [
-                        ButtonSegment(value: false, label: Text('Branch')),
-                        ButtonSegment(value: true, label: Text('Others')),
-                      ],
-                      selected: {_isOther},
-                      onSelectionChanged: (s) => setState(() => _isOther = s.first),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  if (_isOther)
-                    TextField(
-                      controller: _otherParty,
-                      maxLength: 200,
-                      decoration: InputDecoration(
-                        hintText: _mailType == MailType.outward
-                            ? 'Who is this mail going to? (vendor, head office, customer…)'
-                            : 'Who is this mail from? (vendor, head office, customer…)',
-                      ),
-                    )
-                  else
-                    branchesAsync.when(
-                      data: (branches) => DropdownButtonFormField<int>(
-                        isExpanded: true,
-                        value: branches.any((b) => b.id == _branchId) ? _branchId : null,
-                        items: [
-                          for (final b in branches)
-                            DropdownMenuItem(value: b.id, child: Text(b.label, overflow: TextOverflow.ellipsis)),
-                        ],
-                        onChanged: (v) => setState(() => _branchId = v),
-                      ),
-                      loading: () => const LinearProgressIndicator(),
-                      error: (e, _) => Text('$e', style: const TextStyle(color: AppColors.danger, fontSize: 12)),
-                    ),
-                  const SizedBox(height: 10),
-                  _label('Employee ID'),
-                  TextField(
-                    controller: _employeeId,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(hintText: 'Optional'),
-                  ),
-                  const SizedBox(height: 10),
-                  _label('Department'),
-                  TextField(controller: _department),
-                  const SizedBox(height: 10),
-                  _label('Docket number'),
-                  TextField(controller: _docketNumber),
-                  const SizedBox(height: 10),
-                  _label('Documents'),
-                  TextField(controller: _documents),
-                  const SizedBox(height: 10),
-                  _label('Courier status'),
-                  TextField(controller: _courierStatus),
-                  const SizedBox(height: 10),
-                  if (_mailType == MailType.outward) ...[
-                    _label('Amount (₹)'),
-                    TextField(
-                      controller: _amount,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(hintText: 'Optional'),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  _label('Particular'),
-                  TextField(controller: _particular),
-                  const SizedBox(height: 10),
-                  _label('Details'),
-                  TextField(controller: _details, minLines: 2, maxLines: 5),
-                  if (_error != null) ...[
-                    const SizedBox(height: 14),
-                    AppErrorPanel(message: _error!),
-                  ],
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    height: 50,
-                    child: FilledButton(
-                      onPressed: _saving ? null : _save,
-                      child: Text(_saving ? 'Saving…' : (_isEdit ? 'Save changes' : 'Create entry')),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                ],
-              ),
+    final isOutward = _mailType == MailType.outward;
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: _isEdit ? 'Edit mail record' : 'New mail record',
+        subtitle: 'Mail record · ${isOutward ? 'outward' : 'inward'} register',
+        actions: [
+          if (_isEdit)
+            IconButton(
+              onPressed: _delete,
+              icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
+              tooltip: 'Delete',
+            ),
+          const SizedBox(width: 8),
+        ],
       ),
+      bottomNavigationBar: _loading
+          ? null
+          : ProBottomBar(
+              children: [
+                FilledButton(
+                  onPressed: _saving ? null : _save,
+                  child: Text(_saving ? 'Saving…' : (_isEdit ? 'Save changes' : 'Create entry')),
+                ),
+              ],
+            ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              children: [
+                GlassCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const ProSectionHeader(title: 'Entry'),
+                      const SizedBox(height: 12),
+                      ProField(
+                        label: 'Type',
+                        required: true,
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<String>(
+                            segments: const [
+                              ButtonSegment(
+                                  value: MailType.inward,
+                                  icon: Icon(Icons.south_west_rounded, size: 17),
+                                  label: Text('Inward')),
+                              ButtonSegment(
+                                  value: MailType.outward,
+                                  icon: Icon(Icons.north_east_rounded, size: 17),
+                                  label: Text('Outward')),
+                            ],
+                            selected: {_mailType},
+                            onSelectionChanged: (s) => setState(() => _mailType = s.first),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      ProField(
+                        label: 'Date',
+                        required: true,
+                        child: InkWell(
+                          onTap: _pickDate,
+                          borderRadius: BorderRadius.circular(12),
+                          child: InputDecorator(
+                            decoration: InputDecoration(
+                              prefixIcon: Icon(Icons.calendar_today_rounded, size: 17, color: AppColors.primary),
+                              suffixIcon: const Icon(Icons.expand_more_rounded),
+                            ),
+                            child: Text(df.format(_date),
+                                style: const TextStyle(fontSize: 15, color: AppColors.ink)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      ProField(
+                        label: isOutward ? 'To' : 'From',
+                        required: true,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SegmentedButton<bool>(
+                              segments: const [
+                                ButtonSegment(value: false, label: Text('Branch')),
+                                ButtonSegment(value: true, label: Text('Others')),
+                              ],
+                              selected: {_isOther},
+                              onSelectionChanged: (s) => setState(() => _isOther = s.first),
+                            ),
+                            const SizedBox(height: 10),
+                            if (_isOther)
+                              TextField(
+                                controller: _otherParty,
+                                maxLength: 200,
+                                decoration: InputDecoration(
+                                  hintText: isOutward
+                                      ? 'Who is this mail going to? (vendor, head office, customer…)'
+                                      : 'Who is this mail from? (vendor, head office, customer…)',
+                                ),
+                              )
+                            else
+                              branchesAsync.when(
+                                data: (branches) => DropdownButtonFormField<int>(
+                                  isExpanded: true,
+                                  value: branches.any((b) => b.id == _branchId) ? _branchId : null,
+                                  hint: const Text('Select a branch'),
+                                  items: [
+                                    for (final b in branches)
+                                      DropdownMenuItem(value: b.id, child: Text(b.label, overflow: TextOverflow.ellipsis)),
+                                  ],
+                                  onChanged: (v) => setState(() => _branchId = v),
+                                ),
+                                loading: () => const LinearProgressIndicator(),
+                                error: (e, _) =>
+                                    Text('$e', style: const TextStyle(color: AppColors.danger, fontSize: 12.5)),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                GlassCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const ProSectionHeader(title: 'Details'),
+                      const SizedBox(height: 12),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: ProField(
+                              label: 'Employee ID',
+                              child: TextField(
+                                controller: _employeeId,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(hintText: 'Optional'),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ProField(label: 'Department', child: TextField(controller: _department)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: ProField(label: 'Docket number', child: TextField(controller: _docketNumber)),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ProField(label: 'Courier status', child: TextField(controller: _courierStatus)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      ProField(label: 'Documents', child: TextField(controller: _documents)),
+                      if (isOutward) ...[
+                        const SizedBox(height: 14),
+                        ProField(
+                          label: 'Amount (₹)',
+                          child: TextField(
+                            controller: _amount,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            style: AppText.number.copyWith(fontSize: 15, color: AppColors.ink),
+                            decoration: const InputDecoration(hintText: 'Optional', prefixText: '₹ '),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 14),
+                      ProField(label: 'Particular', child: TextField(controller: _particular)),
+                      const SizedBox(height: 14),
+                      ProField(
+                        label: 'Details',
+                        child: TextField(controller: _details, minLines: 2, maxLines: 5),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 14),
+                  ProNote(_error!, tone: ProNoteTone.bad),
+                ],
+              ],
+            ),
     );
   }
-
-  Widget _label(String t) => Padding(
-        padding: const EdgeInsets.only(bottom: 4, top: 4),
-        child: Text(t,
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
-      );
 }

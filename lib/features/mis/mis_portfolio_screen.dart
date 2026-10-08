@@ -6,10 +6,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_charts.dart';
 import 'mis_clients_screen.dart';
+import 'mis_collection_widgets.dart';
 import 'mis_format.dart';
 import 'mis_matrix_table.dart';
 import 'mis_models.dart';
@@ -108,10 +110,12 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
   Widget build(BuildContext context) {
     final monthsAsync = ref.watch(misPortfolioMonthsProvider);
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('Portfolio')),
+      appBar: AppBar(title: const Text('MIS')),
       body: monthsAsync.when(
-        loading: () => const AppLoadingBlock(height: 240),
+        loading: () => const Padding(
+          padding: EdgeInsets.all(16),
+          child: AppLoadingBlock(height: 240),
+        ),
         error: (e, _) => Padding(
           padding: const EdgeInsets.all(16),
           child: AppErrorPanel(
@@ -137,56 +141,155 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
       branch: _branch,
     );
     final summaryAsync = ref.watch(misPortfolioSummaryProvider(q));
+    // The hero reads the same summary the bucket table shows (an opened
+    // officer's comes from the drill row).
+    final heroSummary =
+        _empRow != null ? _empRow!.toSummary() : summaryAsync.valueOrNull;
 
-    return RefreshIndicator(
-      color: AppColors.primary,
+    return ProPage(
       onRefresh: () async {
         ref.invalidate(misPortfolioSummaryProvider(q));
         ref.invalidate(misPortfolioUnitsProvider(q));
       },
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(
-            16, 12, 16, MediaQuery.of(context).padding.bottom + 24),
-        children: [
-          // No cards/table toggle, matching the web: the drill is always the
-          // table, so units line up for comparison down a column.
-          MisMonthPicker(
+      hero: ProHero(
+        titleWidget: MisDeepTitle(title: 'Portfolio', crumbs: _crumbs()),
+        // No cards/table toggle, matching the web: the drill is always the
+        // table, so units line up for comparison down a column.
+        overlap: MisLiftedField(
+          child: MisMonthPicker(
             value: activeMonth,
             available: months,
             onChanged: (v) => setState(() => _month = v),
           ),
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: MisSegmented<String>(
-              options: _products,
-              value: _product,
-              onChanged: (v) => setState(() => _product = v),
-            ),
+        ),
+        children: [
+          MisDeepSegmented<String>(
+            options: _products,
+            value: _product,
+            onChanged: (v) => setState(() => _product = v),
           ),
-          const SizedBox(height: 12),
-          MisBreadcrumb(crumbs: _crumbs()),
-          const SizedBox(height: 14),
-          if (_empRow != null)
-            // An opened field officer is a leaf: show that FO's bucket-wise
-            // portfolio (built from the drill row) and no further drill grid.
-            _summary(_empRow!.toSummary(), activeMonth)
-          else ...[
-            summaryAsync.when(
-              loading: () => const AppLoadingBlock(height: 200),
-              error: (e, _) => AppErrorPanel(
-                message: e.toString(),
-                onRetry: () => ref.invalidate(misPortfolioSummaryProvider(q)),
-              ),
-              data: (s) => _summary(s, activeMonth),
-            ),
-            const SizedBox(height: 18),
-            MisSectionTitle('By ${_levelLabel[q.level]!.toLowerCase()}'),
-            _grid(q),
-          ],
+          _heroFigures(heroSummary),
         ],
       ),
+      children: [
+        if (_empRow != null)
+          // An opened field officer is a leaf: show that FO's bucket-wise
+          // portfolio (built from the drill row) and no further drill grid.
+          _summary(_empRow!.toSummary(), activeMonth)
+        else ...[
+          summaryAsync.when(
+            loading: () => const AppLoadingBlock(height: 200),
+            error: (e, _) => AppErrorPanel(
+              message: e.toString(),
+              onRetry: () => ref.invalidate(misPortfolioSummaryProvider(q)),
+            ),
+            data: (s) => _summary(s, activeMonth),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 8),
+              ProSectionHeader(
+                title: 'By ${_levelLabel[q.level]!.toLowerCase()}',
+                subtitle: 'Tap a row to drill down. Swipe the table for '
+                    'every band.',
+              ),
+              const SizedBox(height: 10),
+              _grid(q),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// Grand-total POS, accounts and the bucket share bar for the hero — the
+  /// same figures as the bucket table's Grand Total row. "—" while loading.
+  Widget _heroFigures(PortfolioSummary? s) {
+    double amt(String k) => s?.amt(k) ?? 0;
+    const buckets = ['regular', 'sma0', 'sma1', 'pnpa', 'npa'];
+    final total = amt('total');
+    final accTotal =
+        buckets.fold<double>(0, (sum, k) => sum + amt('${k}_acc'));
+    final hasAcc = accTotal > 0;
+    String pct(double v) =>
+        total > 0 ? '${(v / total * 100).toStringAsFixed(1)}%' : '-';
+    final shares = [
+      for (final st in _status)
+        if (st.$1 != 'total' && amt(st.$1) > 0)
+          (key: st.$1, label: st.$2, value: amt(st.$1)),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        MisDeepLabel(
+          _empName != null ? 'Portfolio — $_empName' : 'Bucket-wise portfolio',
+        ),
+        const SizedBox(height: 8),
+        ProHeroStats(stats: [
+          ProStat(
+            label: 'Grand total POS',
+            value: s == null ? '—' : misRupees(total),
+            sub: 'All buckets',
+            dot: const Color(0xFF8FD0DB),
+          ),
+          ProStat(
+            label: 'Accounts',
+            value: s == null ? '—' : (hasAcc ? misNum(accTotal) : '—'),
+            sub: s == null
+                ? null
+                : (hasAcc ? 'NPA ${pct(amt('npa'))} of POS' : 'no PAR data'),
+            dot: AppColors.live,
+          ),
+        ]),
+        if (shares.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          ProStackBar(
+            height: 8,
+            parts: [
+              for (final b in shares)
+                MapEntry(b.value, MisPalette.risk(b.key)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 12,
+            runSpacing: 6,
+            children: [
+              for (final b in shares)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                          color: MisPalette.risk(b.key),
+                          shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      '${b.label} ',
+                      style: const TextStyle(
+                          fontSize: 12, color: Colors.white70),
+                    ),
+                    Text(
+                      pct(b.value),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 
@@ -249,7 +352,7 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
         total > 0 ? '${(v / total * 100).toStringAsFixed(2)}%' : '-';
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Snapshot cards — all hidden for now (commented per request).
         // Uncomment the whole grid to restore.
@@ -272,13 +375,16 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
         //       label: 'POS (Amount)',
         //       value: misRupees(total)),
         // ]),
-        const SizedBox(height: 18),
-        MisCcTitle(_empName != null
-            ? 'Bucket-wise Portfolio — $_empName'
-            : 'Bucket-wise Portfolio'),
+        ProSectionHeader(
+          title: _empName != null
+              ? 'Bucket-wise portfolio — $_empName'
+              : 'Bucket-wise portfolio',
+          subtitle: activeMonth == null ? null : misMonthLabel(activeMonth),
+        ),
+        const SizedBox(height: 10),
         MisMatrixTable(
           stubHeader: 'Bucket',
-          headers: const ['Accounts', 'POS (Amount)', '% Contrib'],
+          headers: const ['Accounts', 'POS (amount)', '% contrib'],
           rows: [
             for (final st in _status)
               MisMatrixRow(
@@ -293,53 +399,50 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
                   MisCell(misRupees(amt(st.$1))),
                   MisCell(
                     st.$1 == 'total' ? '100%' : pctContrib(amt(st.$1)),
-                    color: MisPalette.risk(st.$1),
-                    weight: FontWeight.w800,
+                    color: st.$1 == 'total' ? null : MisPalette.risk(st.$1),
+                    weight: FontWeight.w600,
                   ),
                 ],
               ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 22),
         // Every bucket — Grand Total included — carries a "Customer details"
         // button that opens the individual clients (loan accounts) in it, for
         // whatever scope is currently open. Mirrors the web's per-row button;
         // on a phone they sit under the table so the table stays readable.
-        const Text(
-          'Customer details',
-          style: TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w800,
-              color: AppColors.muted),
-        ),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final st in _status)
-              OutlinedButton.icon(
-                onPressed: () => _openClients(
-                  st.$1,
-                  st.$2,
-                  activeMonth,
-                  hasAcc
-                      ? (st.$1 == 'total'
-                          ? bucketAccTotal
-                          : bucketAcc(st.$1))
-                      : null,
-                ),
-                icon: Icon(Icons.groups_rounded,
-                    size: 15, color: MisPalette.risk(st.$1)),
-                label: Text(st.$2, style: const TextStyle(fontSize: 12)),
-                style: OutlinedButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  foregroundColor: AppColors.inkSoft,
-                  side: const BorderSide(color: AppColors.hairline),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
+        GlassCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const ProSectionHeader(
+                title: 'Customer details',
+                subtitle: 'Open the customer list for a bucket',
               ),
-          ],
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final st in _status)
+                    _BucketChip(
+                      label: st.$2,
+                      color: MisPalette.risk(st.$1),
+                      onTap: () => _openClients(
+                        st.$1,
+                        st.$2,
+                        activeMonth,
+                        hasAcc
+                            ? (st.$1 == 'total'
+                                ? bucketAccTotal
+                                : bucketAcc(st.$1))
+                            : null,
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -358,7 +461,10 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
       ),
       data: (rows) {
         if (rows.isEmpty) {
-          return const MisInlineEmpty('No portfolio at this level.');
+          return const ProEmpty(
+            icon: Icons.table_rows_outlined,
+            title: 'No portfolio at this level.',
+          );
         }
         // Per-bucket account counts come from the PAR load and only exist for
         // months whose PAR was ingested. When the whole grid has none, show "—"
@@ -392,13 +498,13 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
         ) =>
             [
               MisCell(hasAcc ? misNum(ra) : '—'),
-              MisCell(misRupees(rp), color: const Color(0xFF059669)),
+              MisCell(misRupees(rp), color: AppColors.ink),
               MisCell(hasAcc ? misNum(da) : '—'),
-              MisCell(misRupees(dp), color: const Color(0xFF059669)),
+              MisCell(misRupees(dp), color: AppColors.ink),
               MisCell(hasAcc ? misNum(na) : '—'),
-              MisCell(misRupees(np), color: const Color(0xFF059669)),
+              MisCell(misRupees(np), color: AppColors.ink),
               MisCell(hasAcc ? misNum(ra + da + na) : '—'),
-              MisCell(misRupees(tp), weight: FontWeight.w800),
+              MisCell(misRupees(tp), weight: FontWeight.w600),
             ];
 
         return MisMatrixTable(
@@ -436,6 +542,49 @@ class _MisPortfolioScreenState extends ConsumerState<MisPortfolioScreen> {
           ],
         );
       },
+    );
+  }
+}
+
+/// "Customer details" link for one bucket: a white pill with the bucket's
+/// colour on the icon.
+class _BucketChip extends StatelessWidget {
+  const _BucketChip({
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.surface,
+      shape: const StadiumBorder(side: BorderSide(color: Color(0xFFDBE3E5))),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(11, 8, 13, 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.groups_rounded, size: 16, color: color),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.inkSoft,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

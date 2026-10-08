@@ -8,8 +8,10 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/api_client.dart';
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
+import '../../core/widgets.dart';
 import 'profile_repository.dart';
 
 /// My Profile → My documents: lists the signed-in employee's documents and
@@ -25,6 +27,7 @@ class _MyDocumentsScreenState extends ConsumerState<MyDocumentsScreen> {
   List<EmployeeDocument>? _docs;
   String? _error;
   int? _openingId; // document currently being downloaded for preview
+  int _filter = 0; // 0 all · 1 PDF · 2 images · 3 other (in-memory filter)
 
   @override
   void initState() {
@@ -84,54 +87,117 @@ class _MyDocumentsScreenState extends ConsumerState<MyDocumentsScreen> {
   @override
   Widget build(BuildContext context) {
     final docs = _docs;
+    final all = docs ?? const <EmployeeDocument>[];
+    final pdfs = all.where((d) => d.isPdf).length;
+    final images = all.where((d) => d.isImage).length;
+    final others = all.length - pdfs - images;
+    final latest = all.isEmpty
+        ? null
+        : all.reduce((a, b) {
+            final ad = a.createdAt, bd = b.createdAt;
+            if (ad == null) return b;
+            if (bd == null) return a;
+            return bd.isAfter(ad) ? b : a;
+          });
+    final shown = switch (_filter) {
+      1 => all.where((d) => d.isPdf).toList(),
+      2 => all.where((d) => d.isImage).toList(),
+      3 => all.where((d) => !d.isPdf && !d.isImage).toList(),
+      _ => all,
+    };
+
     return Scaffold(
-      appBar: AppBar(title: const Text('My documents')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _startUpload,
-        icon: const Icon(Icons.upload_file_rounded),
-        label: const Text('Upload'),
+      appBar: AppBar(title: const Text('Documents')),
+      bottomNavigationBar: ProBottomBar(
+        children: [
+          FilledButton.icon(
+            onPressed: _startUpload,
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+            icon: const Icon(Icons.upload_file_rounded, size: 19),
+            label: const Text('Upload document'),
+          ),
+        ],
       ),
-      body: docs == null
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: docs.isEmpty
-                  ? ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      children: [
-                        const SizedBox(height: 120),
-                        Icon(Icons.folder_open_rounded,
-                            size: 56, color: AppColors.muted.withOpacity(0.6)),
-                        const SizedBox(height: 12),
-                        Center(
-                          child: Text(
-                            _error ?? 'No documents yet.\nTap Upload to add one.',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                                color: AppColors.muted, fontSize: 14),
-                          ),
-                        ),
-                      ],
-                    )
-                  : ListView.separated(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-                      itemCount: docs.length + (_error != null ? 1 : 0),
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (context, i) {
-                        if (_error != null && i == 0) {
-                          return Text(_error!,
-                              style: const TextStyle(color: AppColors.danger));
-                        }
-                        final doc = docs[i - (_error != null ? 1 : 0)];
-                        return _DocumentCard(
-                          doc: doc,
-                          opening: _openingId == doc.id,
-                          onTap: () => _openDocument(doc),
-                        );
-                      },
-                    ),
+      body: ProPage(
+        onRefresh: _load,
+        hero: ProHero(
+          title: 'My documents',
+          subtitle: docs == null
+              ? 'In your employee file'
+              : 'In your employee file · ${all.length} '
+                  '${all.length == 1 ? 'document' : 'documents'}',
+          children: [
+            ProHeroStats(
+              stats: [
+                ProStat(
+                  label: 'Uploaded',
+                  value: docs == null ? '–' : '${all.length}',
+                  sub: 'on file',
+                  dot: AppColors.live,
+                ),
+                ProStat(
+                  label: 'PDFs',
+                  value: docs == null ? '–' : '$pdfs',
+                  sub: 'PDF files',
+                  dot: const Color(0xFFF2B347),
+                ),
+                ProStat(
+                  label: 'Latest',
+                  value: latest?.createdAt == null
+                      ? '—'
+                      : DateFormat('dd MMM').format(latest!.createdAt!),
+                  sub: latest?.docTypeLabel ?? 'nothing yet',
+                  dot: const Color(0xFF6CC3D5),
+                ),
+              ],
             ),
+          ],
+        ),
+        children: [
+          if (docs == null) ...const [
+            AppLoadingBlock(height: 72),
+            AppLoadingBlock(height: 72),
+          ] else ...[
+            if (_error != null) ProNote(_error!, tone: ProNoteTone.bad),
+            if (all.isEmpty)
+              ProEmpty(
+                icon: Icons.folder_open_rounded,
+                title: 'No documents yet',
+                message: _error == null ? 'Tap Upload to add one.' : null,
+              )
+            else ...[
+              ProChipBar(
+                labels: const ['All', 'PDF', 'Images', 'Other'],
+                counts: [all.length, pdfs, images, others],
+                selected: _filter,
+                onSelected: (i) => setState(() => _filter = i),
+                bleed: 0,
+              ),
+              ProSectionHeader(
+                title: '${const ['All documents', 'PDF', 'Images', 'Other'][_filter]} · ${shown.length}',
+                small: true,
+              ),
+              if (shown.isEmpty)
+                const ProEmpty(
+                  icon: Icons.filter_alt_off_outlined,
+                  title: 'Nothing in this filter',
+                  message: 'Switch to All to see every document.',
+                )
+              else
+                ProListGroup(
+                  children: [
+                    for (final doc in shown)
+                      _DocumentCard(
+                        doc: doc,
+                        opening: _openingId == doc.id,
+                        onTap: () => _openDocument(doc),
+                      ),
+                  ],
+                ),
+            ],
+          ],
+        ],
+      ),
     );
   }
 }
@@ -153,6 +219,12 @@ class _DocumentCard extends StatelessWidget {
     return Icons.description_outlined;
   }
 
+  Color get _tone {
+    if (doc.isImage) return AppColors.info;
+    if (doc.isPdf) return AppColors.danger;
+    return AppColors.primary;
+  }
+
   static String _size(int bytes) {
     if (bytes >= 1024 * 1024) {
       return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
@@ -166,75 +238,28 @@ class _DocumentCard extends StatelessWidget {
     final date = doc.createdAt != null
         ? DateFormat('dd MMM yyyy').format(doc.createdAt!)
         : null;
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(AppRadii.md),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            border: Border.all(color: AppColors.muted.withOpacity(0.18)),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: opening
-                    ? const Padding(
-                        padding: EdgeInsets.all(11),
-                        child: CircularProgressIndicator(strokeWidth: 2.2),
-                      )
-                    : Icon(_icon, color: AppColors.primary, size: 22),
+    return ProListRow(
+      leading: opening
+          ? Container(
+              width: 34,
+              height: 34,
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(
+                color: _tone.withOpacity(0.11),
+                borderRadius: BorderRadius.circular(10),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      doc.docTypeLabel,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14.5,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      doc.label?.isNotEmpty == true
-                          ? '${doc.label} · ${doc.fileName}'
-                          : doc.fileName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 12.5, color: AppColors.muted),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      [
-                        _size(doc.sizeBytes),
-                        if (date != null) date,
-                      ].join(' · '),
-                      style: const TextStyle(
-                          fontSize: 11.5, color: AppColors.muted),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded,
-                  color: AppColors.muted, size: 20),
-            ],
-          ),
-        ),
-      ),
+              child: CircularProgressIndicator(strokeWidth: 2, color: _tone),
+            )
+          : ProIconWell(icon: _icon, color: _tone),
+      title: doc.docTypeLabel,
+      subtitle: doc.label?.isNotEmpty == true
+          ? '${doc.label} · ${doc.fileName}'
+          : doc.fileName,
+      meta: [
+        _size(doc.sizeBytes),
+        if (date != null) date,
+      ].join(' · '),
+      onTap: onTap,
     );
   }
 }
@@ -402,162 +427,194 @@ class _UploadDocumentSheetState extends ConsumerState<_UploadDocumentSheet> {
   Widget build(BuildContext context) {
     final types = _types;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final safeBottom = MediaQuery.of(context).padding.bottom;
     return Container(
-      margin: const EdgeInsets.all(12),
-      padding: EdgeInsets.fromLTRB(20, 18, 20, 18 + bottomInset),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Text(
-            'Upload document',
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-              color: AppColors.ink,
-            ),
-          ),
-          const SizedBox(height: 16),
-          if (types == null)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: CircularProgressIndicator(),
-              ),
-            )
-          else ...[
-            DropdownButtonFormField<String>(
-              value: _selectedType,
-              items: types
-                  .map((t) => DropdownMenuItem(
-                        value: t.code,
-                        child: Text(t.label,
-                            overflow: TextOverflow.ellipsis),
-                      ))
-                  .toList(),
-              onChanged: _busy
-                  ? null
-                  : (v) => setState(() {
-                        _selectedType = v;
-                        // The new type may ask for different details, or none.
-                        _documentNumber.clear();
-                        _startDate = null;
-                        _endDate = null;
-                        _error = null;
-                      }),
-              decoration: const InputDecoration(
-                labelText: 'Document type *',
-                border: OutlineInputBorder(),
-              ),
-            ),
-
-            // Extra details this document type is configured to capture. The
-            // server rejects the upload without them, so they are mandatory here.
-            if (_selected?.capturesExtraFields == true) ...[
-              const SizedBox(height: 14),
-              if (_selected!.requiresDocumentNumber)
-                TextField(
-                  controller: _documentNumber,
-                  enabled: !_busy,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    labelText: 'Document number *',
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (_) => setState(() => _error = null),
+      padding: EdgeInsets.fromLTRB(20, 10, 20, 16 + bottomInset + safeBottom),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFC6D3D6),
+                  borderRadius: BorderRadius.circular(5),
                 ),
-              if (_selected!.requiresStartDate) ...[
-                const SizedBox(height: 12),
-                _DateRow(
-                  label: 'Start date *',
-                  value: _startDate == null ? null : _iso(_startDate!),
-                  enabled: !_busy,
-                  onTap: () => _pickDate(start: true),
-                ),
-              ],
-              if (_selected!.requiresEndDate) ...[
-                const SizedBox(height: 12),
-                _DateRow(
-                  label: 'End date *',
-                  value: _endDate == null ? null : _iso(_endDate!),
-                  enabled: !_busy,
-                  onTap: () => _pickDate(start: false),
-                ),
-              ],
-            ],
-
-            const SizedBox(height: 14),
-            TextField(
-              controller: _label,
-              enabled: !_busy,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
-              decoration: const InputDecoration(
-                labelText: 'Label (optional)',
-                hintText: 'e.g. Front Side',
-                border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 14),
-            OutlinedButton.icon(
-              onPressed: _busy ? null : _pickFile,
-              icon: const Icon(Icons.attach_file_rounded, size: 19),
-              label: Text(
-                _file?.name ?? 'Choose file',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                alignment: Alignment.centerLeft,
+            const Text(
+              'Upload document',
+              style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.35,
+                color: AppColors.ink,
               ),
             ),
-            if (_error != null) ...[
-              const SizedBox(height: 10),
-              Text(_error!,
-                  style:
-                      const TextStyle(color: AppColors.danger, fontSize: 13)),
-            ],
             const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: _busy ? null : _upload,
-              icon: _busy
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        valueColor: AlwaysStoppedAnimation(Colors.white),
-                      ),
-                    )
-                  : const Icon(Icons.upload_file_rounded, size: 19),
-              label: Text(_busy ? 'Uploading…' : 'Upload'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
+            if (types == null)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else ...[
+              ProField(
+                label: 'Document type',
+                required: true,
+                child: DropdownButtonFormField<String>(
+                  value: _selectedType,
+                  isExpanded: true,
+                  hint: const Text('Select a document type'),
+                  borderRadius: BorderRadius.circular(14),
+                  items: types
+                      .map((t) => DropdownMenuItem(
+                            value: t.code,
+                            child: Text(t.label,
+                                overflow: TextOverflow.ellipsis),
+                          ))
+                      .toList(),
+                  onChanged: _busy
+                      ? null
+                      : (v) => setState(() {
+                            _selectedType = v;
+                            // The new type may ask for different details, or none.
+                            _documentNumber.clear();
+                            _startDate = null;
+                            _endDate = null;
+                            _error = null;
+                          }),
+                ),
               ),
-            ),
+
+              // Extra details this document type is configured to capture. The
+              // server rejects the upload without them, so they are mandatory here.
+              if (_selected?.capturesExtraFields == true) ...[
+                if (_selected!.requiresDocumentNumber) ...[
+                  const SizedBox(height: 14),
+                  ProField(
+                    label: 'Document number',
+                    required: true,
+                    child: TextField(
+                      controller: _documentNumber,
+                      enabled: !_busy,
+                      textCapitalization: TextCapitalization.characters,
+                      onChanged: (_) => setState(() => _error = null),
+                    ),
+                  ),
+                ],
+                if (_selected!.requiresStartDate) ...[
+                  const SizedBox(height: 14),
+                  ProField(
+                    label: 'Start date',
+                    required: true,
+                    child: _DateRow(
+                      value: _startDate == null ? null : _iso(_startDate!),
+                      enabled: !_busy,
+                      onTap: () => _pickDate(start: true),
+                    ),
+                  ),
+                ],
+                if (_selected!.requiresEndDate) ...[
+                  const SizedBox(height: 14),
+                  ProField(
+                    label: 'End date',
+                    required: true,
+                    child: _DateRow(
+                      value: _endDate == null ? null : _iso(_endDate!),
+                      enabled: !_busy,
+                      onTap: () => _pickDate(start: false),
+                    ),
+                  ),
+                ],
+              ],
+
+              const SizedBox(height: 14),
+              ProField(
+                label: 'Label (optional)',
+                child: TextField(
+                  controller: _label,
+                  enabled: !_busy,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [TitleCaseTextFormatter()],
+                  decoration: const InputDecoration(
+                    hintText: 'e.g. Front Side',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              ProField(
+                label: 'File',
+                required: true,
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _pickFile,
+                  icon: Icon(
+                    _file == null
+                        ? Icons.attach_file_rounded
+                        : Icons.insert_drive_file_outlined,
+                    size: 19,
+                    color: AppColors.primary,
+                  ),
+                  label: Text(
+                    _file?.name ?? 'Choose file',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    alignment: Alignment.centerLeft,
+                  ),
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                ProNote(_error!, tone: ProNoteTone.bad),
+              ],
+              const SizedBox(height: 18),
+              FilledButton.icon(
+                onPressed: _busy ? null : _upload,
+                icon: _busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          valueColor: AlwaysStoppedAnimation(Colors.white),
+                        ),
+                      )
+                    : const Icon(Icons.upload_file_rounded, size: 19),
+                label: Text(_busy ? 'Uploading…' : 'Upload'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                  disabledBackgroundColor: _busy ? AppColors.primary : null,
+                  disabledForegroundColor: _busy ? Colors.white : null,
+                ),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
 }
 
-/// A tappable, read-only date field matching the surrounding OutlineInputBorder
-/// inputs. Used for the start/end dates a document type requires.
+/// A tappable, read-only date field styled like the surrounding inputs. Used
+/// for the start/end dates a document type requires.
 class _DateRow extends StatelessWidget {
   const _DateRow({
-    required this.label,
     required this.value,
     required this.enabled,
     required this.onTap,
   });
 
-  final String label;
   final String? value;
   final bool enabled;
   final VoidCallback onTap;
@@ -566,17 +623,18 @@ class _DateRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: enabled ? onTap : null,
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(AppRadii.md),
       child: InputDecorator(
+        isEmpty: false,
         decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
+          enabled: enabled,
           suffixIcon: const Icon(Icons.calendar_today_rounded, size: 18),
         ),
         child: Text(
           value ?? 'Select a date',
           style: TextStyle(
-            color: value == null ? AppColors.muted : AppColors.ink,
+            fontSize: 15,
+            color: value == null ? AppColors.faint : AppColors.ink,
           ),
         ),
       ),

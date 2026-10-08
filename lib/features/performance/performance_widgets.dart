@@ -6,6 +6,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import 'performance_models.dart';
 
@@ -21,6 +22,24 @@ Color perfTone(double? ratio) {
   if (ratio >= 0.9) return AppColors.success;
   if (ratio >= 0.6) return AppColors.warning;
   return AppColors.danger;
+}
+
+/// The same banding as [perfTone], in the brighter tints that read on the
+/// deep hero surface.
+Color perfToneOnDark(double? ratio) {
+  if (ratio == null) return Colors.white54;
+  if (ratio >= 0.9) return AppColors.live;
+  if (ratio >= 0.6) return const Color(0xFFF2B347);
+  return const Color(0xFFE5484D);
+}
+
+/// Tinted % pill toned to the ratio.
+ProPill perfPctPill(double? ratio) {
+  final tone = perfTone(ratio);
+  if (tone == AppColors.success) return ProPill.ok(perfPct(ratio));
+  if (tone == AppColors.warning) return ProPill.warn(perfPct(ratio));
+  if (tone == AppColors.danger) return ProPill.bad(perfPct(ratio));
+  return ProPill.neutral(perfPct(ratio));
 }
 
 String _intOrDash(int? v) => v == null ? '—' : '$v';
@@ -48,25 +67,10 @@ class PerfKpiCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return GlassCard(
       padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [color.withValues(alpha: 0.22), color.withValues(alpha: 0.10)],
-              ),
-              borderRadius: BorderRadius.circular(9),
-              border: Border.all(color: color.withValues(alpha: 0.28)),
-            ),
-            alignment: Alignment.center,
-            child: Icon(icon, size: 17, color: color),
-          ),
+          ProIconWell(icon: icon, color: color, size: 32),
           const SizedBox(height: 10),
           FittedBox(
             alignment: Alignment.centerLeft,
@@ -74,11 +78,12 @@ class PerfKpiCard extends StatelessWidget {
             child: Text(
               value,
               style: TextStyle(
-                fontSize: 19,
-                fontWeight: FontWeight.w800,
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
                 color: color,
-                height: 1.1,
-                letterSpacing: -0.3,
+                height: 1.15,
+                letterSpacing: -0.4,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ),
@@ -87,11 +92,7 @@ class PerfKpiCard extends StatelessWidget {
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.muted,
-            ),
+            style: const TextStyle(fontSize: 12, color: AppColors.muted),
           ),
           if (sub != null) ...[
             const SizedBox(height: 1),
@@ -99,11 +100,7 @@ class PerfKpiCard extends StatelessWidget {
               sub!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w500,
-                color: AppColors.muted,
-              ),
+              style: const TextStyle(fontSize: 11.5, color: AppColors.faint),
             ),
           ],
         ],
@@ -115,7 +112,7 @@ class PerfKpiCard extends StatelessWidget {
 // ── Metric card with progress bar + colored % badge ──────────────────────────
 
 /// A collection-metric row: label, a tinted % badge, an optional subtitle and a
-/// linear progress bar whose fill is toned to the ratio.
+/// progress bar whose fill is toned to the ratio.
 class PerfMetricCard extends StatelessWidget {
   const PerfMetricCard({
     super.key,
@@ -136,66 +133,34 @@ class PerfMetricCard extends StatelessWidget {
     final clamped = (ratio ?? 0).clamp(0.0, 1.0).toDouble();
     return GlassCard(
       padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               if (icon != null) ...[
-                Icon(icon, size: 15, color: AppColors.muted),
-                const SizedBox(width: 8),
+                ProIconWell(icon: icon!, color: tone),
+                const SizedBox(width: 12),
               ],
               Expanded(
                 child: Text(
                   label,
                   style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w500,
                     color: AppColors.ink,
                   ),
                 ),
               ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  color: tone.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(AppRadii.pill),
-                  border: Border.all(color: tone.withValues(alpha: 0.30)),
-                ),
-                child: Text(
-                  perfPct(ratio),
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    color: tone,
-                  ),
-                ),
-              ),
+              perfPctPill(ratio),
             ],
           ),
           if (sub != null) ...[
             const SizedBox(height: 3),
-            Text(
-              sub!,
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: AppColors.muted,
-              ),
-            ),
+            Text(sub!, style: AppText.caption),
           ],
-          const SizedBox(height: 9),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            child: LinearProgressIndicator(
-              value: clamped,
-              minHeight: 7,
-              backgroundColor: AppColors.hairline,
-              valueColor: AlwaysStoppedAnimation(tone),
-            ),
-          ),
+          const SizedBox(height: 10),
+          ProBar(value: clamped, color: tone, height: 6),
         ],
       ),
     );
@@ -230,37 +195,51 @@ class PerfRingProgress extends StatelessWidget {
           SizedBox(
             width: size,
             height: size,
-            child: CircularProgressIndicator(
-              value: clamped,
-              strokeWidth: 8,
-              backgroundColor: AppColors.hairline,
-              valueColor: AlwaysStoppedAnimation(tone),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: clamped),
+              duration: const Duration(milliseconds: 900),
+              curve: Curves.easeOutCubic,
+              builder: (_, v, __) => CircularProgressIndicator(
+                value: v,
+                strokeWidth: size >= 80 ? 7 : 6,
+                strokeCap: StrokeCap.round,
+                backgroundColor: AppColors.hairlineSoft,
+                valueColor: AlwaysStoppedAnimation(tone),
+              ),
             ),
           ),
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                perfPct(ratio),
-                style: TextStyle(
-                  fontSize: size * 0.22,
-                  fontWeight: FontWeight.w800,
-                  color: tone,
-                  height: 1.0,
-                ),
-              ),
-              if (label != null) ...[
-                const SizedBox(height: 2),
-                Text(
-                  label!,
-                  style: const TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.muted,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    perfPct(ratio),
+                    style: TextStyle(
+                      fontSize: size * 0.2,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.4,
+                      color: AppColors.ink,
+                      height: 1.0,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                   ),
                 ),
+                if (label != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    label!,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.muted,
+                    ),
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ],
       ),
@@ -270,7 +249,7 @@ class PerfRingProgress extends StatelessWidget {
 
 // ── Rank badge ───────────────────────────────────────────────────────────────
 
-/// A rank pill (e.g. "NLPL #4"). Grade renders as a coloured chip.
+/// A rank tile (e.g. "NLPL rank #4").
 class PerfRankBadge extends StatelessWidget {
   const PerfRankBadge({
     super.key,
@@ -287,39 +266,36 @@ class PerfRankBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = color ?? AppColors.primary;
     return GlassCard(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      shadow: AppShadows.soft,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.all(14),
+      child: Row(
         children: [
-          Row(
-            children: [
-              Icon(icon, size: 15, color: color ?? AppColors.primary),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
+          ProIconWell(icon: icon, color: c),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  rank == null ? '—' : '#${rank!}',
                   style: const TextStyle(
-                    fontSize: 11,
+                    fontSize: 21,
                     fontWeight: FontWeight.w600,
-                    color: AppColors.muted,
+                    color: AppColors.ink,
+                    height: 1.15,
+                    letterSpacing: -0.4,
+                    fontFeatures: [FontFeature.tabularFigures()],
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            rank == null ? '—' : '#${rank!}',
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              color: color ?? AppColors.primary,
-              height: 1.0,
-              letterSpacing: -0.5,
+              ],
             ),
           ),
         ],
@@ -328,10 +304,10 @@ class PerfRankBadge extends StatelessWidget {
   }
 }
 
-// ── Sticky month selector ────────────────────────────────────────────────────
+// ── Month selector ───────────────────────────────────────────────────────────
 
-/// A dropdown that picks one of the available scorecard periods. Renders as a
-/// pill-styled selector intended to sit at the top of the screen.
+/// A dropdown that picks one of the available scorecard periods. Pass
+/// [raised] when it straddles a hero (`ProHero(overlap: ...)`).
 class PerfMonthSelector extends StatelessWidget {
   const PerfMonthSelector({
     super.key,
@@ -339,53 +315,52 @@ class PerfMonthSelector extends StatelessWidget {
     required this.selected,
     required this.onChanged,
     this.lastSyncedLabel,
+    this.raised = false,
   });
 
   final List<PeriodOption> periods;
   final PeriodOption? selected;
   final ValueChanged<PeriodOption> onChanged;
   final String? lastSyncedLabel;
+  final bool raised;
 
   @override
   Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      shadow: AppShadows.card,
+    const valueStyle = TextStyle(
+      fontSize: 15,
+      fontWeight: FontWeight.w500,
+      color: AppColors.ink,
+    );
+    return Container(
+      constraints: const BoxConstraints(minHeight: 50),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: AppColors.hairline),
+        boxShadow: raised ? AppShadows.lifted : AppShadows.card,
+      ),
       child: Row(
         children: [
           Icon(Icons.calendar_month_rounded,
-              size: 18, color: AppColors.primary),
+              size: 20, color: AppColors.primary),
           const SizedBox(width: 10),
           Expanded(
             child: periods.isEmpty
                 ? Text(
                     selected?.label ?? 'No periods available',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.ink,
-                    ),
+                    style: valueStyle,
                   )
                 : DropdownButtonHideUnderline(
                     child: DropdownButton<PeriodOption>(
                       isExpanded: true,
                       isDense: true,
+                      borderRadius: BorderRadius.circular(14),
                       value: periods.contains(selected) ? selected : null,
-                      hint: const Text(
-                        'Select period',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.ink,
-                        ),
-                      ),
+                      hint: const Text('Select period', style: valueStyle),
                       icon: const Icon(Icons.keyboard_arrow_down_rounded,
                           color: AppColors.muted),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.ink,
-                      ),
+                      style: valueStyle,
                       items: [
                         for (final p in periods)
                           DropdownMenuItem<PeriodOption>(
@@ -407,11 +382,7 @@ class PerfMonthSelector extends StatelessWidget {
                 textAlign: TextAlign.right,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.muted,
-                ),
+                style: const TextStyle(fontSize: 12, color: AppColors.muted),
               ),
             ),
           ],
@@ -452,13 +423,16 @@ class PerfCompareRow extends StatelessWidget {
     final tone = improved == null
         ? AppColors.muted
         : (improved ? AppColors.success : AppColors.danger);
+    final tint = improved == null
+        ? AppColors.neutralTint
+        : (improved ? AppColors.successTint : AppColors.dangerTint);
     final arrow = (delta == null || delta == 0)
         ? Icons.remove_rounded
         : ((delta! > 0)
             ? Icons.arrow_upward_rounded
             : Icons.arrow_downward_rounded);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         children: [
           Expanded(
@@ -466,9 +440,9 @@ class PerfCompareRow extends StatelessWidget {
             child: Text(
               label,
               style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: AppColors.inkSoft,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: AppColors.muted,
               ),
             ),
           ),
@@ -478,30 +452,33 @@ class PerfCompareRow extends StatelessWidget {
               '$valueA → $valueB',
               textAlign: TextAlign.right,
               style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
                 color: AppColors.ink,
+                fontFeatures: [FontFeature.tabularFigures()],
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            height: 22,
+            padding: const EdgeInsets.symmetric(horizontal: 7),
             decoration: BoxDecoration(
-              color: tone.withValues(alpha: 0.13),
-              borderRadius: BorderRadius.circular(AppRadii.pill),
+              color: tint,
+              borderRadius: BorderRadius.circular(999),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(arrow, size: 11, color: tone),
+                Icon(arrow, size: 12, color: tone),
                 const SizedBox(width: 2),
                 Text(
                   deltaText,
                   style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
                     color: tone,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
               ],
@@ -513,10 +490,10 @@ class PerfCompareRow extends StatelessWidget {
   }
 }
 
-// ── Section card (local copy mirroring the team-detail look) ─────────────────
+// ── Section card ─────────────────────────────────────────────────────────────
 
-/// A titled white card with an icon and divider, matching the employee-detail
-/// section style.
+/// A titled white card, matching the employee-detail section style. Hairline
+/// dividers separate consecutive [PerfCompareRow]s.
 class PerfSectionCard extends StatelessWidget {
   const PerfSectionCard({
     super.key,
@@ -534,32 +511,20 @@ class PerfSectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GlassCard(
-      shadow: AppShadows.soft,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 16, color: AppColors.primary),
-                const SizedBox(width: 8),
-              ],
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
-                ),
-              ),
-              if (trailing != null) trailing!,
-            ],
-          ),
-          const SizedBox(height: 6),
-          const Divider(height: 12),
-          ...children,
+          ProSectionHeader(title: title, trailing: trailing),
+          const SizedBox(height: 8),
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0 &&
+                children[i] is PerfCompareRow &&
+                children[i - 1] is PerfCompareRow)
+              const Divider(
+                  height: 1, thickness: 1, color: AppColors.hairlineSoft),
+            children[i],
+          ],
         ],
       ),
     );
@@ -596,11 +561,7 @@ class PerfGradeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StatusPill(
-      label: 'Grade $grade',
-      color: AppColors.primary,
-      icon: Icons.workspace_premium_rounded,
-    );
+    return ProPill('Grade $grade', color: AppColors.primary);
   }
 }
 

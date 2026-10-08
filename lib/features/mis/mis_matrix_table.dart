@@ -11,12 +11,16 @@
 //    • a bold Total row pinned last
 //    • category / child row variants for the nested Mode-of-Collection table
 //
+//  Pro styling: a white hairline card, a soft grey header row with small muted
+//  labels, hairline row dividers and tabular figures.
+//
 //  The stub column is pinned and the measure columns scroll horizontally — both
 //  halves are Columns of identical row heights, so nothing can drift out of sync.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 
 /// One measure cell.
@@ -104,6 +108,43 @@ class MisGroup {
   const MisGroup(this.label, this.span);
 }
 
+// ── Shared Pro table chrome ──────────────────────────────────────────────────
+
+/// Header band fill (the Pro "surfaceAlt" header row).
+const Color _headBg = Color(0xFFF6F8F8);
+
+/// The design system never goes heavier than w600 — callers' bolder weights
+/// are capped here so every grid reads alike.
+FontWeight _cap(FontWeight w) =>
+    (w == FontWeight.w700 || w == FontWeight.w800 || w == FontWeight.w900)
+        ? FontWeight.w600
+        : w;
+
+Color _rowBgFor(MisMatrixRow r) {
+  if (r.bgColor != null) return r.bgColor!;
+  switch (r.kind) {
+    case MisRowKind.total:
+    case MisRowKind.category:
+      return _headBg;
+    case MisRowKind.child:
+    case MisRowKind.normal:
+      return AppColors.surface;
+    case MisRowKind.accent:
+      return AppColors.danger.withValues(alpha: 0.04);
+  }
+}
+
+FontWeight _rowWeightFor(MisMatrixRow r) =>
+    r.kind == MisRowKind.total || r.kind == MisRowKind.category
+        ? FontWeight.w600
+        : FontWeight.w500;
+
+/// Header label colour on a band — muted on the default grey, white/ink on a
+/// caller-supplied fill (kept for screens that pass their own header colour).
+Color _headInk(Color? fill) => fill == null
+    ? AppColors.muted
+    : (fill.computeLuminance() < 0.4 ? Colors.white : AppColors.ink);
+
 class MisMatrixTable extends StatefulWidget {
   const MisMatrixTable({
     super.key,
@@ -131,12 +172,12 @@ class MisMatrixTable extends StatefulWidget {
   final double stubWidth;
   final double cellWidth;
 
-  /// Overrides the column-header band colour (default: the app's brand
-  /// primary). Used by screens whose header colour is a fixed identity
-  /// regardless of the app theme (e.g. the Branch Report card's navy).
+  /// Overrides the column-header band colour (default: the neutral Pro header
+  /// row). Used by screens whose header colour is a fixed identity regardless
+  /// of the app theme.
   final Color? headerColor;
 
-  /// Overrides the spanning group-header band colour (default: primaryDark).
+  /// Overrides the spanning group-header band colour (default: neutral).
   final Color? groupHeaderColor;
 
   @override
@@ -157,187 +198,180 @@ class _MisMatrixTableState extends State<MisMatrixTable> {
   }
 
   static const double _rowH = 44;
-  static const double _bandH = 26;
+  static const double _groupH = 30;
+  static const double _subH = 36;
 
   bool get _grouped => widget.groups != null && widget.groups!.isNotEmpty;
-  double get _headerH => _bandH * (_grouped ? 2 : 1);
-
-  Color _rowBg(MisMatrixRow r, int i) {
-    if (r.bgColor != null) return r.bgColor!;
-    switch (r.kind) {
-      case MisRowKind.total:
-        return const Color(0xFFF4B084);
-      case MisRowKind.category:
-        return AppColors.surfaceAlt;
-      case MisRowKind.child:
-        return AppColors.surface;
-      case MisRowKind.accent:
-        return AppColors.danger.withValues(alpha: 0.04);
-      case MisRowKind.normal:
-        return i.isOdd ? AppColors.surfaceAlt : AppColors.surface;
-    }
-  }
-
-  FontWeight _rowWeight(MisMatrixRow r) =>
-      r.kind == MisRowKind.total || r.kind == MisRowKind.category
-          ? FontWeight.w800
-          : FontWeight.w500;
+  double get _headerH => _subH + (_grouped ? _groupH : 0);
 
   @override
   Widget build(BuildContext context) {
     return GlassCard(
       padding: EdgeInsets.zero,
-      shadow: AppShadows.soft,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppRadii.lg),
-        child: Container(
-          decoration: const BoxDecoration(
-            border: Border(
-              top: BorderSide(color: Colors.black),
-              left: BorderSide(color: Colors.black),
-            ),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: widget.stubWidth,
-                child: Column(
-                  children: [
-                    Container(
-                      height: _headerH,
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      alignment: Alignment.centerLeft,
-                      decoration: BoxDecoration(
-                        color: widget.headerColor ?? AppColors.primary,
-                        border: const Border(
-                          right: BorderSide(color: Colors.black),
-                          bottom: BorderSide(color: Colors.black),
-                        ),
-                      ),
-                      child: Text(
-                        widget.stubHeader,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Pinned stub column, divided from the scrolling measures by a
+            // hairline.
+            Container(
+              width: widget.stubWidth,
+              decoration: const BoxDecoration(
+                border: Border(right: BorderSide(color: AppColors.hairline)),
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    height: _headerH,
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    alignment: Alignment.centerLeft,
+                    color: widget.headerColor ?? _headBg,
+                    child: Text(
+                      widget.stubHeader,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: _headInk(widget.headerColor),
                       ),
                     ),
-                    for (var i = 0; i < widget.rows.length; i++)
-                      _stubCell(widget.rows[i], i),
-                  ],
-                ),
+                  ),
+                  for (var i = 0; i < widget.rows.length; i++)
+                    _stubCell(widget.rows[i], i),
+                ],
               ),
-              Expanded(
-                child: Scrollbar(
+            ),
+            Expanded(
+              child: Scrollbar(
+                controller: _hScroll,
+                thumbVisibility: true,
+                trackVisibility: true,
+                thickness: 4,
+                radius: const Radius.circular(4),
+                child: SingleChildScrollView(
                   controller: _hScroll,
-                  thumbVisibility: true,
-                  trackVisibility: true,
-                  child: SingleChildScrollView(
-                    controller: _hScroll,
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (_grouped)
-                          Row(
-                            children: [
-                              for (final g in widget.groups!)
-                                _headerCell(
-                                    g.label,
-                                    widget.cellWidth * g.span,
-                                    widget.groupHeaderColor ??
-                                        AppColors.primaryDark),
-                            ],
-                          ),
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_grouped)
                         Row(
                           children: [
-                            for (final h in widget.headers)
-                              _headerCell(
-                                h,
-                                widget.cellWidth,
-                                widget.headerColor ??
-                                    (h == 'Demand' ||
-                                            h == 'Balance' ||
-                                            h == 'Pending'
-                                        ? const Color(0xFFFCE4D6)
-                                        : h == 'Collection'
-                                            ? const Color(0xFFE2EFDA)
-                                            : h == 'Coll %' ||
-                                                    h == 'Collection %'
-                                                ? const Color(0xFFFFFFCC)
-                                                : AppColors.primary),
+                            for (var g = 0; g < widget.groups!.length; g++)
+                              _groupCell(
+                                widget.groups![g].label,
+                                widget.cellWidth * widget.groups![g].span,
+                                first: g == 0,
                               ),
                           ],
                         ),
-                        for (var i = 0; i < widget.rows.length; i++)
-                          _cellsRow(widget.rows[i], i),
-                      ],
-                    ),
+                      Row(
+                        children: [
+                          for (final h in widget.headers)
+                            _headerCell(h, widget.cellWidth),
+                        ],
+                      ),
+                      for (var i = 0; i < widget.rows.length; i++)
+                        _cellsRow(widget.rows[i], i),
+                    ],
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _headerCell(String text, double width, Color color) {
+  Widget _groupCell(String text, double width, {required bool first}) {
+    final fill = widget.groupHeaderColor;
     return Container(
       width: width,
-      height: _bandH,
-      alignment: Alignment.centerRight,
+      height: _groupH,
+      alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: color,
-        border: const Border(
-          right: BorderSide(color: Colors.black),
-          bottom: BorderSide(color: Colors.black),
+        color: fill ?? _headBg,
+        border: Border(
+          left: first
+              ? BorderSide.none
+              : const BorderSide(color: AppColors.hairline),
+          bottom: const BorderSide(color: AppColors.hairline),
         ),
       ),
       child: Text(
         text,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.right,
+        textAlign: TextAlign.center,
         style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-          color: color.computeLuminance() < 0.4 ? Colors.white : Colors.black,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: fill == null ? AppColors.inkSoft : _headInk(fill),
         ),
       ),
     );
   }
 
-  Widget _stubCell(MisMatrixRow r, int i) {
-    final lead = r.lead;
-    final cell = Container(
-      height: _rowH,
-      decoration: BoxDecoration(
-        color: r.bgColor ?? _rowBg(r, i),
-        border: const Border(
-          right: BorderSide(color: Colors.black),
-          bottom: BorderSide(color: Colors.black),
+  Widget _headerCell(String text, double width) {
+    final fill = widget.headerColor;
+    return Container(
+      width: width,
+      height: _subH,
+      alignment: Alignment.centerRight,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      color: fill ?? _headBg,
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.right,
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+          color: _headInk(fill),
         ),
       ),
-      padding: EdgeInsets.only(left: lead.indent ? 22 : 10, right: 6),
+    );
+  }
+
+  BoxDecoration _rowDecoration(MisMatrixRow r, Color bg) => BoxDecoration(
+        color: bg,
+        border: Border(
+          top: BorderSide(
+            color: r.kind == MisRowKind.total
+                ? AppColors.hairline
+                : AppColors.hairlineSoft,
+          ),
+        ),
+      );
+
+  Widget _stubCell(MisMatrixRow r, int i) {
+    final lead = r.lead;
+    final weight = r.kind == MisRowKind.child
+        ? FontWeight.w400
+        : (_rowWeightFor(r) == FontWeight.w600
+            ? FontWeight.w600
+            : FontWeight.w500);
+    final cell = Container(
+      height: _rowH,
+      decoration: _rowDecoration(r, _rowBgFor(r)),
+      padding: EdgeInsets.only(left: lead.indent ? 24 : 12, right: 6),
       child: Row(
         children: [
           if (lead.chip != null) ...[
             Container(
-              width: 9,
-              height: 9,
+              width: 8,
+              height: 8,
               decoration:
                   BoxDecoration(color: lead.chip, shape: BoxShape.circle),
             ),
-            const SizedBox(width: 7),
+            const SizedBox(width: 8),
           ],
           Expanded(
             child: Column(
@@ -349,12 +383,9 @@ class _MisMatrixTableState extends State<MisMatrixTable> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: r.kind == MisRowKind.child
-                        ? FontWeight.w500
-                        : (_rowWeight(r) == FontWeight.w800
-                            ? FontWeight.w800
-                            : FontWeight.w700),
+                    fontSize: 12.5,
+                    height: 1.3,
+                    fontWeight: weight,
                     color: AppColors.ink,
                   ),
                 ),
@@ -364,7 +395,7 @@ class _MisMatrixTableState extends State<MisMatrixTable> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        fontSize: 9.5, color: AppColors.muted),
+                        fontSize: 10.5, color: AppColors.muted),
                   ),
               ],
             ),
@@ -372,7 +403,7 @@ class _MisMatrixTableState extends State<MisMatrixTable> {
           if (lead.trailing != null) lead.trailing!,
           if (r.onTap != null)
             const Icon(Icons.chevron_right_rounded,
-                size: 15, color: AppColors.muted),
+                size: 16, color: Color(0xFFB3C0C3)),
         ],
       ),
     );
@@ -381,11 +412,11 @@ class _MisMatrixTableState extends State<MisMatrixTable> {
   }
 
   Widget _cellsRow(MisMatrixRow r, int i) {
-    final band = Container(
+    final band = SizedBox(
       height: _rowH,
       child: Row(
         children: [
-          for (final c in r.cells) _valueCell(c, _rowWeight(r), r, i),
+          for (final c in r.cells) _valueCell(c, _rowWeightFor(r), r),
         ],
       ),
     );
@@ -393,20 +424,14 @@ class _MisMatrixTableState extends State<MisMatrixTable> {
     return InkWell(onTap: r.onTap, child: band);
   }
 
-  Widget _valueCell(MisCell c, FontWeight rowWeight, MisMatrixRow r, int i) {
+  Widget _valueCell(MisCell c, FontWeight rowWeight, MisMatrixRow r) {
     final color =
-        c.muted ? AppColors.muted : (c.color ?? AppColors.inkSoft);
+        c.muted ? AppColors.faint : (c.color ?? AppColors.inkSoft);
     return Container(
       width: widget.cellWidth,
-      decoration: BoxDecoration(
-        color: c.bgColor ?? r.bgColor ?? _rowBg(r, i),
-        border: const Border(
-          right: BorderSide(color: Colors.black),
-          bottom: BorderSide(color: Colors.black),
-        ),
-      ),
+      decoration: _rowDecoration(r, c.bgColor ?? _rowBgFor(r)),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
@@ -416,23 +441,18 @@ class _MisMatrixTableState extends State<MisMatrixTable> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: c.weight ?? rowWeight,
+                fontSize: 12.5,
+                fontWeight: _cap(c.weight ?? rowWeight),
                 color: color,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
             if (c.track != null) ...[
-              const SizedBox(height: 3),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadii.pill),
-                child: LinearProgressIndicator(
-                  value: c.track!.clamp(0.0, 1.0),
-                  minHeight: 3,
-                  backgroundColor: AppColors.hairline,
-                  valueColor: AlwaysStoppedAnimation(
-                      c.trackColor ?? c.color ?? AppColors.primary),
-                ),
+              const SizedBox(height: 4),
+              ProBar(
+                value: c.track!.clamp(0.0, 1.0),
+                height: 3,
+                color: c.trackColor ?? c.color ?? AppColors.primary,
               ),
             ],
           ],
@@ -449,10 +469,10 @@ Color misPctColor(double collection, double demand,
   if (demand == 0) return AppColors.muted;
   final p = collection / demand * 100;
   return p >= hi
-      ? const Color(0xFF059669)
+      ? AppColors.success
       : p >= mid
-          ? const Color(0xFFF59E0B)
-          : const Color(0xFFE11D48);
+          ? AppColors.warning
+          : AppColors.danger;
 }
 
 /// Two-decimal percentage text, "—" when there is nothing to divide by.
@@ -467,29 +487,9 @@ class MisWarnBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.warning.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: AppColors.warning.withValues(alpha: 0.30)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.warning_amber_rounded,
-              size: 16, color: AppColors.warning),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(
-                  fontSize: 11.5, height: 1.35, color: AppColors.inkSoft),
-            ),
-          ),
-        ],
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: ProNote(message, tone: ProNoteTone.warn),
     );
   }
 }
@@ -501,11 +501,11 @@ class MisFootNote extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.only(top: 10, left: 2, right: 2),
         child: Text(
           text,
           style: const TextStyle(
-              fontSize: 10.5, height: 1.4, color: AppColors.muted),
+              fontSize: 12, height: 1.42, color: AppColors.muted),
         ),
       );
 }
@@ -518,19 +518,10 @@ class MisCcTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 4, bottom: 8),
+        padding: const EdgeInsets.only(top: 4, bottom: 10, left: 2),
         child: Row(
           children: [
-            Expanded(
-              child: Text(
-                text,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink,
-                ),
-              ),
-            ),
+            Expanded(child: Text(text, style: AppText.section)),
             if (trailing != null) trailing!,
           ],
         ),
@@ -568,37 +559,29 @@ class MisFlexMatrixTable extends StatelessWidget {
 
   bool get _grouped => groups != null && groups!.isNotEmpty;
 
-  Color _rowBg(MisMatrixRow r, int i) {
-    if (r.bgColor != null) return r.bgColor!;
-    switch (r.kind) {
-      case MisRowKind.total:
-        return const Color(0xFFF4B084);
-      case MisRowKind.category:
-        return AppColors.surfaceAlt;
-      case MisRowKind.child:
-        return AppColors.surface;
-      case MisRowKind.accent:
-        return AppColors.danger.withValues(alpha: 0.04);
-      case MisRowKind.normal:
-        return i.isOdd ? AppColors.surfaceAlt : AppColors.surface;
-    }
-  }
-
-  Widget _headerCell(String text, int flex, Color color, {bool left = false}) {
+  Widget _headerCell(String text, int flex, Color? fill,
+      {bool left = false, bool center = false, bool divider = false}) {
     return Expanded(
       flex: flex,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
-        color: color,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: fill ?? _headBg,
+          border: divider
+              ? const Border(left: BorderSide(color: AppColors.hairline))
+              : null,
+        ),
         child: Text(
           text,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          textAlign: left ? TextAlign.left : TextAlign.right,
+          textAlign: left
+              ? TextAlign.left
+              : (center ? TextAlign.center : TextAlign.right),
           style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w800,
-            color: color.computeLuminance() < 0.4 ? Colors.white : Colors.black,
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+            color: _headInk(fill),
           ),
         ),
       ),
@@ -609,17 +592,17 @@ class MisFlexMatrixTable extends StatelessWidget {
     return Expanded(
       flex: flex,
       child: Container(
-        color: bg,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+        color: c.bgColor ?? bg,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
         child: Text(
           c.text,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.right,
           style: TextStyle(
-            fontSize: 11.5,
-            fontWeight: c.weight ?? rowWeight,
-            color: c.muted ? AppColors.muted : (c.color ?? AppColors.inkSoft),
+            fontSize: 12.5,
+            fontWeight: _cap(c.weight ?? rowWeight),
+            color: c.muted ? AppColors.faint : (c.color ?? AppColors.inkSoft),
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
         ),
@@ -629,61 +612,81 @@ class MisFlexMatrixTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final headColor = headerColor ?? AppColors.primary;
-    final groupColor = groupHeaderColor ?? headerColor ?? AppColors.primaryDark;
+    final groupFill = groupHeaderColor ?? headerColor;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(AppRadii.lg),
+      borderRadius: BorderRadius.circular(AppRadii.md),
       child: Container(
-        decoration: BoxDecoration(border: Border.all(color: AppColors.hairline)),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          border: Border.all(color: AppColors.hairline),
+        ),
         child: Column(
           children: [
             if (_grouped)
-              Row(
-                children: [
-                  _headerCell('', stubFlex, groupColor),
-                  for (final g in groups!)
-                    _headerCell(g.label, cellFlex * g.span, groupColor),
-                ],
+              Container(
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: AppColors.hairline)),
+                ),
+                child: Row(
+                  children: [
+                    _headerCell('', stubFlex, groupFill),
+                    for (final g in groups!)
+                      _headerCell(g.label, cellFlex * g.span, groupFill,
+                          center: true, divider: true),
+                  ],
+                ),
               ),
             Row(
               children: [
-                _headerCell(stubHeader, stubFlex, headColor, left: true),
-                for (final h in headers) _headerCell(h, cellFlex, headColor),
+                _headerCell(stubHeader, stubFlex, headerColor, left: true),
+                for (final h in headers) _headerCell(h, cellFlex, headerColor),
               ],
             ),
             for (var i = 0; i < rows.length; i++)
-              Row(
-                children: [
-                  Expanded(
-                    flex: stubFlex,
-                    child: Container(
-                      color: _rowBg(rows[i], i),
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
-                      child: Text(
-                        rows[i].lead.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: rows[i].kind == MisRowKind.total
-                              ? FontWeight.w800
-                              : FontWeight.w700,
-                          color: AppColors.ink,
+              Container(
+                decoration: BoxDecoration(
+                  border: Border(
+                    top: BorderSide(
+                      color: rows[i].kind == MisRowKind.total
+                          ? AppColors.hairline
+                          : AppColors.hairlineSoft,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: stubFlex,
+                      child: Container(
+                        color: _rowBgFor(rows[i]),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 11),
+                        child: Text(
+                          rows[i].lead.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: rows[i].kind == MisRowKind.total
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                            color: AppColors.ink,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  for (final c in rows[i].cells)
-                    _valueCell(
-                      c,
-                      cellFlex,
-                      rows[i].kind == MisRowKind.total
-                          ? FontWeight.w800
-                          : FontWeight.w500,
-                      _rowBg(rows[i], i),
-                    ),
-                ],
+                    for (final c in rows[i].cells)
+                      _valueCell(
+                        c,
+                        cellFlex,
+                        rows[i].kind == MisRowKind.total
+                            ? FontWeight.w600
+                            : FontWeight.w500,
+                        _rowBgFor(rows[i]),
+                      ),
+                  ],
+                ),
               ),
           ],
         ),

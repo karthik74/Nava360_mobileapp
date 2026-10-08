@@ -13,6 +13,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/text_formatters.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -42,176 +43,198 @@ class FindingDetailScreen extends ConsumerWidget {
       'AUDIT_VERIFY', 'AUDIT_REOPEN', 'AUDIT_CLOSE', 'AUDIT_ADMIN',
     ]);
 
+    Future<void> reload() async {
+      ref.invalidate(findingDetailProvider(findingId));
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: const Text('Finding'),
-        backgroundColor: AppColors.surface,
-        foregroundColor: AppColors.ink,
-        elevation: 0,
-      ),
-      body: SafeArea(
-        child: RefreshIndicator(
-          color: AppColors.primary,
-          onRefresh: () async {
-            ref.invalidate(findingDetailProvider(findingId));
-            await Future<void>.delayed(const Duration(milliseconds: 250));
-          },
-          child: async.when(
-            loading: () => ListView(
-              padding: const EdgeInsets.all(16),
-              children: const [AppLoadingBlock(height: 280)],
+      appBar: AppBar(title: const Text('Finding detail')),
+      body: async.when(
+        loading: () => ProPage(
+          onRefresh: reload,
+          children: const [AppLoadingBlock(height: 280)],
+        ),
+        error: (e, __) => ProPage(
+          onRefresh: reload,
+          children: [
+            AppErrorPanel(
+              message: 'Could not load this finding.\n$e',
+              onRetry: () => ref.invalidate(findingDetailProvider(findingId)),
             ),
-            error: (e, __) => ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                AppErrorPanel(
-                  message: 'Could not load this finding.\n$e',
-                  onRetry: () =>
-                      ref.invalidate(findingDetailProvider(findingId)),
-                ),
-              ],
-            ),
-            data: (detail) => ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-              children: [
-                _findingCard(detail.finding),
-                const SizedBox(height: 14),
-                _capaHistory(detail.capaHistory),
-                const SizedBox(height: 14),
-                _verifications(detail.verifications),
-                const SizedBox(height: 14),
-                AddPhotoProofButton(
-                  parentType: 'FINDING',
-                  parentId: findingId,
-                  executionId: detail.finding.executionId,
-                ),
-                // Compliance can be submitted only while the finding awaits action
-                // (not once already submitted, until a verifier reopens/rejects it).
-                if (canBm && detail.canSubmitCompliance) ...[
-                  const SizedBox(height: 18),
-                  _CapaForm(findingId: findingId),
-                ] else if (canBm && detail.complianceSubmitted) ...[
-                  const SizedBox(height: 18),
-                  const _InfoNote(
-                    'Compliance has been submitted and is awaiting verification. '
-                    'You can submit again only if a verifier rejects or reopens this finding.',
-                  ),
-                ],
-                // Verification is available only to verifiers, and only once
-                // compliance has been submitted.
-                if (canVerify && detail.canVerify) ...[
-                  const SizedBox(height: 18),
-                  _VerifyForm(findingId: findingId),
-                ] else if (canVerify && !detail.canVerify) ...[
-                  const SizedBox(height: 18),
-                  const _InfoNote(
-                    'Verification becomes available once the branch manager submits '
-                    'compliance for this finding.',
-                  ),
-                ],
-              ],
-            ),
-          ),
+          ],
+        ),
+        data: (detail) => ProPage(
+          onRefresh: reload,
+          hero: _hero(detail),
+          children: [
+            _findingCard(detail.finding),
+            _capaHistory(detail.capaHistory),
+            _verifications(detail.verifications),
+            _photoCard(detail.finding),
+            // Compliance can be submitted only while the finding awaits action
+            // (not once already submitted, until a verifier reopens/rejects it).
+            if (canBm && detail.canSubmitCompliance)
+              _CapaForm(findingId: findingId)
+            else if (canBm && detail.complianceSubmitted)
+              const ProNote(
+                'Compliance has been submitted and is awaiting verification. '
+                'You can submit again only if a verifier rejects or reopens this finding.',
+                tone: ProNoteTone.info,
+              ),
+            // Verification is available only to verifiers, and only once
+            // compliance has been submitted.
+            if (canVerify && detail.canVerify)
+              _VerifyForm(findingId: findingId)
+            else if (canVerify && !detail.canVerify)
+              const ProNote(
+                'Verification becomes available once the branch manager submits '
+                'compliance for this finding.',
+              ),
+          ],
         ),
       ),
     );
   }
 
+  // ── Hero ───────────────────────────────────────────────────────────────────
+
+  Widget _hero(AuditFindingDetail detail) {
+    final f = detail.finding;
+    final st = findingStatusTone(f.status);
+    final sev = severityTone(f.severity);
+    final role = [
+      if ((f.code ?? '').isNotEmpty) f.code!,
+      if ((f.category ?? '').isNotEmpty) f.category!,
+    ].join(' · ');
+
+    // Workflow line, from the flags the server already sent.
+    final String live;
+    final Color liveColor;
+    if (f.status == 'CLOSED') {
+      live = 'Finding closed';
+      liveColor = AppColors.live;
+    } else if (detail.canVerify || detail.complianceSubmitted) {
+      live = 'Compliance submitted · awaiting verification';
+      liveColor = const Color(0xFFF2B347);
+    } else if (detail.canSubmitCompliance) {
+      live = 'Waiting for branch manager compliance';
+      liveColor = const Color(0xFFF2B347);
+    } else {
+      live = st.label;
+      liveColor = st.color == AppColors.danger
+          ? const Color(0xFFE5484D)
+          : AppColors.live;
+    }
+
+    return ProHero(
+      overlap: ProKpiStrip(cells: [
+        _dueKpi(f),
+        ProKpi(value: '${detail.capaHistory.length}', label: 'CAPA submitted'),
+        ProKpi(
+          value: '${detail.verifications.length}',
+          label: 'Verification actions',
+        ),
+      ]),
+      children: [
+        ProHeroIdentity(
+          name: f.title ?? f.code ?? 'Finding',
+          role: role.isEmpty ? null : role,
+          icon: Icons.report_problem_rounded,
+          tags: [
+            ProHeroTag(st.label, tone: auditTagTone(st.color)),
+            ProHeroTag(sev.label,
+                tone: auditTagTone(sev.color), icon: Icons.flag_rounded),
+            if ((f.questionCode ?? '').isNotEmpty)
+              ProHeroTag('Q ${f.questionCode}'),
+          ],
+        ),
+        ProLiveLine(text: live, color: liveColor),
+      ],
+    );
+  }
+
+  /// Days left until the due date (or overdue), derived from the finding.
+  static ProKpi _dueKpi(AuditFinding f) {
+    final due = (f.dueDate == null || f.dueDate!.isEmpty)
+        ? null
+        : DateTime.tryParse(f.dueDate!);
+    if (due == null) return const ProKpi(value: '—', label: 'No due date');
+    final label = DateFormat('dd MMM').format(due);
+    if (f.status == 'CLOSED') {
+      return ProKpi(value: 'Closed', label: 'Due $label');
+    }
+    final days = DateUtils.dateOnly(due)
+        .difference(DateUtils.dateOnly(DateTime.now()))
+        .inDays;
+    if (days < 0) {
+      return ProKpi(
+        value: '${-days}d',
+        label: 'Overdue · due $label',
+        valueColor: AppColors.danger,
+      );
+    }
+    return ProKpi(
+      value: days == 0 ? 'Today' : '${days}d',
+      label: days == 0 ? 'Due today' : 'Left · due $label',
+      valueColor: days <= 2 ? const Color(0xFF9A5B00) : null,
+    );
+  }
+
+  // ── Sections ───────────────────────────────────────────────────────────────
+
   Widget _findingCard(AuditFinding f) {
     return GlassCard(
-      shadow: AppShadows.card,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  f.title ?? f.code ?? 'Finding',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              SeverityChip(severity: f.severity),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              FindingStatusChip(status: f.status),
-              const Spacer(),
-              if (_fmt(f.dueDate) != null)
-                Text(
-                  'Due ${_fmt(f.dueDate)}',
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.inkSoft,
-                  ),
-                ),
-            ],
-          ),
+          const ProSectionHeader(title: 'Observation'),
           if ((f.description ?? '').isNotEmpty) ...[
-            const Divider(height: 20),
+            const SizedBox(height: 8),
             Text(
               f.description!,
               style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w500,
+                fontSize: 14.5,
+                height: 1.5,
                 color: AppColors.inkSoft,
-                height: 1.4,
               ),
             ),
           ],
-          const SizedBox(height: 8),
-          Text(
-            [
-              if ((f.code ?? '').isNotEmpty) f.code!,
-              if ((f.category ?? '').isNotEmpty) f.category!,
-              if ((f.questionCode ?? '').isNotEmpty) 'Q ${f.questionCode}',
-            ].join(' · '),
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: AppColors.muted,
-            ),
-          ),
+          const SizedBox(height: 6),
+          _PillRow(label: 'Severity', child: SeverityChip(severity: f.severity)),
+          _PillRow(label: 'Status', child: FindingStatusChip(status: f.status)),
+          ProKeyValue(rows: [
+            if (_fmt(f.dueDate) != null) MapEntry('Due', _fmt(f.dueDate)!),
+            if ((f.code ?? '').isNotEmpty) MapEntry('Finding', f.code!),
+            if ((f.category ?? '').isNotEmpty) MapEntry('Category', f.category!),
+            if ((f.questionCode ?? '').isNotEmpty)
+              MapEntry('Question', f.questionCode!),
+          ]),
         ],
       ),
     );
   }
 
   Widget _capaHistory(List<Capa> history) {
-    return AuditSectionCard(
-      title: 'CAPA history',
-      icon: Icons.healing_rounded,
-      children: history.isEmpty
-          ? const [
-              Padding(
-                padding: EdgeInsets.symmetric(vertical: 6),
-                child: Text(
-                  'No CAPA submitted yet.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.muted,
-                  ),
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProSectionHeader(title: 'CAPA history'),
+          const SizedBox(height: 8),
+          if (history.isEmpty)
+            const Text('No CAPA submitted yet.', style: AppText.caption)
+          else
+            for (var i = 0; i < history.length; i++) ...[
+              if (i > 0)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Divider(height: 1),
                 ),
-              ),
-            ]
-          : [
-              for (final c in history) ...[
-                _capaEntry(c),
-                const Divider(height: 18),
-              ],
+              _capaEntry(history[i]),
             ],
+        ],
+      ),
     );
   }
 
@@ -219,39 +242,63 @@ class FindingDetailScreen extends ConsumerWidget {
     Widget line(String label, String? value) {
       if (value == null || value.isEmpty) return const SizedBox.shrink();
       return Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: RichText(
-          text: TextSpan(
-            style: const TextStyle(fontSize: 12, color: AppColors.inkSoft),
-            children: [
-              TextSpan(
-                text: '$label: ',
+        padding: const EdgeInsets.only(top: 6),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 112,
+              child: Text(
+                label,
                 style: const TextStyle(
-                    fontWeight: FontWeight.w700, color: AppColors.ink),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.muted,
+                ),
               ),
-              TextSpan(text: value),
-            ],
-          ),
+            ),
+            Expanded(
+              child: Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  height: 1.4,
+                  color: AppColors.ink,
+                ),
+              ),
+            ),
+          ],
         ),
       );
     }
 
+    final by = c.submittedByName ?? '';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if ((c.submittedByName ?? '').isNotEmpty || _fmt(c.createdAt) != null)
-          Text(
-            [
-              if ((c.submittedByName ?? '').isNotEmpty) c.submittedByName!,
-              if (_fmt(c.createdAt) != null) _fmt(c.createdAt)!,
-            ].join(' · '),
-            style: const TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
-              color: AppColors.muted,
-            ),
+        if (by.isNotEmpty || _fmt(c.createdAt) != null)
+          Row(
+            children: [
+              if (by.isNotEmpty) ...[
+                ProAvatar(name: by, size: 28),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Text(
+                  [
+                    if (by.isNotEmpty) by,
+                    if (_fmt(c.createdAt) != null) _fmt(c.createdAt)!,
+                  ].join(' · '),
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.inkSoft,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ],
           ),
-        const SizedBox(height: 4),
         line('Root cause', c.rootCause),
         line('Corrective', c.correctiveAction),
         line('Preventive', c.preventiveAction),
@@ -262,69 +309,112 @@ class FindingDetailScreen extends ConsumerWidget {
   }
 
   Widget _verifications(List<Verification> verifications) {
-    return AuditSectionCard(
-      title: 'Verification trail',
-      icon: Icons.verified_user_rounded,
-      children: verifications.isEmpty
-          ? const [
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProSectionHeader(title: 'Verification trail'),
+          const SizedBox(height: 8),
+          if (verifications.isEmpty)
+            const Text('No verification actions yet.', style: AppText.caption)
+          else
+            for (final v in verifications)
               Padding(
-                padding: EdgeInsets.symmetric(vertical: 6),
-                child: Text(
-                  'No verification actions yet.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.muted,
-                  ),
-                ),
-              ),
-            ]
-          : [
-              for (final v in verifications)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 5),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      StatusPill(
-                        label: v.action ?? '—',
-                        color: AppColors.primary,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            if ((v.remarks ?? '').isNotEmpty)
-                              Text(
-                                v.remarks!,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: AppColors.inkSoft,
-                                ),
-                              ),
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    auditPill(v.action ?? '—', _actionColor(v.action)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if ((v.remarks ?? '').isNotEmpty)
                             Text(
-                              [
-                                if ((v.verifiedByName ?? '').isNotEmpty)
-                                  v.verifiedByName!,
-                                if (_fmt(v.createdAt) != null) _fmt(v.createdAt)!,
-                                if (_fmt(v.dueDate) != null)
-                                  'Due ${_fmt(v.dueDate)}',
-                              ].join(' · '),
+                              v.remarks!,
                               style: const TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.muted,
+                                fontSize: 13.5,
+                                height: 1.4,
+                                color: AppColors.ink,
                               ),
                             ),
-                          ],
-                        ),
+                          Text(
+                            [
+                              if ((v.verifiedByName ?? '').isNotEmpty)
+                                v.verifiedByName!,
+                              if (_fmt(v.createdAt) != null) _fmt(v.createdAt)!,
+                              if (_fmt(v.dueDate) != null)
+                                'Due ${_fmt(v.dueDate)}',
+                            ].join(' · '),
+                            style: AppText.caption,
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-            ],
+              ),
+        ],
+      ),
+    );
+  }
+
+  static Color _actionColor(String? a) => switch (a) {
+        'ACCEPT' || 'CLOSE' => AppColors.success,
+        'REJECT' => AppColors.danger,
+        'REOPEN' || 'ESCALATE' => AppColors.warning,
+        _ => AppColors.primary,
+      };
+
+  Widget _photoCard(AuditFinding f) {
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProSectionHeader(
+            title: 'Photo proof',
+            subtitle: 'Photos are compressed and stamped with the time and your location.',
+          ),
+          const SizedBox(height: 12),
+          AddPhotoProofButton(
+            parentType: 'FINDING',
+            parentId: findingId,
+            executionId: f.executionId,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Label ............ [pill]" row matching [ProKeyValue] spacing.
+class _PillRow extends StatelessWidget {
+  const _PillRow({required this.label, required this.child});
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 9),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppColors.hairlineSoft)),
+      ),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: AppColors.muted,
+            ),
+          ),
+          const Spacer(),
+          child,
+        ],
+      ),
     );
   }
 }
@@ -390,34 +480,35 @@ class _CapaFormState extends ConsumerState<_CapaForm> {
 
   @override
   Widget build(BuildContext context) {
-    return AuditSectionCard(
-      title: 'Submit compliance',
-      icon: Icons.edit_note_rounded,
-      children: [
-        _field(_rootCause, 'Root cause *', maxLines: 2),
-        _field(_corrective, 'Corrective action *', maxLines: 2),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProSectionHeader(title: 'Submit compliance'),
+          const SizedBox(height: 12),
+          _field(_rootCause, 'Root cause', maxLines: 2),
+          const SizedBox(height: 12),
+          _field(_corrective, 'Corrective action', maxLines: 2),
+          const SizedBox(height: 16),
+          FilledButton.icon(
             onPressed: _busy ? null : _submit,
             icon: const Icon(Icons.send_rounded, size: 18),
             label: Text(_busy ? 'Submitting…' : 'Submit compliance'),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _field(TextEditingController c, String label, {int maxLines = 1}) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
+    return ProField(
+      label: label,
+      required: true,
       child: TextField(
         controller: c,
         maxLines: maxLines,
         textCapitalization: TextCapitalization.words,
         inputFormatters: const [TitleCaseTextFormatter()],
-        decoration: InputDecoration(labelText: label),
       ),
     );
   }
@@ -476,83 +567,52 @@ class _VerifyFormState extends ConsumerState<_VerifyForm> {
     }
   }
 
+  static String _actionLabel(String a) =>
+      a.isEmpty ? a : '${a[0]}${a.substring(1).toLowerCase()}';
+
   @override
   Widget build(BuildContext context) {
-    return AuditSectionCard(
-      title: 'Verify finding (Auditor)',
-      icon: Icons.rule_rounded,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 6),
-          child: DropdownButtonFormField<String>(
-            initialValue: _action,
-            decoration: const InputDecoration(labelText: 'Action'),
-            items: [
-              for (final a in _kVerifyActions)
-                DropdownMenuItem(value: a, child: Text(a)),
-            ],
-            onChanged: (v) => setState(() => _action = v ?? 'ACCEPT'),
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProSectionHeader(title: 'Verify finding (auditor)'),
+          const SizedBox(height: 12),
+          ProField(
+            label: 'Action',
+            child: DropdownButtonFormField<String>(
+              initialValue: _action,
+              items: [
+                for (final a in _kVerifyActions)
+                  DropdownMenuItem(value: a, child: Text(_actionLabel(a))),
+              ],
+              onChanged: (v) => setState(() => _action = v ?? 'ACCEPT'),
+            ),
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(top: 10),
-          child: TextField(
-            controller: _remarks,
-            maxLines: 2,
-            textCapitalization: TextCapitalization.words,
-            inputFormatters: const [TitleCaseTextFormatter()],
-            decoration: const InputDecoration(labelText: 'Remarks'),
+          const SizedBox(height: 12),
+          ProField(
+            label: 'Remarks',
+            child: TextField(
+              controller: _remarks,
+              maxLines: 2,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [TitleCaseTextFormatter()],
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        _DatePickerRow(
-          label: 'Due date (for reopen/escalate)',
-          value: _dueDate,
-          onPick: (d) => setState(() => _dueDate = d),
-        ),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
+          const SizedBox(height: 12),
+          ProField(
+            label: 'Due date (for reopen/escalate)',
+            child: _DatePickerRow(
+              label: 'Select a date',
+              value: _dueDate,
+              onPick: (d) => setState(() => _dueDate = d),
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
             onPressed: _busy ? null : _submit,
             icon: const Icon(Icons.check_rounded, size: 18),
             label: Text(_busy ? 'Submitting…' : 'Submit action'),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// A small informational note card (e.g. "compliance already submitted").
-class _InfoNote extends StatelessWidget {
-  const _InfoNote(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: AppColors.hairline),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.info_outline_rounded, size: 18, color: AppColors.muted),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w500,
-                color: AppColors.inkSoft,
-                height: 1.4,
-              ),
-            ),
           ),
         ],
       ),
@@ -572,43 +632,43 @@ class _DatePickerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(AppRadii.md),
-      onTap: () async {
-        final now = DateTime.now();
-        final picked = await showDatePicker(
-          context: context,
-          initialDate: value ?? now,
-          firstDate: DateTime(now.year - 1),
-          lastDate: DateTime(now.year + 3),
-        );
-        if (picked != null) onPick(picked);
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: Border.all(color: AppColors.hairline),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.event_rounded, size: 18, color: AppColors.muted),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                value == null
-                    ? label
-                    : '$label: ${DateFormat('dd MMM yyyy').format(value!)}',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: value == null ? AppColors.muted : AppColors.ink,
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        side: const BorderSide(color: Color(0xFFD9E2E4)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () async {
+          final now = DateTime.now();
+          final picked = await showDatePicker(
+            context: context,
+            initialDate: value ?? now,
+            firstDate: DateTime(now.year - 1),
+            lastDate: DateTime(now.year + 3),
+          );
+          if (picked != null) onPick(picked);
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              const Icon(Icons.event_rounded, size: 18, color: AppColors.muted),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  value == null ? label : DateFormat('dd MMM yyyy').format(value!),
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: value == null ? AppColors.faint : AppColors.ink,
+                  ),
                 ),
               ),
-            ),
-            const Icon(Icons.keyboard_arrow_down_rounded,
-                color: AppColors.muted),
-          ],
+              const Icon(Icons.keyboard_arrow_down_rounded,
+                  color: AppColors.muted),
+            ],
+          ),
         ),
       ),
     );

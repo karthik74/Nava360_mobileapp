@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api_client.dart';
 import '../../core/branding.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../assets/assets_models.dart';
@@ -15,6 +16,8 @@ import '../assets/assets_repository.dart';
 import '../attendance/attendance_models.dart';
 import '../attendance/attendance_repository.dart';
 import '../auth/auth_controller.dart';
+import '../chat/chat_repository.dart';
+import '../chat/chat_thread_screen.dart';
 import '../leaves/leave_models.dart';
 import '../leaves/leave_repository.dart';
 import '../performance/performance_tab.dart';
@@ -159,12 +162,19 @@ class EmployeeDetailScreen extends ConsumerWidget {
     final canViewSensitive = (user?.hasRole(const {'ADMIN', 'HR'}) ?? false) ||
         (user?.hasPermission('EMPLOYEE_VIEW') ?? false);
 
+    final tabBar = TabBar(
+      isScrollable: true,
+      tabAlignment: TabAlignment.start,
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      tabs: [for (final t in _tabs) Tab(height: 46, text: t.$1)],
+    );
+
     return DefaultTabController(
       length: _tabs.length,
       child: Scaffold(
         backgroundColor: AppColors.bg,
         appBar: AppBar(
-          title: Text(name),
+          title: const Text('Team member'),
           actions: [
             IconButton(
               tooltip: 'Refresh',
@@ -181,157 +191,401 @@ class EmployeeDetailScreen extends ConsumerWidget {
             ),
           ],
         ),
-        body: Column(
-          children: [
-            // Fixed, always-visible profile card.
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-              child: _ProfileHeader(employeeId: employeeId, fallbackName: name),
-            ),
-            // Tab strip.
-            Container(
-              color: AppColors.surface,
-              child: TabBar(
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                labelColor: AppColors.primary,
-                unselectedLabelColor: AppColors.muted,
-                indicatorColor: AppColors.primary,
-                indicatorWeight: 2.5,
-                labelStyle: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                ),
-                tabs: [
-                  for (final t in _tabs)
-                    Tab(
-                      height: 44,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(t.$2, size: 15),
-                          const SizedBox(width: 6),
-                          Text(t.$1),
-                        ],
-                      ),
-                    ),
-                ],
+        // The deep profile hero scrolls away; the section tabs stay pinned.
+        body: NestedScrollView(
+          headerSliverBuilder: (context, _) => [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _ProfileHeader(employeeId: employeeId, fallbackName: name),
               ),
             ),
-            const Divider(height: 1),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _OverviewTab(
-                    employeeId: employeeId,
-                    canViewSensitive: canViewSensitive,
-                  ),
-                  _AttendanceTab(employeeId: employeeId),
-                  _LocationTab(employeeId: employeeId, name: name),
-                  _TasksTab(employeeId: employeeId, name: name),
-                  _LeaveTab(employeeId: employeeId),
-                  _DocumentsTab(
-                    employeeId: employeeId,
-                    canViewSensitive: canViewSensitive,
-                  ),
-                  _AssetsTab(employeeId: employeeId),
-                  _PerformanceTab(employeeId: employeeId),
-                  _TimelineTab(
-                    employeeId: employeeId,
-                    canViewChanges: canViewSensitive,
-                  ),
-                ],
+            SliverOverlapAbsorber(
+              handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+              sliver: SliverPersistentHeader(
+                pinned: true,
+                delegate: _TabBarHeader(tabBar),
               ),
             ),
           ],
+          body: TabBarView(
+            children: [
+              _OverviewTab(
+                employeeId: employeeId,
+                canViewSensitive: canViewSensitive,
+              ),
+              _AttendanceTab(employeeId: employeeId),
+              _LocationTab(employeeId: employeeId, name: name),
+              _TasksTab(employeeId: employeeId, name: name),
+              _LeaveTab(employeeId: employeeId),
+              _DocumentsTab(
+                employeeId: employeeId,
+                canViewSensitive: canViewSensitive,
+              ),
+              _AssetsTab(employeeId: employeeId),
+              _PerformanceTab(employeeId: employeeId),
+              _TimelineTab(
+                employeeId: employeeId,
+                canViewChanges: canViewSensitive,
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
+/// Pinned section tab strip on the canvas colour.
+class _TabBarHeader extends SliverPersistentHeaderDelegate {
+  _TabBarHeader(this.tabBar);
+  final TabBar tabBar;
+
+  @override
+  double get minExtent => tabBar.preferredSize.height;
+
+  @override
+  double get maxExtent => tabBar.preferredSize.height;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return ColoredBox(color: AppColors.bg, child: tabBar);
+  }
+
+  @override
+  bool shouldRebuild(covariant _TabBarHeader oldDelegate) =>
+      oldDelegate.tabBar != tabBar;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Fixed profile header
+// Profile hero
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _ProfileHeader extends ConsumerWidget {
+class _ProfileHeader extends ConsumerStatefulWidget {
   const _ProfileHeader({required this.employeeId, required this.fallbackName});
   final int employeeId;
   final String fallbackName;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ProfileHeader> createState() => _ProfileHeaderState();
+}
+
+class _ProfileHeaderState extends ConsumerState<_ProfileHeader> {
+  bool _undoBusy = false;
+  bool _chatBusy = false;
+
+  Future<void> _call(String? number) async {
+    final cleaned = number?.replaceAll(RegExp(r'[^0-9+#*]'), '') ?? '';
+    if (cleaned.isEmpty) return;
+    try {
+      // Launched directly: canLaunchUrl reports false for tel: on Android
+      // unless the DIAL intent is declared, even when a dialler exists.
+      if (await launchUrl(Uri(scheme: 'tel', path: cleaned),
+          mode: LaunchMode.externalApplication)) {
+        return;
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Could not open the dialler.')));
+  }
+
+  /// Open (or create) the direct chat with this employee.
+  Future<void> _message() async {
+    if (_chatBusy) return;
+    setState(() => _chatBusy = true);
+    try {
+      final dm = await ref
+          .read(chatRepositoryProvider)
+          .getOrCreateDirect(widget.employeeId);
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ChatThreadScreen(conversation: dm)),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to open chat: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _chatBusy = false);
+    }
+  }
+
+  /// Same flow as the Attendance tab's "Undo check-out" card.
+  Future<void> _undoCheckOut(AttendanceRecord? today) async {
+    if (_undoBusy) return;
+    final confirmed = await _confirmUndoCheckOut(context, today);
+    if (!confirmed || !mounted) return;
+    setState(() => _undoBusy = true);
+    await _reopenCheckOut(
+      context,
+      ref,
+      employeeId: widget.employeeId,
+      onChanged: () => ref.invalidate(_attendanceProvider(widget.employeeId)),
+    );
+    if (mounted) setState(() => _undoBusy = false);
+  }
+
+  void _openTab(int index) => DefaultTabController.of(context).animateTo(index);
+
+  @override
+  Widget build(BuildContext context) {
+    final employeeId = widget.employeeId;
     final async = ref.watch(_profileProvider(employeeId));
     final emp = async.asData?.value;
-    final name = emp?.fullName ?? fallbackName;
-    final meta = emp == null
+    final attAsync = ref.watch(_attendanceProvider(employeeId));
+    final records = attAsync.asData?.value;
+    final tasks = ref.watch(_tasksProvider(employeeId)).asData?.value;
+    final canOverride =
+        ref.watch(authUserProvider)?.hasPermission('ATTENDANCE_OVERRIDE') ??
+            false;
+
+    final name = emp?.fullName ?? widget.fallbackName;
+    final role = emp == null
         ? null
         : [
             if ((emp.designation ?? '').isNotEmpty) emp.designation!,
             if ((emp.department ?? '').isNotEmpty) emp.department!,
+            if ((emp.branchLabel ?? '').isNotEmpty) emp.branchLabel!,
           ].join(' · ');
+    final joined = _parseYmd(emp?.joiningDate);
+    final tags = <ProHeroTag>[
+      if ((emp?.employeeCode ?? '').isNotEmpty)
+        ProHeroTag(emp!.employeeCode!, icon: Icons.badge_rounded),
+      if (emp != null)
+        ProHeroTag(
+          emp.active ? 'Active' : 'Inactive',
+          tone: emp.active ? ProTagTone.ok : ProTagTone.neutral,
+        ),
+      if (joined != null)
+        ProHeroTag('Since ${_months[joined.month - 1]} ${joined.year}'),
+    ];
 
-    return GlassCard(
-      shadow: AppShadows.card,
-      child: Row(
-        children: [
-          UserAvatar(
+    // ── Today's status (live line) ──
+    AttendanceRecord? today;
+    final ymd = _ymd(DateTime.now());
+    for (final r in records ?? const <AttendanceRecord>[]) {
+      if (r.date == ymd) {
+        today = r;
+        break;
+      }
+    }
+    final String liveText;
+    final Color liveColor;
+    if (records == null) {
+      liveText = attAsync.hasError
+          ? "Today's attendance couldn't be loaded"
+          : "Loading today's attendance…";
+      liveColor = Colors.white54;
+    } else if (today != null && today.checkIn != null && today.checkOut == null) {
+      liveText = 'Checked in at ${_fmtTime(today.checkIn)} · on the clock';
+      liveColor = AppColors.live;
+    } else if (today != null && today.checkIn != null) {
+      final hrs = _fmtHours(today.workingHours);
+      liveText = 'Checked in ${_fmtTime(today.checkIn)} · out '
+          '${_fmtTime(today.checkOut)}${hrs == '—' ? '' : ' · $hrs'}';
+      liveColor = const Color(0xFF7FC8D8);
+    } else if (today != null) {
+      final tone = StatusTone.forAttendance(today.status);
+      liveText = 'Today: ${tone.label}';
+      liveColor = today.status == 'ABSENT'
+          ? const Color(0xFFE5484D)
+          : const Color(0xFFF2B347);
+    } else {
+      liveText = 'No check-in today yet';
+      liveColor = Colors.white54;
+    }
+
+    // ── KPIs from data the tabs already load ──
+    final present = records?.where((r) => r.status == 'PRESENT').length ?? 0;
+    final totalHours = records?.fold<double>(
+            0, (sum, r) => sum + (r.workingHours ?? 0)) ??
+        0;
+    final done = tasks?.where((t) => t.status == 'DONE').length ?? 0;
+    final month = _months[DateTime.now().month - 1];
+
+    final checkedOut =
+        today != null && today.checkIn != null && today.checkOut != null;
+    final phone = emp?.phone;
+    final hasPhone = (phone ?? '').replaceAll(RegExp(r'[^0-9+#*]'), '').isNotEmpty;
+
+    final photo = _photoUrl(emp?.profileImageUrl);
+    // Avatar ring follows today's state; grey while unknown / not checked in.
+    final ring = liveColor == Colors.white54 ? Colors.white24 : liveColor;
+
+    final kpis = ProKpiStrip(
+      cells: [
+        ProKpi(
+          value: records == null ? '—' : '$present/${records.length}',
+          label: 'Days present · $month',
+          progress: records == null || records.isEmpty
+              ? null
+              : present / records.length,
+          color: AppColors.success,
+          onTap: () => _openTab(1),
+        ),
+        ProKpi(
+          value: records == null ? '—' : _fmtHours(totalHours),
+          label: 'Hours · $month',
+          onTap: () => _openTab(1),
+        ),
+        ProKpi(
+          value: tasks == null ? '—' : '$done/${tasks.length}',
+          label: 'Tasks done',
+          progress:
+              tasks == null || tasks.isEmpty ? null : done / tasks.length,
+          onTap: () => _openTab(3),
+        ),
+      ],
+    );
+
+    return ProHero(
+      overlap: kpis,
+      children: [
+        if (photo == null)
+          ProHeroIdentity(
             name: name,
-            size: 54,
-            radius: 16,
-            imageUrl: _photoUrl(emp?.profileImageUrl),
+            role: (role ?? '').isEmpty ? null : role,
+            initials: ProAvatar.initialsOf(name),
+            ringColor: ring,
+            tags: tags,
+          )
+        else
+          _PhotoIdentity(
+            name: name,
+            role: (role ?? '').isEmpty ? null : role,
+            photoUrl: photo,
+            ringColor: ring,
+            tags: tags,
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
+        ProLiveLine(text: liveText, color: liveColor),
+        ProHeroActions(
+          actions: [
+            ProAction(
+              icon: Icons.call_rounded,
+              label: 'Call',
+              primary: true,
+              onTap: hasPhone ? () => _call(phone) : null,
+            ),
+            if (Branding.current.featureEnabled('FEATURE_CHAT'))
+              ProAction(
+                icon: Icons.chat_bubble_outline_rounded,
+                label: 'Message',
+                onTap: _chatBusy ? null : _message,
+              ),
+            ProAction(
+              icon: Icons.my_location_rounded,
+              label: 'Locate',
+              onTap: () => _openTab(2),
+            ),
+            if (canOverride)
+              ProAction(
+                icon: Icons.undo_rounded,
+                label: 'Undo out',
+                onTap: _undoBusy || !checkedOut
+                    ? null
+                    : () => _undoCheckOut(today),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// [ProHeroIdentity] layout with the employee's profile photo (initials show
+/// while it loads or if it fails).
+class _PhotoIdentity extends StatelessWidget {
+  const _PhotoIdentity({
+    required this.name,
+    required this.photoUrl,
+    required this.ringColor,
+    required this.tags,
+    this.role,
+  });
+
+  final String name;
+  final String? role;
+  final String photoUrl;
+  final Color ringColor;
+  final List<ProHeroTag> tags;
+
+  @override
+  Widget build(BuildContext context) {
+    final initials = Text(
+      ProAvatar.initialsOf(name),
+      style: TextStyle(
+        fontSize: 21,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.4,
+        color: AppColors.deep,
+      ),
+    );
+    return Row(
+      children: [
+        Container(
+          width: 64,
+          height: 64,
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(color: AppColors.deep, spreadRadius: 3),
+              BoxShadow(color: ringColor, spreadRadius: 5),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: Image.network(
+            photoUrl,
+            width: 64,
+            height: 64,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Center(child: initials),
+            loadingBuilder: (context, child, progress) =>
+                progress == null ? child : Center(child: initials),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 22,
+                  height: 1.22,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.55,
+                  color: Colors.white,
                 ),
-                if (meta != null && meta.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    meta,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+              ),
+              if (role != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    role!,
                     style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.muted,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      height: 1.35,
+                      color: Colors.white70,
                     ),
                   ),
-                ],
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    if ((emp?.employeeCode ?? '').isNotEmpty)
-                      StatusPill(
-                        label: emp!.employeeCode!,
-                        color: AppColors.primary,
-                        icon: Icons.badge_rounded,
-                      ),
-                    if (emp != null)
-                      StatusPill(
-                        label: emp.active ? 'Active' : 'Inactive',
-                        color: emp.active ? AppColors.success : AppColors.muted,
-                      ),
-                  ],
                 ),
-              ],
-            ),
+              if (tags.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 9),
+                  child: Wrap(spacing: 6, runSpacing: 6, children: tags),
+                ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -443,10 +697,9 @@ class _AttendanceTab extends ConsumerWidget {
               _SectionCard(
                 title: "Today",
                 icon: Icons.today_rounded,
-                trailing: StatusPill(
-                  label: todayRec == null ? 'No record' : tone.label,
-                  color: todayRec == null ? AppColors.muted : tone.color,
-                ),
+                trailing: todayRec == null
+                    ? ProPill.neutral('No record')
+                    : _tonePill(tone),
                 children: [
                   _InfoRow(Icons.login_rounded, 'Check-in',
                       _fmtTime(todayRec?.checkIn)),
@@ -618,9 +871,7 @@ class _MarkAttendanceCardState extends ConsumerState<_MarkAttendanceCard> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: _status == 'ABSENT'
-                ? FilledButton.styleFrom(backgroundColor: AppColors.danger)
-                : null,
+            style: _status == 'ABSENT' ? _destructive() : null,
             onPressed: () => Navigator.pop(ctx, true),
             child: Text('Mark $label'),
           ),
@@ -663,71 +914,76 @@ class _MarkAttendanceCardState extends ConsumerState<_MarkAttendanceCard> {
       title: 'Mark attendance',
       icon: Icons.edit_calendar_rounded,
       trailing: currentTone == null
-          ? const StatusPill(label: 'No record', color: AppColors.muted)
-          : StatusPill(label: currentTone.label, color: currentTone.color),
+          ? ProPill.neutral('No record')
+          : _tonePill(currentTone),
       children: [
-        InkWell(
-          onTap: _busy ? null : _pickDate,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          child: InputDecorator(
-            decoration: const InputDecoration(
-              labelText: 'Day',
-              isDense: true,
-              prefixIcon: Icon(Icons.event_rounded, size: 20),
-            ),
-            child: Text(
-              DateFormat('EEE, d MMM yyyy').format(_date),
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                color: AppColors.ink,
+        const SizedBox(height: 4),
+        ProField(
+          label: 'Day',
+          child: InkWell(
+            onTap: _busy ? null : _pickDate,
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            child: InputDecorator(
+              decoration: const InputDecoration(
+                isDense: true,
+                prefixIcon: Icon(Icons.event_rounded, size: 20),
+                suffixIcon: Icon(Icons.expand_more_rounded, size: 20),
               ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final o in _options)
-              ChoiceChip(
-                avatar: Icon(o.$3,
-                    size: 16,
-                    color: _status == o.$1
-                        ? StatusTone.forAttendance(o.$1).color
-                        : AppColors.muted),
-                label: Text(o.$2),
-                selected: _status == o.$1,
-                selectedColor:
-                    StatusTone.forAttendance(o.$1).color.withOpacity(0.15),
-                labelStyle: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: _status == o.$1
-                      ? StatusTone.forAttendance(o.$1).color
-                      : AppColors.inkSoft,
+              child: Text(
+                DateFormat('EEE, d MMM yyyy').format(_date),
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.ink,
                 ),
-                onSelected: _busy ? null : (_) => setState(() => _status = o.$1),
               ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        TextField(
-          controller: _notes,
-          enabled: !_busy,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(
-            labelText: 'Note (optional)',
-            isDense: true,
+            ),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
+        ProField(
+          label: 'Mark as',
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final o in _options)
+                ChoiceChip(
+                  avatar: Icon(o.$3,
+                      size: 16,
+                      color: _status == o.$1 ? Colors.white : AppColors.muted),
+                  label: Text(o.$2),
+                  selected: _status == o.$1,
+                  labelStyle: TextStyle(
+                    fontWeight:
+                        _status == o.$1 ? FontWeight.w600 : FontWeight.w500,
+                    color: _status == o.$1 ? Colors.white : AppColors.inkSoft,
+                  ),
+                  onSelected:
+                      _busy ? null : (_) => setState(() => _status = o.$1),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        ProField(
+          label: 'Note (optional)',
+          child: TextField(
+            controller: _notes,
+            enabled: !_busy,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              hintText: 'e.g. Did not report to branch',
+              isDense: true,
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
             onPressed: _busy ? null : _save,
-            style: _status == 'ABSENT'
-                ? FilledButton.styleFrom(backgroundColor: AppColors.danger)
-                : null,
+            style: _status == 'ABSENT' ? _destructive() : null,
             icon: _busy
                 ? const SizedBox(
                     width: 16,
@@ -741,6 +997,13 @@ class _MarkAttendanceCardState extends ConsumerState<_MarkAttendanceCard> {
                 : 'Mark ${_options.firstWhere((o) => o.$1 == _status).$2}'),
           ),
         ),
+        const SizedBox(height: 8),
+        const Text(
+          'A missed punch is fixed through a regularization request, so '
+          'Present is not offered here.',
+          style: AppText.caption,
+        ),
+        const SizedBox(height: 6),
       ],
     );
   }
@@ -775,51 +1038,20 @@ class _UndoCheckOutCardState extends ConsumerState<_UndoCheckOutCard> {
     return null;
   }
 
-  String _hhmm(String? iso) {
-    if (iso == null) return '—';
-    final dt = DateTime.tryParse(iso);
-    return dt == null ? iso : DateFormat('h:mm a').format(dt);
-  }
+  String _hhmm(String? iso) => _hhmmA(iso);
 
   Future<void> _undo() async {
     final today = _today;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Undo today's check-out?"),
-        content: Text(
-          'The check-out at ${_hhmm(today?.checkOut)} will be cleared and the '
-          'employee will be checked in again (check-in ${_hhmm(today?.checkIn)} '
-          'is kept), so they can check out properly later.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Undo check-out'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
+    final confirmed = await _confirmUndoCheckOut(context, today);
+    if (!confirmed || !mounted) return;
 
     setState(() => _busy = true);
     try {
-      final message = await ref
-          .read(attendanceRepositoryProvider)
-          .reopenCheckOut(employeeId: widget.employeeId);
-      if (!mounted) return;
-      widget.onChanged();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not undo the check-out: $e')),
+      await _reopenCheckOut(
+        context,
+        ref,
+        employeeId: widget.employeeId,
+        onChanged: widget.onChanged,
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -841,40 +1073,108 @@ class _UndoCheckOutCardState extends ConsumerState<_UndoCheckOutCard> {
     return _SectionCard(
       title: 'Undo check-out',
       icon: Icons.history_toggle_off_rounded,
+      trailing: checkedOut ? ProPill.info('Checked out') : null,
       children: [
+        const SizedBox(height: 4),
         Text(
           state,
           style: const TextStyle(
-            fontWeight: FontWeight.w700,
+            fontSize: 14.5,
+            fontWeight: FontWeight.w500,
             color: AppColors.ink,
+            fontFeatures: [FontFeature.tabularFigures()],
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         const Text(
           'For an employee who checked out by mistake: clears today\'s '
           'check-out so they can check out again later.',
-          style: TextStyle(fontSize: 12, color: AppColors.inkSoft),
+          style: AppText.caption,
         ),
         const SizedBox(height: 12),
         SizedBox(
           width: double.infinity,
-          child: FilledButton.icon(
+          child: OutlinedButton.icon(
             onPressed: _busy || !checkedOut ? null : _undo,
             icon: _busy
                 ? const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.undo_rounded, size: 18),
             label: Text(_busy ? 'Undoing…' : 'Undo check-out'),
           ),
         ),
+        const SizedBox(height: 6),
       ],
     );
   }
 }
+
+String _hhmmA(String? iso) {
+  if (iso == null) return '—';
+  final dt = DateTime.tryParse(iso);
+  return dt == null ? iso : DateFormat('h:mm a').format(dt);
+}
+
+/// "Undo today's check-out?" confirmation, shared by the Attendance tab card
+/// and the hero action. Returns true when the manager confirms.
+Future<bool> _confirmUndoCheckOut(
+    BuildContext context, AttendanceRecord? today) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text("Undo today's check-out?"),
+      content: Text(
+        'The check-out at ${_hhmmA(today?.checkOut)} will be cleared and the '
+        'employee will be checked in again (check-in ${_hhmmA(today?.checkIn)} '
+        'is kept), so they can check out properly later.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('Undo check-out'),
+        ),
+      ],
+    ),
+  );
+  return confirmed == true;
+}
+
+/// Clears today's check-out for [employeeId] and reports the server message.
+Future<void> _reopenCheckOut(
+  BuildContext context,
+  WidgetRef ref, {
+  required int employeeId,
+  required VoidCallback onChanged,
+}) async {
+  try {
+    final message = await ref
+        .read(attendanceRepositoryProvider)
+        .reopenCheckOut(employeeId: employeeId);
+    if (!context.mounted) return;
+    onChanged();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  } catch (e) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Could not undo the check-out: $e')),
+    );
+  }
+}
+
+ButtonStyle _destructive() => FilledButton.styleFrom(
+      backgroundColor: AppColors.dangerTint,
+      foregroundColor: AppColors.danger,
+    );
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. Location
@@ -1071,7 +1371,7 @@ class _LocationTabState extends ConsumerState<_LocationTab> {
               _SectionCard(
                 title: 'Current location',
                 icon: Icons.my_location_rounded,
-                trailing: StatusPill(label: locTone.label, color: locTone.color),
+                trailing: _tonePill(locTone),
                 children: [
                   _InfoRow(
                     Icons.place_rounded,
@@ -1105,60 +1405,53 @@ class _LocationTabState extends ConsumerState<_LocationTab> {
                           ),
                         )
                       : const Icon(Icons.gps_fixed_rounded, size: 18),
-                  label: Text(_locating ? 'Locating…' : 'Get Live Location'),
+                  label: Text(_locating ? 'Locating…' : 'Get live location'),
                 ),
               ),
               const SizedBox(height: 12),
-              _statGrid([
-                StatTileV2(
+              _StatStrip(cells: [
+                _StatCell(
                   label: 'Distance today',
                   value: distanceKm == null
                       ? '—'
                       : '${distanceKm.toStringAsFixed(1)} km',
-                  icon: Icons.route_rounded,
                   color: AppColors.primary,
                 ),
-                StatTileV2(
+                _StatCell(
                   label: 'Field visits',
                   value: '$visits',
-                  icon: Icons.store_mall_directory_rounded,
                   color: AppColors.accent,
                 ),
               ]),
               const SizedBox(height: 12),
               GlassCard(
-                shadow: AppShadows.soft,
+                padding: const EdgeInsets.all(14),
                 child: Row(
                   children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(11),
-                      ),
-                      child: Icon(Icons.map_rounded,
-                          color: AppColors.primary, size: 20),
-                    ),
+                    ProIconWell(icon: Icons.map_rounded, color: AppColors.primary),
                     const SizedBox(width: 12),
                     const Expanded(
                       child: Text(
                         "Today's route on the map",
                         style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w500,
                           color: AppColors.ink,
                         ),
                       ),
                     ),
-                    FilledButton.icon(
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
                       onPressed: _routeBusy ? null : _openTodaysRouteInMaps,
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 40),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
                       icon: _routeBusy
                           ? const SizedBox(
                               width: 14,
                               height: 14,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white),
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.navigation_rounded, size: 16),
                       label: Text(_routeBusy ? 'Opening…' : 'Route map'),
@@ -1193,12 +1486,11 @@ class _LiveResultNote extends StatelessWidget {
         ? live.message.trim()
         : (hasCoords ? 'Live location updated' : 'No live location available');
     return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.only(top: 8, bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.25)),
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppRadii.md),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1217,10 +1509,9 @@ class _LiveResultNote extends StatelessWidget {
             child: Text(
               text,
               style: const TextStyle(
-                fontSize: 12,
+                fontSize: 13,
                 color: AppColors.ink,
-                fontWeight: FontWeight.w500,
-                height: 1.3,
+                height: 1.4,
               ),
             ),
           ),
@@ -1251,21 +1542,13 @@ class _LocationStatusBanner extends StatelessWidget {
         : tone.label;
 
     return GlassCard(
-      shadow: AppShadows.soft,
+      padding: const EdgeInsets.all(14),
       child: Row(
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              on ? Icons.location_on_rounded : Icons.location_off_rounded,
-              color: color,
-              size: 22,
-            ),
+          ProIconWell(
+            icon: on ? Icons.location_on_rounded : Icons.location_off_rounded,
+            color: color,
+            size: 44,
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1274,20 +1557,17 @@ class _LocationStatusBanner extends StatelessWidget {
               children: [
                 const Text(
                   'Location status',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.muted,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: TextStyle(fontSize: 12.5, color: AppColors.muted),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 1),
                 Text(
                   tone.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.2,
                     color: AppColors.ink,
                   ),
                 ),
@@ -1298,9 +1578,9 @@ class _LocationStatusBanner extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 11.5,
+                      fontSize: 12.5,
                       color: AppColors.muted,
-                      fontWeight: FontWeight.w500,
+                      fontFeatures: [FontFeature.tabularFigures()],
                     ),
                   ),
                 ],
@@ -1308,29 +1588,33 @@ class _LocationStatusBanner extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          // Big ON / OFF pill with a status dot.
+          // ON / OFF pill with a status dot (pulses while tracking).
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(22),
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(999),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  width: 9,
-                  height: 9,
-                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-                ),
-                const SizedBox(width: 7),
+                if (on)
+                  ProPulseDot(color: color, size: 7)
+                else
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration:
+                        BoxDecoration(color: color, shape: BoxShape.circle),
+                  ),
+                const SizedBox(width: 6),
                 Text(
                   badgeText,
                   style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
                     color: color,
-                    letterSpacing: 0.6,
+                    letterSpacing: 0.4,
                   ),
                 ),
               ],
@@ -1371,47 +1655,41 @@ class _TasksTab extends ConsumerWidget {
 
           return Column(
             children: [
-              _statGrid([
-                StatTileV2(
+              _StatStrip(cells: [
+                _StatCell(
                   label: 'Pending',
                   value: '$pending',
-                  icon: Icons.radio_button_unchecked_rounded,
-                  color: AppColors.muted,
+                  color: AppColors.faint,
                 ),
-                StatTileV2(
+                _StatCell(
                   label: 'In progress',
                   value: '$inProgress',
-                  icon: Icons.timelapse_rounded,
                   color: AppColors.info,
                 ),
-                StatTileV2(
+                _StatCell(
                   label: 'Completed',
                   value: '$completed',
-                  icon: Icons.check_circle_rounded,
                   color: AppColors.success,
                 ),
-                StatTileV2(
+                _StatCell(
                   label: 'Overdue',
                   value: '$overdue',
-                  icon: Icons.warning_amber_rounded,
                   color: AppColors.danger,
                 ),
               ]),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               if (tasks.isEmpty)
                 const AppEmptyState(
                   icon: Icons.checklist_rounded,
                   message: 'No tasks assigned to this employee.',
                 )
               else ...[
-                const AppSectionHeader(title: 'Recent tasks'),
+                const ProSectionHeader(title: 'Recent tasks'),
                 const SizedBox(height: 10),
-                for (final t in tasks.take(5))
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _TaskCard(t: t),
-                  ),
-                const SizedBox(height: 4),
+                ProListGroup(
+                  children: [for (final t in tasks.take(5)) _TaskCard(t: t)],
+                ),
+                const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
@@ -1444,55 +1722,18 @@ class _TaskCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final tone = _taskTone(t.status);
     final overdue = _isOverdue(t);
-    return GlassCard(
-      padding: const EdgeInsets.all(12),
-      shadow: AppShadows.soft,
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  t.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Row(
-                  children: [
-                    Icon(
-                      overdue
-                          ? Icons.event_busy_rounded
-                          : Icons.event_rounded,
-                      size: 12,
-                      color: overdue ? AppColors.danger : AppColors.muted,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      t.dueDate == null
-                          ? (t.taskCode ?? 'No due date')
-                          : 'Due ${_fmtDate(t.dueDate!)}',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: overdue ? AppColors.danger : AppColors.muted,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          StatusPill(label: tone.label, color: tone.color),
-        ],
+    final due = t.dueDate == null
+        ? (t.taskCode ?? 'No due date')
+        : 'Due ${_fmtDate(t.dueDate!)}';
+    return ProListRow(
+      leading: ProIconWell(
+        icon: overdue ? Icons.event_busy_rounded : Icons.event_rounded,
+        color: overdue ? AppColors.danger : tone.color,
       ),
+      title: t.title,
+      titleMaxLines: 2,
+      subtitle: overdue ? 'Overdue · $due' : due,
+      pill: _tonePill(tone),
     );
   }
 }
@@ -1527,11 +1768,19 @@ class _AllTasksScreen extends ConsumerWidget {
               ),
             );
           }
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: tasks.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 10),
-            itemBuilder: (_, i) => _TaskCard(t: tasks[i]),
+          return ListView(
+            padding: EdgeInsets.fromLTRB(
+                16, 14, 16, MediaQuery.of(context).padding.bottom + 24),
+            children: [
+              ProSectionHeader(
+                title: 'All tasks · ${tasks.length}',
+                small: true,
+              ),
+              const SizedBox(height: 8),
+              ProListGroup(
+                children: [for (final t in tasks) _TaskCard(t: t)],
+              ),
+            ],
           );
         },
       ),
@@ -1571,56 +1820,58 @@ class _LeaveTab extends ConsumerWidget {
 
           return Column(
             children: [
-              _statGrid([
-                StatTileV2(
+              _StatStrip(cells: [
+                _StatCell(
                   label: 'Pending',
                   value: '$pending',
-                  icon: Icons.hourglass_bottom_rounded,
                   color: AppColors.warning,
                 ),
-                StatTileV2(
+                _StatCell(
                   label: 'Approved',
                   value: '$approved',
-                  icon: Icons.check_circle_rounded,
                   color: AppColors.success,
                 ),
-                StatTileV2(
+                _StatCell(
                   label: 'Rejected',
                   value: '$rejected',
-                  icon: Icons.cancel_rounded,
                   color: AppColors.danger,
                 ),
-                StatTileV2(
+                _StatCell(
                   label: 'Upcoming',
                   value: '${upcoming.length}',
-                  icon: Icons.event_rounded,
                   color: AppColors.info,
                 ),
               ]),
-              const SizedBox(height: 12),
-              _SectionCard(
-                title: 'Leave balance',
-                icon: Icons.account_balance_wallet_rounded,
-                children: [
-                  if (b.balance == null || b.balance!.balances.isEmpty)
-                    const _MutedLine('No balance configured.')
-                  else
+              const SizedBox(height: 16),
+              const ProSectionHeader(title: 'Leave balance'),
+              const SizedBox(height: 10),
+              if (b.balance == null || b.balance!.balances.isEmpty)
+                const GlassCard(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: _MutedLine('No balance configured.'),
+                  ),
+                )
+              else
+                ProListGroup(
+                  children: [
                     for (final bal in b.balance!.balances)
                       _BalanceRow(bal: bal),
-                ],
-              ),
-              const SizedBox(height: 12),
+                  ],
+                ),
+              const SizedBox(height: 16),
               if (upcoming.isNotEmpty) ...[
-                const AppSectionHeader(title: 'Upcoming leave'),
+                const ProSectionHeader(title: 'Upcoming leave'),
                 const SizedBox(height: 10),
-                for (final r in upcoming.take(3))
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _LeaveCard(r: r),
-                  ),
-                const SizedBox(height: 2),
+                ProListGroup(
+                  children: [
+                    for (final r in upcoming.take(3)) _LeaveCard(r: r),
+                  ],
+                ),
+                const SizedBox(height: 16),
               ],
-              const AppSectionHeader(title: 'Recent requests'),
+              const ProSectionHeader(title: 'Recent requests'),
               const SizedBox(height: 10),
               if (reqs.isEmpty)
                 const AppEmptyState(
@@ -1628,11 +1879,9 @@ class _LeaveTab extends ConsumerWidget {
                   message: 'No leave requests on record.',
                 )
               else
-                for (final r in reqs.take(8))
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _LeaveCard(r: r),
-                  ),
+                ProListGroup(
+                  children: [for (final r in reqs.take(8)) _LeaveCard(r: r)],
+                ),
             ],
           );
         },
@@ -1650,45 +1899,11 @@ class _BalanceRow extends StatelessWidget {
     final allowance = bal.allowanceDays ?? 0;
     final balance = bal.balanceDays ?? (allowance - bal.usedDays);
     final ratio = allowance <= 0 ? 0.0 : (bal.usedDays / allowance).clamp(0.0, 1.0);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  bal.leaveTypeLabel,
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
-                  ),
-                ),
-              ),
-              Text(
-                '$balance / $allowance left',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.primary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            child: LinearProgressIndicator(
-              value: ratio,
-              minHeight: 6,
-              backgroundColor: AppColors.hairline,
-              valueColor: AlwaysStoppedAnimation(AppColors.primary),
-            ),
-          ),
-        ],
-      ),
+    return ProProgressRow(
+      icon: Icons.beach_access_rounded,
+      label: bal.leaveTypeLabel,
+      value: '$balance / $allowance left',
+      progress: ratio.toDouble(),
     );
   }
 }
@@ -1700,45 +1915,11 @@ class _LeaveCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tone = StatusTone.forLeave(r.status);
-    return GlassCard(
-      padding: const EdgeInsets.all(12),
-      shadow: AppShadows.soft,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${r.leaveType} · ${r.numberOfDays ?? '?'} day(s)',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
-                  ),
-                ),
-              ),
-              StatusPill(label: tone.label, color: tone.color),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              const Icon(Icons.calendar_today_rounded,
-                  size: 12, color: AppColors.muted),
-              const SizedBox(width: 5),
-              Text(
-                '${r.fromDate}  →  ${r.toDate}',
-                style: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.inkSoft,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+    return ProListRow(
+      leading: ProIconWell(icon: Icons.beach_access_rounded, color: tone.color),
+      title: '${r.leaveType} · ${r.numberOfDays ?? '?'} day(s)',
+      subtitle: '${r.fromDate}  →  ${r.toDate}',
+      pill: _tonePill(tone),
     );
   }
 }
@@ -1789,11 +1970,15 @@ class _DocumentsTab extends ConsumerWidget {
             return !_expected.any((e) => up.contains(e.$1));
           }).toList();
 
+          final have = _expected.where((e) => has(e.$1)).length;
           return Column(
             children: [
-              _SectionCard(
+              ProSectionHeader(
                 title: 'Required documents',
-                icon: Icons.fact_check_rounded,
+                trailing: ProPill.neutral('$have of ${_expected.length}'),
+              ),
+              const SizedBox(height: 10),
+              ProListGroup(
                 children: [
                   for (final e in _expected)
                     _DocStatusRow(
@@ -1804,10 +1989,10 @@ class _DocumentsTab extends ConsumerWidget {
                 ],
               ),
               if (extras.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _SectionCard(
-                  title: 'Other documents',
-                  icon: Icons.folder_open_rounded,
+                const SizedBox(height: 16),
+                const ProSectionHeader(title: 'Other documents'),
+                const SizedBox(height: 10),
+                ProListGroup(
                   children: [
                     for (final d in extras)
                       _DocStatusRow(
@@ -1818,6 +2003,12 @@ class _DocumentsTab extends ConsumerWidget {
                   ],
                 ),
               ],
+              const SizedBox(height: 14),
+              const ProNote(
+                'Only HR, Admin and people with employee-view access can see '
+                'these documents.',
+                icon: Icons.lock_outline_rounded,
+              ),
             ],
           );
         },
@@ -1838,31 +2029,13 @@ class _DocStatusRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
-      child: Row(
-        children: [
-          Icon(icon, size: 17, color: AppColors.muted),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: AppColors.ink,
-              ),
-            ),
-          ),
-          StatusPill(
-            label: available ? 'Available' : 'Missing',
-            color: available ? AppColors.success : AppColors.muted,
-            icon: available
-                ? Icons.check_circle_rounded
-                : Icons.remove_circle_outline_rounded,
-          ),
-        ],
+    return ProListRow(
+      leading: ProIconWell(
+        icon: icon,
+        color: available ? AppColors.primary : null,
       ),
+      title: label,
+      pill: available ? ProPill.ok('Available') : ProPill.neutral('Missing'),
     );
   }
 }
@@ -1895,11 +2068,14 @@ class _AssetsTab extends ConsumerWidget {
           }
           return Column(
             children: [
-              for (final a in assets)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _AssetCard(a: a),
-                ),
+              ProSectionHeader(
+                title: 'Assigned assets · ${assets.length}',
+                small: true,
+              ),
+              const SizedBox(height: 8),
+              ProListGroup(
+                children: [for (final a in assets) _AssetCard(a: a)],
+              ),
             ],
           );
         },
@@ -1920,58 +2096,14 @@ class _AssetCard extends StatelessWidget {
       if ((a.serialNumber ?? '').isNotEmpty) 'SN ${a.serialNumber}',
       if ((a.imeiNumber ?? '').isNotEmpty) 'IMEI ${a.imeiNumber}',
     ].join(' · ');
-    return GlassCard(
-      padding: const EdgeInsets.all(12),
-      shadow: AppShadows.soft,
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.primary.withOpacity(0.18)),
-            ),
-            alignment: Alignment.center,
-            child: Icon(_assetIcon(a.assetName),
-                color: AppColors.primary, size: 21),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  a.assetName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
-                  ),
-                ),
-                if (sub.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    sub,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.muted,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          StatusPill(label: tone.label, color: tone.color),
-        ],
+    return ProListRow(
+      leading: ProIconWell(
+        icon: _assetIcon(a.assetName),
+        color: AppColors.primary,
       ),
+      title: a.assetName,
+      subtitle: sub.isEmpty ? null : sub,
+      pill: _tonePill(tone),
     );
   }
 }
@@ -1986,7 +2118,8 @@ class _PerformanceTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PerformanceTabBody(employeeId: employeeId);
+    // `nested`: lives under the pinned tab strip of the NestedScrollView.
+    return PerformanceTabBody(employeeId: employeeId, nested: true);
   }
 }
 
@@ -2085,7 +2218,6 @@ class _TimelineTab extends ConsumerWidget {
               ))
         : GlassCard(
             padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 14),
-            shadow: AppShadows.soft,
             child: Column(
               children: [
                 for (var i = 0; i < top.length; i++)
@@ -2104,22 +2236,13 @@ class _TimelineTab extends ConsumerWidget {
         ref.invalidate(_locationProvider(employeeId));
       },
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (canViewChanges) ...[
             _ChangeHistoryCard(changes: changes),
-            const SizedBox(height: 14),
-            const Padding(
-              padding: EdgeInsets.only(left: 4, bottom: 8),
-              child: Text(
-                'Activity',
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink,
-                ),
-              ),
-            ),
+            const SizedBox(height: 16),
+            const ProSectionHeader(title: 'Activity'),
+            const SizedBox(height: 10),
           ],
           activity,
         ],
@@ -2146,16 +2269,16 @@ class _ChangeHistoryCard extends StatelessWidget {
             padding: EdgeInsets.symmetric(vertical: 10),
             child: Text(
               'Could not load change history.',
-              style: TextStyle(fontSize: 12, color: AppColors.danger),
+              style: TextStyle(fontSize: 13, color: AppColors.danger),
             ),
           ),
           data: (list) {
             if (list.isEmpty) {
-              return const Padding(
-                padding: EdgeInsets.symmetric(vertical: 10),
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
                 child: Text(
                   'No changes recorded yet. Edits made from now on will appear here.',
-                  style: TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: AppText.caption.copyWith(fontSize: 13),
                 ),
               );
             }
@@ -2196,9 +2319,8 @@ class _ChangeLogRow extends StatelessWidget {
                 height: 26,
                 margin: const EdgeInsets.only(top: 6),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: color.withOpacity(0.28)),
+                  color: color.withValues(alpha: 0.11),
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
                   entry.isCreated ? Icons.person_add_alt_1_rounded : Icons.edit_rounded,
@@ -2219,18 +2341,15 @@ class _ChangeLogRow extends StatelessWidget {
                 children: [
                   Text.rich(
                     TextSpan(
-                      style: const TextStyle(fontSize: 12.5, color: AppColors.ink),
+                      style: const TextStyle(fontSize: 13.5, color: AppColors.ink),
                       children: [
                         TextSpan(
                           text: entry.actorName,
-                          style: const TextStyle(fontWeight: FontWeight.w800),
+                          style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                         TextSpan(
                           text: ' $summary',
-                          style: const TextStyle(
-                            color: AppColors.muted,
-                            fontWeight: FontWeight.w500,
-                          ),
+                          style: const TextStyle(color: AppColors.muted),
                         ),
                       ],
                     ),
@@ -2239,9 +2358,9 @@ class _ChangeLogRow extends StatelessWidget {
                   Text(
                     at == null ? '—' : _fmtDateTime(at),
                     style: const TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
                       color: AppColors.muted,
+                      fontFeatures: [FontFeature.tabularFigures()],
                     ),
                   ),
                   if (entry.changes.isNotEmpty) ...[
@@ -2250,9 +2369,8 @@ class _ChangeLogRow extends StatelessWidget {
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: AppColors.bg,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppColors.hairline),
+                        color: AppColors.surfaceAlt,
+                        borderRadius: BorderRadius.circular(AppRadii.md),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2264,11 +2382,10 @@ class _ChangeLogRow extends StatelessWidget {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    c.label.toUpperCase(),
+                                    c.label,
                                     style: const TextStyle(
-                                      fontSize: 9.5,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 0.4,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
                                       color: AppColors.muted,
                                     ),
                                   ),
@@ -2291,12 +2408,12 @@ class _ChangeLogRow extends StatelessWidget {
                                           text: c.newValue ?? '—',
                                           style: const TextStyle(
                                             color: AppColors.ink,
-                                            fontWeight: FontWeight.w700,
+                                            fontWeight: FontWeight.w500,
                                           ),
                                         ),
                                       ],
                                     ),
-                                    style: const TextStyle(fontSize: 12),
+                                    style: const TextStyle(fontSize: 13),
                                   ),
                                 ],
                               ),
@@ -2333,11 +2450,10 @@ class _TimelineRow extends StatelessWidget {
                 height: 30,
                 margin: const EdgeInsets.only(top: 8),
                 decoration: BoxDecoration(
-                  color: e.color.withOpacity(0.12),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: e.color.withOpacity(0.28)),
+                  color: e.color.withValues(alpha: 0.11),
+                  borderRadius: BorderRadius.circular(9),
                 ),
-                child: Icon(e.icon, size: 15, color: e.color),
+                child: Icon(e.icon, size: 16, color: e.color),
               ),
               if (!isLast)
                 Expanded(
@@ -2358,8 +2474,8 @@ class _TimelineRow extends StatelessWidget {
                         child: Text(
                           e.title,
                           style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w500,
                             color: AppColors.ink,
                           ),
                         ),
@@ -2367,9 +2483,9 @@ class _TimelineRow extends StatelessWidget {
                       Text(
                         _fmtDateTime(e.time),
                         style: const TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
                           color: AppColors.muted,
+                          fontFeatures: [FontFeature.tabularFigures()],
                         ),
                       ),
                     ],
@@ -2380,9 +2496,8 @@ class _TimelineRow extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 11.5,
+                      fontSize: 12.5,
                       color: AppColors.muted,
-                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
@@ -2399,7 +2514,8 @@ class _TimelineRow extends StatelessWidget {
 // Shared building blocks
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Scrollable, pull-to-refresh container used by every tab.
+//// Scrollable, pull-to-refresh container used by every tab. Injects the
+/// pinned tab strip's overlap so the first card never hides under it.
 class _TabScaffold extends StatelessWidget {
   const _TabScaffold({required this.child, this.onRefresh});
   final Widget child;
@@ -2408,20 +2524,30 @@ class _TabScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
-    final list = ListView(
+    final list = CustomScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: EdgeInsets.fromLTRB(16, 14, 16, mq.padding.bottom + 24),
-      children: [child],
+      slivers: [
+        SliverOverlapInjector(
+          handle: NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+        ),
+        SliverPadding(
+          padding: EdgeInsets.fromLTRB(16, 14, 16, mq.padding.bottom + 24),
+          sliver: SliverToBoxAdapter(child: child),
+        ),
+      ],
     );
     if (onRefresh == null) return list;
     return RefreshIndicator(
       color: AppColors.primary,
+      backgroundColor: Colors.white,
       onRefresh: onRefresh!,
       child: list,
     );
   }
 }
 
+/// White section card: title row (optional trailing pill) then rows. Hairline
+/// dividers are drawn between consecutive [_InfoRow]s.
 class _SectionCard extends StatelessWidget {
   const _SectionCard({
     required this.title,
@@ -2437,38 +2563,24 @@ class _SectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GlassCard(
-      shadow: AppShadows.soft,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 16, color: AppColors.primary),
-                const SizedBox(width: 8),
-              ],
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
-                ),
-              ),
-              if (trailing != null) trailing!,
-            ],
-          ),
+          ProSectionHeader(title: title, trailing: trailing),
           const SizedBox(height: 6),
-          const Divider(height: 12),
-          ...children,
+          for (var i = 0; i < children.length; i++) ...[
+            if (i > 0 && children[i] is _InfoRow && children[i - 1] is _InfoRow)
+              const Divider(height: 1, thickness: 1, color: AppColors.hairlineSoft),
+            children[i],
+          ],
         ],
       ),
     );
   }
 }
 
+/// Key / value row (Pro key-value look) with a faint leading icon.
 class _InfoRow extends StatelessWidget {
   const _InfoRow(this.icon, this.label, this.value, {this.onTap});
   final IconData icon;
@@ -2484,18 +2596,21 @@ class _InfoRow extends StatelessWidget {
     final v = (value == null || value!.trim().isEmpty) ? '—' : value!.trim();
     final tappable = onTap != null;
     final row = Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 15, color: AppColors.muted),
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, size: 16, color: AppColors.faint),
+          ),
           const SizedBox(width: 10),
           Text(
             label,
             style: const TextStyle(
-              fontSize: 12,
+              fontSize: 14,
               color: AppColors.muted,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w500,
             ),
           ),
           const SizedBox(width: 12),
@@ -2504,17 +2619,20 @@ class _InfoRow extends StatelessWidget {
               v,
               textAlign: TextAlign.right,
               style: TextStyle(
-                fontSize: 12.5,
+                fontSize: 14,
                 color: tappable ? AppColors.primary : AppColors.ink,
-                fontWeight: FontWeight.w700,
-                decoration: tappable ? TextDecoration.underline : null,
+                fontWeight: FontWeight.w500,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ),
           if (tappable) ...[
             const SizedBox(width: 6),
-            Icon(Icons.open_in_new_rounded,
-                size: 14, color: AppColors.primary),
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(Icons.open_in_new_rounded,
+                  size: 15, color: AppColors.primary),
+            ),
           ],
         ],
       ),
@@ -2543,31 +2661,90 @@ class _MonthStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          '$value',
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-            color: color,
-            height: 1.1,
+    return _StatCell(label: label, value: '$value', color: color);
+  }
+}
+
+/// Dot + number + label cell used by [_MonthStat] and [_StatStrip].
+class _StatCell extends StatelessWidget {
+  const _StatCell({required this.label, required this.value, required this.color});
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      height: 1.2,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.4,
+                      color: AppColors.ink,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          label,
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: AppColors.muted,
+          const SizedBox(height: 3),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, color: AppColors.muted),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// White strip of evenly spaced stat cells with hairline separators.
+class _StatStrip extends StatelessWidget {
+  const _StatStrip({required this.cells});
+  final List<_StatCell> cells;
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassCard(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < cells.length; i++) ...[
+              if (i > 0)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: VerticalDivider(
+                      width: 1, thickness: 1, color: AppColors.hairlineSoft),
+                ),
+              Expanded(child: cells[i]),
+            ],
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -2578,15 +2755,8 @@ class _MutedLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Text(
-        text,
-        style: const TextStyle(
-          fontSize: 12.5,
-          color: AppColors.muted,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Text(text, style: AppText.caption.copyWith(fontSize: 13.5)),
     );
   }
 }
@@ -2595,59 +2765,18 @@ class _NoteCard extends StatelessWidget {
   const _NoteCard({required this.text});
   final String text;
   @override
-  Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.all(12),
-      shadow: AppShadows.soft,
-      color: AppColors.surfaceAlt,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.info_outline_rounded,
-              size: 15, color: AppColors.muted),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                fontSize: 11.5,
-                color: AppColors.muted,
-                fontWeight: FontWeight.w500,
-                height: 1.4,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => ProNote(text);
 }
 
-/// 2-per-row grid of stat tiles.
-Widget _statGrid(List<Widget> tiles) {
-  final rows = <Widget>[];
-  for (var i = 0; i < tiles.length; i += 2) {
-    final a = tiles[i];
-    final b = (i + 1 < tiles.length) ? tiles[i + 1] : null;
-    rows.add(Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      // IntrinsicHeight gives the Row a bounded cross-axis so that
-      // CrossAxisAlignment.stretch produces equal-height tiles instead of an
-      // unbounded constraint that collapses a child to zero size (which throws
-      // "Cannot hit test a render box with no size" and swallows taps).
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(child: a),
-            const SizedBox(width: 10),
-            Expanded(child: b ?? const SizedBox.shrink()),
-          ],
-        ),
-      ),
-    ));
+/// Status tone → Pro pill tint.
+ProPill _tonePill(StatusTone tone) {
+  if (tone.color == AppColors.success) return ProPill.ok(tone.label);
+  if (tone.color == AppColors.danger) return ProPill.bad(tone.label);
+  if (tone.color == AppColors.warning) return ProPill.warn(tone.label);
+  if (tone.color == AppColors.info || tone.color == AppColors.accent) {
+    return ProPill.info(tone.label);
   }
-  return Column(children: rows);
+  return ProPill.neutral(tone.label);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

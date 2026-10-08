@@ -5,8 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
+import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
 import 'form_renderer.dart';
 import 'task_done_screen.dart';
@@ -29,6 +31,17 @@ final taskCommentsProvider =
   return ref.watch(taskRepositoryProvider).comments(id);
 });
 
+String _trimNum(double v) =>
+    v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
+
+/// Label of the completion button. Form tasks: the backend decides
+/// review-vs-done on submit (server config can force review), so keep the
+/// label neutral. Non-form tasks transition exactly as the task config
+/// dictates.
+String _completeLabel(Task task, FormSchema? schema) => schema != null
+    ? 'Submit'
+    : (task.requiresReview ? 'Submit for review' : 'Mark done');
+
 class TaskDetailScreen extends ConsumerStatefulWidget {
   const TaskDetailScreen({super.key, required this.taskId});
   final int taskId;
@@ -43,6 +56,10 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
   bool _submitting = false;
   String? _topError;
   bool _hydrated = false;
+
+  /// Hero quick actions jump to these sections.
+  final _activityKey = GlobalKey();
+  final _commentsKey = GlobalKey();
 
   void _hydrate(Task task) {
     if (_hydrated) return;
@@ -228,22 +245,38 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
     }
   }
 
+  void _jumpTo(GlobalKey key) {
+    final ctx = key.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOutCubic,
+      alignment: 0.04,
+    );
+  }
+
+  /// Action buttons are offered while the task is neither in review nor closed.
+  bool _hasActions(Task task) => !task.isInReview && !task.isClosed;
+
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(taskDetailProvider(widget.taskId));
+    final loaded = async.valueOrNull;
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: const Text('Task'),
-        backgroundColor: Colors.white,
-        foregroundColor: AppColors.ink,
-        elevation: 0.5,
-      ),
+      appBar: AppBar(title: const Text('Task')),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Padding(
-          padding: const EdgeInsets.all(24),
-          child: Center(child: Text(e.toString())),
+          padding: const EdgeInsets.all(16),
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: AppErrorPanel(
+              message: e.toString(),
+              onRetry: () => ref.invalidate(taskDetailProvider(widget.taskId)),
+            ),
+          ),
         ),
         data: (task) {
           _hydrate(task);
@@ -253,41 +286,43 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
           // manager is performing it on the assignee's behalf.
           final onBehalf =
               task.isOnBehalfFor(ref.read(authUserProvider)?.employeeId);
+          final required = _requiredProgress(task, schema);
 
-          return ListView(
-            padding: const EdgeInsets.all(16),
+          return ProPage(
+            hero: _hero(task, schema, required),
             children: [
-              _Header(task: task),
-              const SizedBox(height: 16),
-              _MetaGrid(task: task, showAssignee: onBehalf),
-              if (task.description != null &&
-                  task.description!.isNotEmpty) ...[
-                const SizedBox(height: 20),
-                const _SectionLabel('Description'),
-                const SizedBox(height: 6),
-                Text(
-                  task.description!,
-                  style: const TextStyle(color: AppColors.inkSoft, height: 1.4),
+              ..._details(task, showAssignee: onBehalf),
+              if (onBehalf && task.isActionable)
+                ProNote(
+                  'Assigned to ${task.assignedToName ?? 'your reportee'}, who '
+                  'reports to you. As their reporting manager you can complete '
+                  'it on their behalf — whoever submits first completes it.',
+                  tone: ProNoteTone.info,
+                  icon: Icons.groups_outlined,
                 ),
-              ],
-              if (task.completionAddress != null &&
-                  task.completionAddress!.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                _InfoRow(
-                  icon: Icons.place_outlined,
-                  label: 'Completed at',
-                  value: task.completionAddress!,
-                ),
-              ],
-              const SizedBox(height: 20),
-              const _SectionLabel('Submission'),
-              const SizedBox(height: 10),
+              ProSectionHeader(
+                title: required == null
+                    ? 'Submission'
+                    : 'Submission · ${required.$1} of ${required.$2} required done',
+                small: true,
+              ),
               if (schema == null)
-                Text(
-                  task.isActionable
-                      ? 'This task has no form. Mark it done when finished.'
-                      : 'This task has no form.',
-                  style: const TextStyle(color: AppColors.muted),
+                GlassCard(
+                  child: Row(
+                    children: [
+                      const ProIconWell(icon: Icons.task_alt_rounded),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          task.isActionable
+                              ? 'This task has no form. Mark it done when finished.'
+                              : 'This task has no form.',
+                          style: const TextStyle(
+                              fontSize: 14, color: AppColors.inkSoft),
+                        ),
+                      ),
+                    ],
+                  ),
                 )
               else
                 FormRenderer(
@@ -296,6 +331,7 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
                   readOnly: readOnly,
                   errors: _errors,
                   ownerFillsAssigned: _isSelfTask(task),
+                  sectionCards: true,
                   onChanged: (name, v) {
                     setState(() {
                       if (v == null) {
@@ -307,309 +343,353 @@ class _TaskDetailScreenState extends ConsumerState<TaskDetailScreen> {
                     });
                   },
                 ),
-              const SizedBox(height: 16),
-              if (_topError != null) _TopBanner(message: _topError!),
-              const SizedBox(height: 4),
-              if (onBehalf && task.isActionable) ...[
-                _StatusBanner(
-                  icon: Icons.groups_outlined,
-                  color: AppColors.accent,
-                  text: 'Assigned to ${task.assignedToName ?? 'your reportee'}, who '
-                      'reports to you. As their reporting manager you can complete '
-                      'it on their behalf — whoever submits first completes it.',
+              if (_topError != null && !_hasActions(task))
+                ProNote(_topError!, tone: ProNoteTone.bad),
+              if (!_hasActions(task)) _StateNote(task: task),
+              KeyedSubtree(
+                key: _activityKey,
+                child: GlassCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const ProSectionHeader(title: 'Activity'),
+                      const SizedBox(height: 12),
+                      _HistorySection(taskId: task.id),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 12),
-              ],
-              _ActionArea(
-                task: task,
-                schema: schema,
-                submitting: _submitting,
-                onStart: () => _markInProgress(task),
-                onComplete: () => _complete(task),
               ),
-              const SizedBox(height: 28),
-              const _SectionLabel('Activity'),
-              const SizedBox(height: 10),
-              _HistorySection(taskId: task.id),
-              const SizedBox(height: 24),
-              const _SectionLabel('Comments'),
-              const SizedBox(height: 10),
-              _CommentsSection(taskId: task.id),
-              const SizedBox(height: 32),
+              KeyedSubtree(
+                key: _commentsKey,
+                child: _CommentsSection(taskId: task.id),
+              ),
             ],
           );
         },
       ),
+      bottomNavigationBar: loaded == null || !_hasActions(loaded)
+          ? null
+          : _ActionBar(
+              task: loaded,
+              schema: FormSchema.parse(loaded.formSchema),
+              submitting: _submitting,
+              error: _topError,
+              onStart: () => _markInProgress(loaded),
+              onComplete: () => _complete(loaded),
+            ),
     );
+  }
+
+  /// `(done, total)` required fields the assignee still has to fill, or null
+  /// when the task takes no input (no form, nothing required, or not open).
+  (int, int)? _requiredProgress(Task task, FormSchema? schema) {
+    if (schema == null || !task.isActionable) return null;
+    final self = _isSelfTask(task);
+    final req = schema.fields
+        .where((f) =>
+            isFieldVisible(f, _values) &&
+            f.required &&
+            !(f.assigned && !self) &&
+            !f.readOnly &&
+            !f.type.isLayout &&
+            !f.type.isSystem)
+        .toList();
+    if (req.isEmpty) return null;
+    final errors = validateForm(schema, _values, includeAssigned: self);
+    final done = req.where((f) => errors[f.name] != 'Required').length;
+    return (done, req.length);
+  }
+
+  Widget _hero(Task task, FormSchema? schema, (int, int)? required) {
+    final due = task.dueDate;
+    final dueTime = formatDueTime(task.dueTime);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final dueDay = due == null ? null : DateTime(due.year, due.month, due.day);
+    final overdue = dueDay != null && dueDay.isBefore(today) && !task.isClosed;
+
+    final role = [
+      if (task.customerName != null && task.customerName!.isNotEmpty)
+        task.customerName!,
+      if (task.taskCode != null && task.taskCode!.isNotEmpty) task.taskCode!,
+    ].join(' · ');
+
+    final priority = task.priority;
+    final kpis = <ProKpi>[
+      if (due != null)
+        ProKpi(
+          value: dueTime ?? DateFormat('d MMM').format(due),
+          label: dueTime != null
+              ? 'Due ${DateFormat('d MMM').format(due)}'
+              : 'Due date',
+          valueColor: overdue ? AppColors.danger : null,
+        ),
+      if (task.estimatedHours != null)
+        ProKpi(value: '${_trimNum(task.estimatedHours!)} h', label: 'Estimated'),
+      if (required != null)
+        ProKpi(
+          value: '${required.$1} / ${required.$2}',
+          label: 'Required done',
+          progress: required.$1 / required.$2,
+          color: required.$1 == required.$2 ? AppColors.live : null,
+        ),
+      if (task.completionPercentage > 0 && !task.isDone)
+        ProKpi(
+          value: '${task.completionPercentage}%',
+          label: 'Progress',
+          progress: task.completionPercentage / 100,
+        ),
+    ].take(3).toList();
+
+    final live = _liveLine(task, dueDay, today, dueTime);
+
+    return ProHero(
+      overlap: kpis.isEmpty ? null : ProKpiStrip(cells: kpis),
+      children: [
+        ProHeroIdentity(
+          name: task.title,
+          role: role.isEmpty ? null : role,
+          icon: task.isDone
+              ? Icons.task_alt_rounded
+              : (task.isCustomerTask
+                  ? Icons.storefront_outlined
+                  : Icons.assignment_outlined),
+          tags: [
+            ProHeroTag(statusLabel(task.status),
+                tone: taskStatusTagTone(task.status)),
+            if (priority != null)
+              ProHeroTag(
+                humanizeEnum(priority),
+                icon: Icons.flag_rounded,
+                tone: switch (priority.toUpperCase()) {
+                  'URGENT' => ProTagTone.bad,
+                  'HIGH' => ProTagTone.warn,
+                  _ => ProTagTone.neutral,
+                },
+              ),
+            if (task.categoryName != null)
+              ProHeroTag(task.categoryName!, icon: Icons.folder_open_rounded),
+          ],
+        ),
+        if (live != null) ProLiveLine(text: live.$1, color: live.$2),
+        ProHeroActions(
+          actions: [
+            if (_hasActions(task) && task.status == TaskStatuses.todo)
+              ProAction(
+                icon: Icons.play_arrow_rounded,
+                label: 'Start',
+                primary: true,
+                onTap: _submitting ? null : () => _markInProgress(task),
+              ),
+            if (_hasActions(task))
+              ProAction(
+                icon: Icons.check_rounded,
+                label: _completeLabel(task, schema),
+                primary: task.status != TaskStatuses.todo,
+                onTap: _submitting ? null : () => _complete(task),
+              ),
+            ProAction(
+              icon: Icons.history_rounded,
+              label: 'Activity',
+              onTap: () => _jumpTo(_activityKey),
+            ),
+            ProAction(
+              icon: Icons.chat_bubble_outline_rounded,
+              label: 'Comments',
+              onTap: () => _jumpTo(_commentsKey),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// One-line status for the hero, built from the task's own dates.
+  (String, Color)? _liveLine(
+      Task task, DateTime? dueDay, DateTime today, String? dueTime) {
+    if (task.isInReview) {
+      return (
+        task.reviewerName != null
+            ? 'Awaiting review by ${task.reviewerName}'
+            : 'Awaiting review',
+        const Color(0xFFF2B347),
+      );
+    }
+    if (task.isDone) {
+      final at = task.completedAt;
+      return (
+        at == null
+            ? 'Completed'
+            : 'Completed ${DateFormat('d MMM, h:mm a').format(at.toLocal())}',
+        AppColors.live,
+      );
+    }
+    if (task.status == TaskStatuses.rejected) {
+      return ('Rejected · see the activity below', const Color(0xFFE5484D));
+    }
+    if (task.status == TaskStatuses.cancelled) {
+      return ('Cancelled', Colors.white54);
+    }
+    if (dueDay == null) return null;
+    final time = dueTime == null ? '' : ', $dueTime';
+    final day = DateFormat('EEE, d MMM').format(dueDay);
+    if (dueDay.isBefore(today)) {
+      return ('Overdue · was due $day$time', const Color(0xFFE5484D));
+    }
+    if (dueDay == today) return ('Due today$time', const Color(0xFFF2B347));
+    return ('Due $day$time', AppColors.live);
+  }
+
+  /// Details card: description and the task's key facts.
+  List<Widget> _details(Task task, {required bool showAssignee}) {
+    final due = task.dueDate == null
+        ? null
+        : DateFormat('EEE, d MMM y').format(task.dueDate!);
+    final dueTime = formatDueTime(task.dueTime);
+    final rows = <MapEntry<String, String>>[
+      if (showAssignee && task.assignedToName != null)
+        MapEntry('Assigned to', task.assignedToName!),
+      if (task.customerName != null && task.customerName!.isNotEmpty)
+        MapEntry('Customer', task.customerName!),
+      if (task.assignedByName != null)
+        MapEntry('Assigned by', task.assignedByName!),
+      if (task.reviewerName != null) MapEntry('Reviewer', task.reviewerName!),
+      if (due != null) MapEntry('Due', dueTime != null ? '$due · $dueTime' : due),
+      if (task.estimatedHours != null)
+        MapEntry('Estimated', '${_trimNum(task.estimatedHours!)} h'),
+      if (task.completionPercentage > 0 && !task.isDone)
+        MapEntry('Progress', '${task.completionPercentage}%'),
+      if (task.completionAddress != null && task.completionAddress!.isNotEmpty)
+        MapEntry('Completed at', task.completionAddress!),
+    ];
+    final hasDescription =
+        task.description != null && task.description!.isNotEmpty;
+    // The hero clamps the title to two lines; repeat a long one in full here.
+    final longTitle = task.title.length > 44;
+    if (rows.isEmpty && !hasDescription && !longTitle) return const [];
+    return [
+      GlassCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const ProSectionHeader(title: 'Details'),
+            if (longTitle) ...[
+              const SizedBox(height: 8),
+              Text(
+                task.title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  height: 1.4,
+                  color: AppColors.ink,
+                ),
+              ),
+            ],
+            if (hasDescription) ...[
+              const SizedBox(height: 8),
+              Text(
+                task.description!,
+                style: const TextStyle(
+                  fontSize: 14.5,
+                  color: AppColors.inkSoft,
+                  height: 1.45,
+                ),
+              ),
+            ],
+            if (rows.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              ProKeyValue(rows: rows),
+            ],
+          ],
+        ),
+      ),
+    ];
   }
 }
 
-// ───────────────────────────────── Action area ─────────────────────────────
+// ───────────────────────────────── Action bar ──────────────────────────────
 
-class _ActionArea extends StatelessWidget {
-  const _ActionArea({
+class _ActionBar extends StatelessWidget {
+  const _ActionBar({
     required this.task,
     required this.schema,
     required this.submitting,
     required this.onStart,
     required this.onComplete,
+    this.error,
   });
 
   final Task task;
   final FormSchema? schema;
   final bool submitting;
+  final String? error;
   final VoidCallback onStart;
   final VoidCallback onComplete;
 
   @override
   Widget build(BuildContext context) {
+    return ProBottomBar(
+      top: error == null ? null : ProNote(error!, tone: ProNoteTone.bad),
+      children: [
+        if (task.status == TaskStatuses.todo)
+          OutlinedButton.icon(
+            onPressed: submitting ? null : onStart,
+            icon: const Icon(Icons.play_arrow_rounded, size: 20),
+            label: const Text('Start'),
+          ),
+        FilledButton(
+          onPressed: submitting ? null : onComplete,
+          child: submitting
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation(Colors.white),
+                  ),
+                )
+              : Text(_completeLabel(task, schema)),
+        ),
+      ],
+    );
+  }
+}
+
+/// Where the task stands once it is in review or closed.
+class _StateNote extends StatelessWidget {
+  const _StateNote({required this.task});
+  final Task task;
+
+  @override
+  Widget build(BuildContext context) {
     if (task.isInReview) {
-      return const _StatusBanner(
+      return const ProNote(
+        'Awaiting review. Your submission is with the reviewer.',
+        tone: ProNoteTone.info,
         icon: Icons.rate_review_outlined,
-        color: AppColors.accent,
-        text: 'Awaiting review. Your submission is with the reviewer.',
       );
     }
     if (task.isClosed) {
-      final (icon, color, text) = switch (task.status) {
+      final (icon, tone, text) = switch (task.status) {
         TaskStatuses.done => (
             Icons.check_circle_rounded,
-            AppColors.success,
+            ProNoteTone.ok,
             'This task is complete.'
           ),
         TaskStatuses.rejected => (
             Icons.cancel_rounded,
-            AppColors.danger,
+            ProNoteTone.bad,
             'This task was rejected. Check the activity log for the reason.'
           ),
-        _ => (Icons.block_rounded, AppColors.muted, 'This task was cancelled.'),
+        _ => (
+            Icons.block_rounded,
+            ProNoteTone.neutral,
+            'This task was cancelled.'
+          ),
       };
-      return _StatusBanner(icon: icon, color: color, text: text);
+      return ProNote(text, tone: tone, icon: icon);
     }
-
-    // Form tasks: the backend decides review-vs-done on submit (server config
-    // can force review), so keep the label neutral. Non-form tasks transition
-    // exactly as the task config dictates.
-    final completeLabel = schema != null
-        ? 'Submit'
-        : (task.requiresReview ? 'Submit for review' : 'Mark done');
-
-    return Row(
-      children: [
-        if (task.status == TaskStatuses.todo) ...[
-          Expanded(
-            child: OutlinedButton(
-              onPressed: submitting ? null : onStart,
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-              child: const Text('Start'),
-            ),
-          ),
-          const SizedBox(width: 12),
-        ],
-        Expanded(
-          child: FilledButton(
-            onPressed: submitting ? null : onComplete,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-            ),
-            child: submitting
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation(Colors.white),
-                    ),
-                  )
-                : Text(completeLabel),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────── Header ────────────────────────────────
-
-class _Header extends StatelessWidget {
-  const _Header({required this.task});
-  final Task task;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (task.taskCode != null && task.taskCode!.isNotEmpty)
-          Text(
-            task.taskCode!,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: AppColors.muted,
-              letterSpacing: 0.4,
-            ),
-          ),
-        const SizedBox(height: 2),
-        Text(
-          task.title,
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-            color: AppColors.ink,
-          ),
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            TaskStatusPill(status: task.status, dense: false),
-            if (task.priority != null)
-              _Chip(
-                label: humanizeEnum(task.priority!),
-                color: priorityColor(task.priority!),
-                icon: Icons.flag_rounded,
-              ),
-            if (task.categoryName != null)
-              _Chip(
-                label: task.categoryName!,
-                color: AppColors.primary,
-                icon: Icons.folder_open_rounded,
-              ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _MetaGrid extends StatelessWidget {
-  const _MetaGrid({required this.task, this.showAssignee = false});
-  final Task task;
-
-  /// Show who the task is assigned to — only when that isn't the viewer.
-  final bool showAssignee;
-
-  @override
-  Widget build(BuildContext context) {
-    final due = task.dueDate == null
-        ? null
-        : DateFormat('EEE, d MMM y').format(task.dueDate!);
-    final dueTime = formatDueTime(task.dueTime);
-    final rows = <Widget>[
-      if (showAssignee && task.assignedToName != null)
-        _InfoRow(
-          icon: Icons.groups_outlined,
-          label: 'Assigned to',
-          value: task.assignedToName!,
-        ),
-      if (task.customerName != null && task.customerName!.isNotEmpty)
-        _InfoRow(
-          icon: Icons.badge_outlined,
-          label: 'Customer',
-          value: task.customerName!,
-        ),
-      if (task.assignedByName != null)
-        _InfoRow(
-          icon: Icons.person_outline,
-          label: 'Assigned by',
-          value: task.assignedByName!,
-        ),
-      if (task.reviewerName != null)
-        _InfoRow(
-          icon: Icons.verified_user_outlined,
-          label: 'Reviewer',
-          value: task.reviewerName!,
-        ),
-      if (due != null)
-        _InfoRow(
-          icon: Icons.event_outlined,
-          label: 'Due',
-          value: dueTime != null ? '$due · $dueTime' : due,
-        ),
-      if (task.estimatedHours != null)
-        _InfoRow(
-          icon: Icons.schedule_outlined,
-          label: 'Estimated',
-          value: '${_trimNum(task.estimatedHours!)} h',
-        ),
-      if (task.completionPercentage > 0 && !task.isDone)
-        _InfoRow(
-          icon: Icons.donut_large_outlined,
-          label: 'Progress',
-          value: '${task.completionPercentage}%',
-        ),
-    ];
-    if (rows.isEmpty) return const SizedBox.shrink();
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: AppColors.muted.withOpacity(0.15)),
-      ),
-      child: Column(
-        children: [
-          for (var i = 0; i < rows.length; i++) ...[
-            if (i > 0) Divider(height: 1, color: AppColors.muted.withOpacity(0.12)),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: rows[i],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  static String _trimNum(double v) =>
-      v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toString();
-}
-
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 16, color: AppColors.muted),
-        const SizedBox(width: 10),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12.5,
-            color: AppColors.muted,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            value,
-            textAlign: TextAlign.right,
-            style: const TextStyle(
-              fontSize: 12.5,
-              color: AppColors.ink,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
-    );
+    return const SizedBox.shrink();
   }
 }
 
@@ -629,13 +709,13 @@ class _HistorySection extends ConsumerWidget {
       ),
       error: (_, __) => const Text(
         'Could not load activity.',
-        style: TextStyle(color: AppColors.muted, fontSize: 12.5),
+        style: TextStyle(color: AppColors.muted, fontSize: 13.5),
       ),
       data: (entries) {
         if (entries.isEmpty) {
           return const Text(
             'No activity yet.',
-            style: TextStyle(color: AppColors.muted, fontSize: 12.5),
+            style: TextStyle(color: AppColors.muted, fontSize: 13.5),
           );
         }
         return Column(
@@ -657,8 +737,8 @@ class _HistoryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = entry.isStatusChange && entry.newStatus != null
-        ? statusColor(entry.newStatus!)
-        : AppColors.muted;
+        ? taskStatusDot(entry.newStatus!)
+        : const Color(0xFFB3C0C3);
     final when = entry.createdAt == null
         ? ''
         : DateFormat('d MMM, h:mm a').format(entry.createdAt!.toLocal());
@@ -678,22 +758,31 @@ class _HistoryTile extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                margin: const EdgeInsets.only(top: 3),
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              ),
-              if (!isLast)
-                Expanded(
-                  child: Container(
-                    width: 2,
-                    color: AppColors.muted.withOpacity(0.18),
+          SizedBox(
+            width: 14,
+            child: Column(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  margin: const EdgeInsets.only(top: 5),
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    boxShadow: [BoxShadow(color: color, spreadRadius: 1)],
                   ),
                 ),
-            ],
+                if (!isLast)
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      margin: const EdgeInsets.symmetric(vertical: 3),
+                      color: AppColors.hairline,
+                    ),
+                  ),
+              ],
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -705,31 +794,41 @@ class _HistoryTile extends StatelessWidget {
                   Text(
                     title,
                     style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w500,
                       color: AppColors.ink,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 1),
                   Text(
                     [
                       if (entry.changedByName != null) entry.changedByName!,
                       if (when.isNotEmpty) when,
                     ].join(' · '),
                     style: const TextStyle(
-                      fontSize: 11.5,
+                      fontSize: 12.5,
                       color: AppColors.muted,
+                      fontFeatures: [FontFeature.tabularFigures()],
                     ),
                   ),
                   if (entry.changeReason != null &&
                       entry.changeReason!.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      entry.changeReason!,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.inkSoft,
-                        fontStyle: FontStyle.italic,
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceAlt,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        entry.changeReason!,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          height: 1.4,
+                          color: AppColors.inkSoft,
+                        ),
                       ),
                     ),
                   ],
@@ -784,82 +883,85 @@ class _CommentsSectionState extends ConsumerState<_CommentsSection> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(taskCommentsProvider(widget.taskId));
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        async.when(
-          loading: () => const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: LinearProgressIndicator(minHeight: 2),
+    final count = async.valueOrNull?.length ?? 0;
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ProSectionHeader(
+            title: 'Comments',
+            trailing: count == 0 ? null : ProPill.neutral('$count'),
           ),
-          error: (_, __) => const Text(
-            'Could not load comments.',
-            style: TextStyle(color: AppColors.muted, fontSize: 12.5),
-          ),
-          data: (comments) {
-            if (comments.isEmpty) {
-              return const Text(
-                'No comments yet.',
-                style: TextStyle(color: AppColors.muted, fontSize: 12.5),
+          const SizedBox(height: 10),
+          async.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: LinearProgressIndicator(minHeight: 2),
+            ),
+            error: (_, __) => const Text(
+              'Could not load comments.',
+              style: TextStyle(color: AppColors.muted, fontSize: 13.5),
+            ),
+            data: (comments) {
+              if (comments.isEmpty) {
+                return const Text(
+                  'No comments yet.',
+                  style: TextStyle(color: AppColors.muted, fontSize: 13.5),
+                );
+              }
+              return Column(
+                children: [for (final c in comments) _CommentTile(comment: c)],
               );
-            }
-            return Column(
-              children: [for (final c in comments) _CommentTile(comment: c)],
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _controller,
-                minLines: 1,
-                maxLines: 4,
-                textCapitalization: TextCapitalization.words,
-                inputFormatters: const [TitleCaseTextFormatter()],
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _send(),
-                decoration: InputDecoration(
-                  hintText: 'Add a comment…',
-                  filled: true,
-                  fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    borderSide:
-                        BorderSide(color: AppColors.muted.withOpacity(0.25)),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    borderSide:
-                        BorderSide(color: AppColors.muted.withOpacity(0.25)),
+            },
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  minLines: 1,
+                  maxLines: 4,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [TitleCaseTextFormatter()],
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _send(),
+                  decoration: const InputDecoration(
+                    hintText: 'Add a comment…',
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 14, vertical: 13),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            IconButton.filled(
-              onPressed: _sending ? null : _send,
-              style: IconButton.styleFrom(backgroundColor: AppColors.primary),
-              icon: _sending
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation(Colors.white),
-                      ),
-                    )
-                  : const Icon(Icons.send_rounded, size: 18),
-            ),
-          ],
-        ),
-      ],
+              const SizedBox(width: 8),
+              IconButton.filled(
+                tooltip: 'Post comment',
+                onPressed: _sending ? null : _send,
+                style: IconButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(46, 46),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                  ),
+                ),
+                icon: _sending
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation(Colors.white),
+                        ),
+                      )
+                    : const Icon(Icons.send_rounded, size: 18),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -870,13 +972,6 @@ class _CommentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initials = (comment.employeeName ?? '?')
-        .trim()
-        .split(RegExp(r'\s+'))
-        .where((s) => s.isNotEmpty)
-        .take(2)
-        .map((s) => s[0].toUpperCase())
-        .join();
     final when = comment.createdAt == null
         ? ''
         : DateFormat('d MMM, h:mm a').format(comment.createdAt!.toLocal());
@@ -886,18 +981,7 @@ class _CommentTile extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            radius: 16,
-            backgroundColor: AppColors.primary.withOpacity(0.12),
-            child: Text(
-              initials.isEmpty ? '?' : initials,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                color: AppColors.primary,
-              ),
-            ),
-          ),
+          ProAvatar(name: comment.employeeName ?? '?', size: 34),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -909,8 +993,8 @@ class _CommentTile extends StatelessWidget {
                       child: Text(
                         comment.employeeName ?? 'Someone',
                         style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
                           color: AppColors.ink,
                         ),
                       ),
@@ -920,8 +1004,9 @@ class _CommentTile extends StatelessWidget {
                       Text(
                         when,
                         style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.muted,
+                          fontSize: 12,
+                          color: AppColors.faint,
+                          fontFeatures: [FontFeature.tabularFigures()],
                         ),
                       ),
                     ],
@@ -931,139 +1016,12 @@ class _CommentTile extends StatelessWidget {
                 Text(
                   comment.commentText,
                   style: const TextStyle(
-                    fontSize: 13,
+                    fontSize: 14,
                     color: AppColors.inkSoft,
-                    height: 1.35,
+                    height: 1.4,
                   ),
                 ),
               ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────── Small widgets ─────────────────────────────
-
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text.toUpperCase(),
-      style: const TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w800,
-        letterSpacing: 0.6,
-        color: AppColors.muted,
-      ),
-    );
-  }
-}
-
-class _TopBanner extends StatelessWidget {
-  const _TopBanner({required this.message});
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.danger.withOpacity(0.10),
-        borderRadius: BorderRadius.circular(AppRadii.sm),
-        border: Border.all(color: AppColors.danger.withOpacity(0.25)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline_rounded,
-              size: 18, color: AppColors.danger),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(color: AppColors.danger, fontSize: 13),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusBanner extends StatelessWidget {
-  const _StatusBanner({
-    required this.icon,
-    required this.color,
-    required this.text,
-  });
-  final IconData icon;
-  final Color color;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: color.withOpacity(0.20)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: color),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                color: color,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Chip extends StatelessWidget {
-  const _Chip({required this.label, required this.color, this.icon});
-  final String label;
-  final Color color;
-  final IconData? icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: color.withOpacity(0.22)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 12, color: color),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.2,
             ),
           ),
         ],

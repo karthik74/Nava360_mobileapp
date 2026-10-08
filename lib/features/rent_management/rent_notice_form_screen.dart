@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
+import '../../core/pro_ui.dart';
 import '../../core/widgets.dart';
 import 'rent_list_screen.dart' show rentBranchesProvider;
 import 'rent_repository.dart';
@@ -77,96 +78,112 @@ class _RentNoticeFormScreenState extends ConsumerState<RentNoticeFormScreen> {
   Widget build(BuildContext context) {
     final df = DateFormat('d MMM yyyy');
     final branchesAsync = ref.watch(rentBranchesProvider);
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Issue Notice'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        body: branchesAsync.when(
-          data: (branches) {
-            _branchId ??= branches.isNotEmpty ? branches.first.id : null;
-            return ListView(
-              padding: const EdgeInsets.all(16),
+    final branches = branchesAsync.valueOrNull;
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: 'Issue notice',
+        subtitle: 'Rent management · notice to a branch',
+      ),
+      bottomNavigationBar: branches == null
+          ? null
+          : ProBottomBar(
               children: [
-                _label('Branch *'),
-                DropdownButtonFormField<int>(
-                  value: _branchId,
-                  items: [
-                    for (final b in branches) DropdownMenuItem(value: b.id, child: Text(b.branchName)),
+                FilledButton.icon(
+                  onPressed: _saving || branches.isEmpty ? null : _save,
+                  icon: const Icon(Icons.campaign_rounded, size: 18),
+                  label: Text(_saving ? 'Issuing…' : 'Issue notice'),
+                ),
+              ],
+            ),
+      body: branchesAsync.when(
+        data: (branches) {
+          _branchId ??= branches.isNotEmpty ? branches.first.id : null;
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            children: [
+              GlassCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const ProSectionHeader(title: 'Notice'),
+                    const SizedBox(height: 12),
+                    ProField(
+                      label: 'Branch',
+                      required: true,
+                      child: DropdownButtonFormField<int>(
+                        value: _branchId,
+                        isExpanded: true,
+                        items: [
+                          for (final b in branches)
+                            DropdownMenuItem(
+                                value: b.id, child: Text(b.branchName, overflow: TextOverflow.ellipsis)),
+                        ],
+                        onChanged: (v) => setState(() => _branchId = v),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    ProField(
+                      label: 'Subject',
+                      required: true,
+                      child: TextField(controller: _subject, textCapitalization: TextCapitalization.sentences),
+                    ),
+                    const SizedBox(height: 14),
+                    ProField(
+                      label: 'Body',
+                      child: TextField(controller: _body, minLines: 3, maxLines: 6),
+                    ),
+                    const SizedBox(height: 14),
+                    ProField(
+                      label: 'Issued on',
+                      required: true,
+                      child: InkWell(
+                        onTap: _pickIssuedOn,
+                        borderRadius: BorderRadius.circular(12),
+                        child: InputDecorator(
+                          decoration: InputDecoration(
+                            prefixIcon: Icon(Icons.calendar_today_rounded, size: 17, color: AppColors.primary),
+                            suffixIcon: const Icon(Icons.expand_more_rounded),
+                          ),
+                          child: Text(df.format(_issuedOn),
+                              style: const TextStyle(fontSize: 15, color: AppColors.ink)),
+                        ),
+                      ),
+                    ),
                   ],
-                  onChanged: (v) => setState(() => _branchId = v),
                 ),
-                const SizedBox(height: 10),
-                _label('Subject *'),
-                TextField(controller: _subject, textCapitalization: TextCapitalization.sentences),
-                const SizedBox(height: 10),
-                _label('Body'),
-                TextField(controller: _body, minLines: 3, maxLines: 6),
-                const SizedBox(height: 10),
-                _label('Issued on *'),
-                InkWell(
-                  onTap: _pickIssuedOn,
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(AppRadii.md),
-                      border: Border.all(color: AppColors.hairline),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.calendar_today_rounded, size: 15, color: AppColors.primary),
-                        const SizedBox(width: 8),
-                        Text(df.format(_issuedOn),
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
+              ),
+              const SizedBox(height: 14),
+              GlassCard(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: SwitchListTile.adaptive(
                   value: _holdRent,
                   onChanged: (v) => setState(() => _holdRent = v),
                   title: const Text("Place this branch's current month rent on hold",
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
                 ),
-                if (_error != null) ...[
-                  const SizedBox(height: 14),
-                  AppErrorPanel(message: _error!),
-                ],
-                const SizedBox(height: 20),
-                SizedBox(
-                  height: 50,
-                  child: FilledButton(
-                    onPressed: _saving || branches.isEmpty ? null : _save,
-                    child: Text(_saving ? 'Issuing…' : 'Issue notice'),
-                  ),
-                ),
-                if (branches.isEmpty) ...[
-                  const SizedBox(height: 10),
-                  const Text('No rent branches configured yet — add one in the Branches tab first.',
-                      style: TextStyle(fontSize: 12, color: AppColors.muted)),
-                ],
-                const SizedBox(height: 24),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 14),
+                ProNote(_error!, tone: ProNoteTone.bad),
               ],
-            );
-          },
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(child: AppErrorPanel(message: '$e')),
+              if (branches.isEmpty) ...[
+                const SizedBox(height: 14),
+                const ProNote('No rent branches configured yet — add one in the Branches tab first.',
+                    tone: ProNoteTone.warn),
+              ],
+            ],
+          );
+        },
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: AppErrorPanel(message: '$e'),
+          ),
         ),
       ),
     );
   }
-
-  Widget _label(String t) => Padding(
-        padding: const EdgeInsets.only(bottom: 4, top: 4),
-        child: Text(t,
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
-      );
 }

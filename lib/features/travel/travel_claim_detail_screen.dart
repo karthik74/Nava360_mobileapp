@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/env.dart';
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -30,6 +31,9 @@ final travelClaimEvalProvider =
   }
 });
 
+/// Rounded rupee amount for the KPI strip ("₹ 14,600").
+final _inr0 = NumberFormat.currency(locale: 'en_IN', symbol: '₹ ', decimalDigits: 0);
+
 class TravelClaimDetailScreen extends ConsumerWidget {
   const TravelClaimDetailScreen({super.key, required this.claimId});
   final int claimId;
@@ -41,153 +45,195 @@ class TravelClaimDetailScreen extends ConsumerWidget {
     ref.invalidate(travelClaimEvalProvider(claimId));
   }
 
+  /// Approval-step tone used in this screen's timeline (unchanged wording).
+  static StatusTone _stepTone(String status) {
+    switch (status) {
+      case 'APPROVED':
+        return StatusTone(AppColors.success, TravelEnums.label(status));
+      case 'REJECTED':
+        return StatusTone(AppColors.danger, TravelEnums.label(status));
+      case 'SENT_BACK':
+        return StatusTone(AppColors.pink, TravelEnums.label(status));
+      case 'PENDING':
+        return StatusTone(AppColors.warning, TravelEnums.label(status));
+      default:
+        return StatusTone(AppColors.muted, TravelEnums.label(status));
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(travelClaimProvider(claimId));
     final user = ref.watch(authUserProvider);
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Travel Claim'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        body: async.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Padding(
-            padding: const EdgeInsets.all(16),
-            child: AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => _refresh(ref),
-            ),
+    bool ownerOf(TravelClaim c) =>
+        user?.employeeId != null && c.employeeId == user!.employeeId;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Travel claim')),
+      body: async.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => _refresh(ref),
           ),
-          data: (claim) {
-            final isOwner =
-                user?.employeeId != null && claim.employeeId == user!.employeeId;
-            final canEdit = isOwner && claimIsEditable(claim.status);
-            final canDelete = isOwner && claimIsDeletable(claim.status);
-            final tone = claimStatusTone(claim.status);
+        ),
+        data: (claim) {
+          final isOwner = ownerOf(claim);
+          final canEdit = isOwner && claimIsEditable(claim.status);
+          final tone = claimStatusTone(claim.status);
 
-            return RefreshIndicator(
-              color: AppColors.primary,
-              backgroundColor: Colors.white.withOpacity(0.92),
-              onRefresh: () async => _refresh(ref),
-              child: ListView(
-                physics: const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics()),
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+          final missingBills =
+              claim.expenses.where((e) => e.billRequired && !e.hasBill).length;
+          final stepTotal = claim.approvalSteps.isNotEmpty
+              ? claim.approvalSteps.length
+              : (claim.approvalLevels ?? 0);
+          final stepsApproved =
+              claim.approvalSteps.where((s) => s.status == 'APPROVED').length;
+          final dates = claim.fromDate == null && claim.toDate == null
+              ? null
+              : '${_fmt(claim.fromDate)} → ${_fmt(claim.toDate)}';
+
+          return ProPage(
+            onRefresh: () async => _refresh(ref),
+            hero: ProHero(
+              overlap: ProKpiStrip(cells: [
+                ProKpi(
+                  value: _inr0.format(claim.totalClaimedAmount ?? 0),
+                  label: claim.totalApprovedAmount != null
+                      ? 'Claimed · ${_inr0.format(claim.totalApprovedAmount)} approved'
+                      : 'Claimed',
+                ),
+                ProKpi(
+                  value: '$missingBills',
+                  label: 'Bills missing',
+                  valueColor: missingBills > 0 ? AppColors.warning : null,
+                ),
+                ProKpi(
+                  value: '$stepsApproved / $stepTotal',
+                  label: 'Levels approved',
+                  progress: stepTotal > 0 ? stepsApproved / stepTotal : null,
+                  color: AppColors.success,
+                ),
+              ]),
+              children: [
+                ProHeroIdentity(
+                  name: claim.title,
+                  role: (claim.claimCode == null || claim.claimCode!.isEmpty) && dates == null
+                      ? null
+                      : [
+                          if (claim.claimCode != null && claim.claimCode!.isNotEmpty)
+                            claim.claimCode!,
+                          if (dates != null) dates,
+                        ].join(' · '),
+                  icon: Icons.receipt_long_rounded,
+                  tags: [
+                    ProHeroTag(tone.label, tone: claimTagTone(claim.status)),
+                    if (claim.hasPolicyViolation)
+                      const ProHeroTag('Policy flag',
+                          tone: ProTagTone.bad, icon: Icons.warning_amber_rounded),
+                    if (claim.approvalLevels != null && claim.approvalLevels! > 0)
+                      ProHeroTag(
+                          '${claim.approvalLevels} approval level${claim.approvalLevels == 1 ? '' : 's'}'),
+                  ],
+                ),
+                ProLiveLine(
+                  text: claimLiveText(claim),
+                  color: claimLiveColor(claim.status),
+                ),
+                if (canEdit)
+                  ProHeroActions(actions: [
+                    ProAction(
+                      icon: Icons.add_rounded,
+                      label: 'Add expense',
+                      primary: true,
+                      onTap: () => _addExpense(context, ref, claim.id),
+                    ),
+                    ProAction(
+                      icon: Icons.upload_file_rounded,
+                      label: 'Upload bill',
+                      onTap: () => _uploadBills(context, ref, claim.id),
+                    ),
+                    ProAction(
+                      icon: Icons.edit_rounded,
+                      label: 'Edit claim',
+                      onTap: () async {
+                        final ok = await context.push<bool>(
+                          '/travel/claims/edit',
+                          extra: claim,
+                        );
+                        if (ok == true) _refresh(ref);
+                      },
+                    ),
+                  ]),
+              ],
+            ),
+            children: [
+              // ── Policy violation banner ──
+              if (claim.hasPolicyViolation)
+                TravelNotice(
+                  icon: Icons.warning_amber_rounded,
+                  color: AppColors.danger,
+                  background: AppColors.dangerTint,
+                  title: 'Policy violation',
+                  body: claim.violationDetails,
+                ),
+
+              // ── Sent-back / rejected notices ──
+              if (claim.status == 'SENT_BACK')
+                TravelNotice(
+                  icon: Icons.undo_rounded,
+                  color: const Color(0xFF8A5200),
+                  background: AppColors.warningTint,
+                  title: 'Sent back for changes',
+                  body: _lastRemark(claim) ??
+                      'An approver sent this claim back. Update it and submit again.',
+                ),
+              if (claim.status == 'REJECTED')
+                TravelNotice(
+                  icon: Icons.cancel_rounded,
+                  color: AppColors.danger,
+                  background: AppColors.dangerTint,
+                  title: 'Rejected',
+                  body: _lastRemark(claim) ?? 'This claim was rejected.',
+                ),
+
+              // ── Trip details ──
+              GlassCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const ProSectionHeader(title: 'Trip details'),
+                    const SizedBox(height: 4),
+                    ProKeyValue(rows: [
+                      MapEntry('Dates', '${_fmt(claim.fromDate)} → ${_fmt(claim.toDate)}'),
+                      if (claim.purpose != null && claim.purpose!.isNotEmpty)
+                        MapEntry('Purpose', claim.purpose!),
+                      if (claim.policyNameSnapshot != null)
+                        MapEntry('Policy', claim.policyNameSnapshot!),
+                      MapEntry('Claimed', money(claim.totalClaimedAmount)),
+                      if (claim.totalApprovedAmount != null)
+                        MapEntry('Approved', money(claim.totalApprovedAmount)),
+                      if (claim.approvalLevels != null && claim.approvalLevels! > 0)
+                        MapEntry('Approval levels', '${claim.approvalLevels}'),
+                    ]),
+                  ],
+                ),
+              ),
+
+              // ── Policy evaluation (limits vs claimed) ──
+              _EvaluationSection(claimId: claimId),
+
+              // ── Expenses ──
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // ── Header ──
-                  GlassCard(
-                    shadow: AppShadows.soft,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(claim.title,
-                                  style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppColors.ink)),
-                            ),
-                            const SizedBox(width: 8),
-                            StatusPill(label: tone.label, color: tone.color),
-                          ],
-                        ),
-                        if (claim.claimCode != null && claim.claimCode!.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(claim.claimCode!,
-                              style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-                        ],
-                        const SizedBox(height: 12),
-                        _kv('Dates', '${_fmt(claim.fromDate)} → ${_fmt(claim.toDate)}'),
-                        if (claim.purpose != null && claim.purpose!.isNotEmpty)
-                          _kv('Purpose', claim.purpose!),
-                        if (claim.policyNameSnapshot != null)
-                          _kv('Policy', claim.policyNameSnapshot!),
-                        _kv('Claimed', money(claim.totalClaimedAmount)),
-                        if (claim.totalApprovedAmount != null)
-                          _kv('Approved', money(claim.totalApprovedAmount)),
-                        if (claim.approvalLevels != null && claim.approvalLevels! > 0)
-                          _kv('Approval levels', '${claim.approvalLevels}'),
-                      ],
-                    ),
-                  ),
-
-                  // ── Policy violation banner ──
-                  if (claim.hasPolicyViolation) ...[
-                    const SizedBox(height: 12),
-                    GlassCard(
-                      color: AppColors.danger.withOpacity(0.07),
-                      shadow: AppShadows.soft,
-                      border: Border.all(color: AppColors.danger.withOpacity(0.3)),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(Icons.warning_amber_rounded,
-                              color: AppColors.danger, size: 20),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Policy violation',
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        color: AppColors.danger,
-                                        fontSize: 13)),
-                                if (claim.violationDetails != null &&
-                                    claim.violationDetails!.isNotEmpty) ...[
-                                  const SizedBox(height: 4),
-                                  Text(claim.violationDetails!,
-                                      style: const TextStyle(
-                                          fontSize: 12.5,
-                                          color: AppColors.inkSoft,
-                                          height: 1.4)),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-
-                  // ── Sent-back notice ──
-                  if (claim.status == 'SENT_BACK') ...[
-                    const SizedBox(height: 12),
-                    _noticeCard(
-                      icon: Icons.undo_rounded,
-                      color: AppColors.pink,
-                      title: 'Sent back for changes',
-                      body: _lastRemark(claim) ??
-                          'An approver sent this claim back. Update it and submit again.',
-                    ),
-                  ],
-                  if (claim.status == 'REJECTED') ...[
-                    const SizedBox(height: 12),
-                    _noticeCard(
-                      icon: Icons.cancel_rounded,
-                      color: AppColors.danger,
-                      title: 'Rejected',
-                      body: _lastRemark(claim) ?? 'This claim was rejected.',
-                    ),
-                  ],
-
-                  // ── Policy evaluation (limits vs claimed) ──
-                  const SizedBox(height: 18),
-                  _EvaluationSection(claimId: claimId),
-
-                  // ── Expenses ──
-                  const SizedBox(height: 18),
-                  AppSectionHeader(
+                  ProSectionHeader(
                     title: 'Expenses',
-                    subtitle: '${claim.expenses.length} line(s)',
+                    subtitle:
+                        '${claim.expenses.length} line(s) · ${money(claim.totalClaimedAmount)}',
                     trailing: canEdit
                         ? _SmallAction(
                             icon: Icons.add_rounded,
@@ -198,32 +244,39 @@ class TravelClaimDetailScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 10),
                   if (claim.expenses.isEmpty)
-                    const AppEmptyState(
+                    const ProEmpty(
                       icon: Icons.receipt_long_rounded,
-                      message: 'No expense lines yet.',
+                      title: 'No expense lines yet.',
+                      message: 'Add at least one expense before submitting.',
                     )
                   else
-                    for (final ex in claim.expenses)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _ExpenseTile(
-                          claimId: claim.id,
-                          expense: ex,
-                          canEdit: canEdit,
-                          onEdit: () => _editExpense(context, ref, claim.id, ex),
-                          onDelete: () => _deleteExpense(context, ref, claim.id, ex),
-                          onAddBill: () => _uploadBills(
-                            context,
-                            ref,
-                            claim.id,
-                            expenseId: ex.id,
+                    ProListGroup(
+                      dividerIndent: 58,
+                      children: [
+                        for (final ex in claim.expenses)
+                          _ExpenseTile(
+                            claimId: claim.id,
+                            expense: ex,
+                            canEdit: canEdit,
+                            onEdit: () => _editExpense(context, ref, claim.id, ex),
+                            onDelete: () => _deleteExpense(context, ref, claim.id, ex),
+                            onAddBill: () => _uploadBills(
+                              context,
+                              ref,
+                              claim.id,
+                              expenseId: ex.id,
+                            ),
                           ),
-                        ),
-                      ),
+                      ],
+                    ),
+                ],
+              ),
 
-                  // ── Claim-level attachments ──
-                  const SizedBox(height: 18),
-                  AppSectionHeader(
+              // ── Claim-level attachments ──
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ProSectionHeader(
                     title: 'Claim bills',
                     subtitle: '${claim.attachments.length} file(s)',
                     trailing: canEdit
@@ -236,133 +289,121 @@ class TravelClaimDetailScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 10),
                   if (claim.attachments.isEmpty)
-                    const Text('No claim-level bills attached.',
-                        style: TextStyle(color: AppColors.muted, fontSize: 12.5))
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 2),
+                      child: Text('No claim-level bills attached.', style: AppText.caption),
+                    )
                   else
-                    for (final att in claim.attachments)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: _AttachmentTile(att: att),
-                      ),
-
-                  // ── Approval timeline ──
-                  if (claim.approvalSteps.isNotEmpty) ...[
-                    const SizedBox(height: 18),
-                    const AppSectionHeader(title: 'Approval chain'),
-                    const SizedBox(height: 10),
-                    GlassCard(
-                      shadow: AppShadows.soft,
-                      child: Column(
-                        children: [
-                          for (int i = 0; i < claim.approvalSteps.length; i++) ...[
-                            if (i > 0)
-                              const Divider(height: 16, color: AppColors.hairline),
-                            _ApprovalRow(step: claim.approvalSteps[i]),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ],
-
-                  // ── Settlement ──
-                  if (claim.settlement != null) ...[
-                    const SizedBox(height: 18),
-                    const AppSectionHeader(title: 'Settlement'),
-                    const SizedBox(height: 10),
-                    GlassCard(
-                      color: AppColors.success.withOpacity(0.06),
-                      shadow: AppShadows.soft,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _kv('Settled amount', money(claim.settlement!.settledAmount)),
-                          if (claim.settlement!.paymentMode != null)
-                            _kv('Mode', TravelEnums.label(claim.settlement!.paymentMode)),
-                          if (claim.settlement!.paymentReference != null &&
-                              claim.settlement!.paymentReference!.isNotEmpty)
-                            _kv('Reference', claim.settlement!.paymentReference!),
-                          if (claim.settlement!.settledAt != null)
-                            _kv('Settled on', _fmt(claim.settlement!.settledAt)),
-                        ],
-                      ),
-                    ),
-                  ],
-
-                  // ── Owner actions ──
-                  if (canEdit) ...[
-                    const SizedBox(height: 22),
-                    Row(
+                    ProListGroup(
                       children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () async {
-                              final ok = await context.push<bool>(
-                                '/travel/claims/edit',
-                                extra: claim,
-                              );
-                              if (ok == true) _refresh(ref);
-                            },
-                            icon: const Icon(Icons.edit_rounded, size: 18),
-                            label: const Text('Edit'),
-                          ),
-                        ),
-                        if (canDelete) ...[
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () => _deleteClaim(context, ref, claim),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: AppColors.danger,
-                                side: BorderSide(color: AppColors.danger.withOpacity(0.4)),
-                              ),
-                              icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                              label: const Text('Delete'),
-                            ),
-                          ),
-                        ],
+                        for (final att in claim.attachments) _AttachmentTile(att: att),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      height: 50,
-                      child: FilledButton.icon(
-                        onPressed: claim.expenses.isEmpty
-                            ? null
-                            : () => _submit(context, ref, claim),
-                        icon: const Icon(Icons.send_rounded, size: 18),
-                        label: Text(claim.status == 'SENT_BACK'
-                            ? 'Resubmit for approval'
-                            : 'Submit for approval'),
-                      ),
-                    ),
-                    if (claim.expenses.isEmpty) ...[
-                      const SizedBox(height: 8),
-                      const Text('Add at least one expense before submitting.',
-                          style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
-                    ],
-                  ] else if (canDelete) ...[
-                    // Awaiting approval: nothing here is editable any more, but the
-                    // claimant can still withdraw a claim nobody has acted on.
-                    const SizedBox(height: 22),
-                    SizedBox(
-                      height: 50,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _deleteClaim(context, ref, claim),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.danger,
-                          side: BorderSide(color: AppColors.danger.withOpacity(0.4)),
-                        ),
-                        icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                        label: const Text('Delete claim'),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 24),
                 ],
               ),
+
+              // ── Approval timeline ──
+              if (claim.approvalSteps.isNotEmpty)
+                GlassCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      ProSectionHeader(
+                        title: 'Approval chain',
+                        trailing: Text(
+                          '$stepsApproved of ${claim.approvalSteps.length} approved',
+                          style: AppText.caption,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      TravelApprovalTimeline(
+                        steps: claim.approvalSteps,
+                        toneOf: _stepTone,
+                      ),
+                    ],
+                  ),
+                ),
+
+              // ── Settlement ──
+              if (claim.settlement != null)
+                GlassCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      ProSectionHeader(
+                        title: 'Settlement',
+                        trailing: ProPill.ok('Settled'),
+                      ),
+                      const SizedBox(height: 4),
+                      ProKeyValue(rows: [
+                        MapEntry('Settled amount', money(claim.settlement!.settledAmount)),
+                        if (claim.settlement!.paymentMode != null)
+                          MapEntry('Mode', TravelEnums.label(claim.settlement!.paymentMode)),
+                        if (claim.settlement!.paymentReference != null &&
+                            claim.settlement!.paymentReference!.isNotEmpty)
+                          MapEntry('Reference', claim.settlement!.paymentReference!),
+                        if (claim.settlement!.settledAt != null)
+                          MapEntry('Settled on', _fmt(claim.settlement!.settledAt)),
+                      ]),
+                    ],
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+      bottomNavigationBar: async.maybeWhen(
+        data: (claim) {
+          final isOwner = ownerOf(claim);
+          final canEdit = isOwner && claimIsEditable(claim.status);
+          final canDelete = isOwner && claimIsDeletable(claim.status);
+
+          // ── Owner actions ──
+          if (canEdit) {
+            return ProBottomBar(
+              top: claim.expenses.isEmpty
+                  ? const Text(
+                      'Add at least one expense before submitting.',
+                      textAlign: TextAlign.center,
+                      style: AppText.caption,
+                    )
+                  : null,
+              children: [
+                if (canDelete)
+                  FilledButton.icon(
+                    onPressed: () => _deleteClaim(context, ref, claim),
+                    style: travelDangerFilled,
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                    label: const Text('Delete'),
+                  ),
+                FilledButton.icon(
+                  onPressed:
+                      claim.expenses.isEmpty ? null : () => _submit(context, ref, claim),
+                  icon: const Icon(Icons.send_rounded, size: 18),
+                  label: Text(
+                    claim.status == 'SENT_BACK' ? 'Resubmit for approval' : 'Submit for approval',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             );
-          },
-        ),
+          }
+          if (canDelete) {
+            // Awaiting approval: nothing here is editable any more, but the
+            // claimant can still withdraw a claim nobody has acted on.
+            return ProBottomBar(children: [
+              FilledButton.icon(
+                onPressed: () => _deleteClaim(context, ref, claim),
+                style: travelDangerFilled,
+                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                label: const Text('Delete claim'),
+              ),
+            ]);
+          }
+          return null;
+        },
+        orElse: () => null,
       ),
     );
   }
@@ -373,58 +414,6 @@ class TravelClaimDetailScreen extends ConsumerWidget {
     }
     return claim.submissionRemarks;
   }
-
-  Widget _kv(String k, String v) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 110,
-              child: Text(k,
-                  style: const TextStyle(fontSize: 12.5, color: AppColors.muted)),
-            ),
-            Expanded(
-              child: Text(v,
-                  style: const TextStyle(
-                      fontSize: 12.5, color: AppColors.ink, fontWeight: FontWeight.w600)),
-            ),
-          ],
-        ),
-      );
-
-  Widget _noticeCard({
-    required IconData icon,
-    required Color color,
-    required String title,
-    required String body,
-  }) =>
-      GlassCard(
-        color: color.withOpacity(0.07),
-        shadow: AppShadows.soft,
-        border: Border.all(color: color.withOpacity(0.3)),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title,
-                      style: TextStyle(
-                          fontWeight: FontWeight.w800, color: color, fontSize: 13)),
-                  const SizedBox(height: 4),
-                  Text(body,
-                      style: const TextStyle(
-                          fontSize: 12.5, color: AppColors.inkSoft, height: 1.4)),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
@@ -461,7 +450,7 @@ class TravelClaimDetailScreen extends ConsumerWidget {
           TextButton(
               onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            style: travelDangerFilled,
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete'),
           ),
@@ -502,7 +491,7 @@ class TravelClaimDetailScreen extends ConsumerWidget {
           TextButton(
               onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            style: travelDangerFilled,
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete'),
           ),
@@ -536,11 +525,11 @@ class TravelClaimDetailScreen extends ConsumerWidget {
             if (needsRemark)
               const Text(
                 'This claim has a policy violation. A justification remark is required.',
-                style: TextStyle(fontSize: 12.5, color: AppColors.danger, height: 1.4),
+                style: TextStyle(fontSize: 13, color: AppColors.danger, height: 1.4),
               )
             else
               const Text('Submit this claim for approval?',
-                  style: TextStyle(fontSize: 13, color: AppColors.inkSoft)),
+                  style: TextStyle(fontSize: 14, color: AppColors.inkSoft)),
             const SizedBox(height: 12),
             TextField(
               controller: ctrl,
@@ -597,93 +586,99 @@ class _EvaluationSection extends ConsumerWidget {
       data: (eval) {
         if (eval == null || eval.policyId == null) return const SizedBox.shrink();
         final tone = eval.hasViolation ? AppColors.danger : AppColors.success;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            AppSectionHeader(
-              title: 'Policy check',
-              subtitle: eval.policyName ?? 'Limit vs claimed',
-            ),
-            const SizedBox(height: 10),
-            GlassCard(
-              shadow: AppShadows.soft,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                          eval.hasViolation
-                              ? Icons.error_outline_rounded
-                              : Icons.verified_rounded,
-                          color: tone,
-                          size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          eval.hasViolation
-                              ? 'Some limits are exceeded'
-                              : 'Within policy limits',
-                          style: TextStyle(
-                              fontWeight: FontWeight.w700, color: tone, fontSize: 13),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (eval.maxClaimAmount != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Total ${money(eval.totalClaimed)} of cap ${money(eval.maxClaimAmount)}',
-                      style: const TextStyle(fontSize: 12, color: AppColors.inkSoft),
-                    ),
-                  ],
-                  if (eval.categories.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    for (final c in eval.categories.where(
-                        (c) => (c.claimed ?? 0) > 0 || c.exceeds || c.billMissing))
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(
-                          children: [
-                            Icon(expenseCategoryIcon(c.category),
-                                size: 15,
-                                color: c.exceeds ? AppColors.danger : AppColors.muted),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(TravelEnums.label(c.category),
-                                  style: const TextStyle(
-                                      fontSize: 12.5, color: AppColors.ink)),
-                            ),
-                            Text(
-                              c.limit == null
-                                  ? money(c.claimed)
-                                  : '${money(c.claimed)} / ${money(c.limit)}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: c.exceeds ? AppColors.danger : AppColors.inkSoft,
-                              ),
-                            ),
-                            if (c.billMissing) ...[
-                              const SizedBox(width: 6),
-                              const Icon(Icons.receipt_long_rounded,
-                                  size: 14, color: AppColors.warning),
-                            ],
-                          ],
-                        ),
-                      ),
-                  ],
-                  if (eval.blockOnViolation && eval.hasViolation) ...[
-                    const SizedBox(height: 4),
-                    const Text(
-                      'This policy blocks submission until violations are resolved or justified.',
-                      style: TextStyle(fontSize: 11.5, color: AppColors.danger, height: 1.4),
-                    ),
-                  ],
-                ],
+        final rows = eval.categories
+            .where((c) => (c.claimed ?? 0) > 0 || c.exceeds || c.billMissing)
+            .toList();
+        return GlassCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ProSectionHeader(
+                title: 'Policy check',
+                subtitle: eval.maxClaimAmount != null
+                    ? '${eval.policyName ?? 'Limit vs claimed'} · total ${money(eval.totalClaimed)} of cap ${money(eval.maxClaimAmount)}'
+                    : (eval.policyName ?? 'Limit vs claimed'),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: eval.hasViolation ? AppColors.dangerTint : AppColors.successTint,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                        eval.hasViolation
+                            ? Icons.error_outline_rounded
+                            : Icons.verified_rounded,
+                        color: tone,
+                        size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        eval.hasViolation
+                            ? 'Some limits are exceeded'
+                            : 'Within policy limits',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, color: tone, fontSize: 13.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              for (final c in rows) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(expenseCategoryIcon(c.category),
+                        size: 16,
+                        color: c.exceeds ? AppColors.danger : AppColors.muted),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(TravelEnums.label(c.category),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.ink)),
+                    ),
+                    if (c.billMissing) ...[
+                      ProPill.warn('Bill missing'),
+                      const SizedBox(width: 6),
+                    ],
+                    Text(
+                      c.limit == null
+                          ? money(c.claimed)
+                          : '${money(c.claimed)} / ${money(c.limit)}',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: c.exceeds ? AppColors.danger : AppColors.inkSoft,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+                if (c.limit != null && c.limit! > 0) ...[
+                  const SizedBox(height: 7),
+                  ProBar(
+                    value: (c.claimed ?? 0) / c.limit!,
+                    color: c.exceeds ? AppColors.danger : AppColors.primary,
+                    height: 4,
+                  ),
+                ],
+              ],
+              if (eval.blockOnViolation && eval.hasViolation) ...[
+                const SizedBox(height: 12),
+                const Text(
+                  'This policy blocks submission until violations are resolved or justified.',
+                  style: TextStyle(fontSize: 12.5, color: AppColors.danger, height: 1.4),
+                ),
+              ],
+            ],
+          ),
         );
       },
     );
@@ -711,109 +706,100 @@ class _ExpenseTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ex = expense;
-    return GlassCard(
-      padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
-      border: ex.exceedsLimit
-          ? Border.all(color: AppColors.danger.withOpacity(0.4))
-          : null,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                alignment: Alignment.center,
-                child: Icon(expenseCategoryIcon(ex.category),
-                    size: 16, color: AppColors.primary),
+              ProIconWell(
+                icon: expenseCategoryIcon(ex.category),
+                color: ex.exceedsLimit ? AppColors.danger : AppColors.primary,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(TravelEnums.label(ex.category),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink)),
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: -0.15,
+                            color: AppColors.ink)),
                     if (ex.expenseDate != null)
                       Text(DateFormat('d MMM yyyy').format(ex.expenseDate!),
-                          style: const TextStyle(fontSize: 11, color: AppColors.muted)),
+                          style: AppText.caption),
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
               Text(money(ex.amount),
                   style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.ink)),
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.ink,
+                      fontFeatures: [FontFeature.tabularFigures()])),
             ],
           ),
           if (ex.description != null && ex.description!.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(ex.description!,
-                style: const TextStyle(fontSize: 12.5, color: AppColors.inkSoft)),
+            Padding(
+              padding: const EdgeInsets.only(left: 46),
+              child: Text(ex.description!,
+                  style: const TextStyle(
+                      fontSize: 13.5, height: 1.4, color: AppColors.inkSoft)),
+            ),
           ],
           if (ex.exceedsLimit || (ex.billRequired && !ex.hasBill) || ex.hasBill) ...[
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                if (ex.exceedsLimit)
-                  StatusPill(
-                    label: ex.limitAmount != null
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(left: 46),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  if (ex.exceedsLimit)
+                    ProPill.bad(ex.limitAmount != null
                         ? 'Over limit ${money(ex.limitAmount)}'
-                        : 'Over limit',
-                    color: AppColors.danger,
-                    icon: Icons.trending_up_rounded,
-                  ),
-                if (ex.billRequired && !ex.hasBill)
-                  const StatusPill(
-                    label: 'Bill required',
-                    color: AppColors.warning,
-                    icon: Icons.receipt_long_rounded,
-                  ),
-                if (ex.hasBill)
-                  const StatusPill(
-                    label: 'Bill attached',
-                    color: AppColors.success,
-                    icon: Icons.check_rounded,
-                  ),
-              ],
+                        : 'Over limit'),
+                  if (ex.billRequired && !ex.hasBill) ProPill.warn('Bill required'),
+                  if (ex.hasBill) ProPill.ok('Bill attached'),
+                ],
+              ),
             ),
           ],
           if (canEdit) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                TextButton.icon(
-                  onPressed: onAddBill,
-                  icon: const Icon(Icons.attach_file_rounded, size: 16),
-                  label: const Text('Bill'),
-                  style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact, padding: EdgeInsets.zero),
-                ),
-                const SizedBox(width: 12),
-                TextButton.icon(
-                  onPressed: onEdit,
-                  icon: const Icon(Icons.edit_rounded, size: 16),
-                  label: const Text('Edit'),
-                  style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact, padding: EdgeInsets.zero),
-                ),
-                const Spacer(),
-                IconButton(
-                  onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline_rounded,
-                      size: 18, color: AppColors.danger),
-                  visualDensity: VisualDensity.compact,
-                  tooltip: 'Delete',
-                ),
-              ],
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.only(left: 38),
+              child: Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: onAddBill,
+                    icon: const Icon(Icons.attach_file_rounded, size: 16),
+                    label: const Text('Bill'),
+                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                  ),
+                  TextButton.icon(
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_rounded, size: 16),
+                    label: const Text('Edit'),
+                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: onDelete,
+                    icon: const Icon(Icons.delete_outline_rounded,
+                        size: 19, color: AppColors.danger),
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Delete',
+                  ),
+                ],
+              ),
             ),
           ],
         ],
@@ -828,107 +814,22 @@ class _AttachmentTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.all(12),
-      shadow: AppShadows.soft,
-      child: InkWell(
-        onTap: () async {
-          final url = Env.fileUrl(att.downloadUrl);
-          if (url == null) return;
-          final ok =
-              await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-          if (!ok && context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Could not open bill')),
-            );
-          }
-        },
-        child: Row(
-          children: [
-            Icon(Icons.description_rounded, color: AppColors.primary),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(att.fileName ?? 'Bill',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink)),
-            ),
-            const Icon(Icons.open_in_new_rounded, size: 16, color: AppColors.muted),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ApprovalRow extends StatelessWidget {
-  const _ApprovalRow({required this.step});
-  final TravelClaimApprovalStep step;
-
-  Color get _color {
-    switch (step.status) {
-      case 'APPROVED':
-        return AppColors.success;
-      case 'REJECTED':
-        return AppColors.danger;
-      case 'SENT_BACK':
-        return AppColors.pink;
-      case 'PENDING':
-        return AppColors.warning;
-      default:
-        return AppColors.muted;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 24,
-          height: 24,
-          decoration: BoxDecoration(
-            color: _color.withOpacity(0.14),
-            shape: BoxShape.circle,
-            border: Border.all(color: _color.withOpacity(0.4)),
-          ),
-          alignment: Alignment.center,
-          child: Text('${step.levelOrder ?? '?'}',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: _color)),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(step.approverName ?? 'Approver',
-                        style: const TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.ink)),
-                  ),
-                  StatusPill(label: TravelEnums.label(step.status), color: _color),
-                ],
-              ),
-              if (step.remarks != null && step.remarks!.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(step.remarks!,
-                    style: const TextStyle(
-                        fontSize: 11.5, color: AppColors.inkSoft, fontStyle: FontStyle.italic)),
-              ],
-              if (step.actionAt != null) ...[
-                const SizedBox(height: 2),
-                Text(DateFormat('d MMM yyyy, h:mm a').format(step.actionAt!),
-                    style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
-              ],
-            ],
-          ),
-        ),
-      ],
+    return ProListRow(
+      leading: ProIconWell(icon: Icons.description_rounded, color: AppColors.primary),
+      title: att.fileName ?? 'Bill',
+      chevron: false,
+      trailing: const Icon(Icons.open_in_new_rounded, size: 17, color: AppColors.muted),
+      onTap: () async {
+        final url = Env.fileUrl(att.downloadUrl);
+        if (url == null) return;
+        final ok =
+            await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+        if (!ok && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not open bill')),
+          );
+        }
+      },
     );
   }
 }
@@ -943,9 +844,13 @@ class _SmallAction extends StatelessWidget {
   Widget build(BuildContext context) {
     return TextButton.icon(
       onPressed: onTap,
-      icon: Icon(icon, size: 16),
+      icon: Icon(icon, size: 17),
       label: Text(label),
-      style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+      style: TextButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        minimumSize: const Size(0, 36),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+      ),
     );
   }
 }
@@ -1030,114 +935,104 @@ class _ExpenseSheetState extends ConsumerState<_ExpenseSheet> {
   @override
   Widget build(BuildContext context) {
     final df = DateFormat('d MMM yyyy');
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 16,
-        bottom: MediaQuery.of(context).viewInsets.bottom +
-            MediaQuery.of(context).padding.bottom +
-            20,
-      ),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: const BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.all(Radius.circular(AppRadii.xl)),
+    return TravelSheet(
+      title: _isEdit ? 'Edit expense' : 'Add expense',
+      children: [
+        // DB-driven categories (/api/lookups/travel-expense-categories) —
+        // the backend enum was removed, so companies can define their own.
+        // The provider itself falls back to the legacy built-in list.
+        ProField(
+          label: 'Category',
+          child: Builder(builder: (context) {
+            final serverCats =
+                ref.watch(travelExpenseCategoriesProvider).maybeWhen(
+                      data: (list) => list,
+                      orElse: () => const <TravelCategoryOption>[],
+                    );
+            final options = serverCats.isNotEmpty
+                ? [...serverCats] // copy — never mutate the provider cache
+                : [
+                    for (final c in TravelEnums.expenseCategories)
+                      TravelCategoryOption(
+                          code: c, label: TravelEnums.label(c)),
+                  ];
+            // Keep an existing expense's (possibly retired) code selectable.
+            final codes = options.map((o) => o.code).toSet();
+            if (!codes.contains(_category)) {
+              options.insert(
+                  0,
+                  TravelCategoryOption(
+                      code: _category, label: TravelEnums.label(_category)));
+            }
+            return DropdownButtonFormField<String>(
+              value: _category,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.category_outlined, size: 20)),
+              items: [
+                for (final o in options)
+                  DropdownMenuItem(value: o.code, child: Text(o.label)),
+              ],
+              onChanged: (v) => setState(() => _category = v ?? _category),
+            );
+          }),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(_isEdit ? 'Edit expense' : 'Add expense',
-                style: const TextStyle(
-                    fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink)),
-            const SizedBox(height: 16),
-            // DB-driven categories (/api/lookups/travel-expense-categories) —
-            // the backend enum was removed, so companies can define their own.
-            // The provider itself falls back to the legacy built-in list.
-            Builder(builder: (context) {
-              final serverCats =
-                  ref.watch(travelExpenseCategoriesProvider).maybeWhen(
-                        data: (list) => list,
-                        orElse: () => const <TravelCategoryOption>[],
-                      );
-              final options = serverCats.isNotEmpty
-                  ? [...serverCats] // copy — never mutate the provider cache
-                  : [
-                      for (final c in TravelEnums.expenseCategories)
-                        TravelCategoryOption(
-                            code: c, label: TravelEnums.label(c)),
-                    ];
-              // Keep an existing expense's (possibly retired) code selectable.
-              final codes = options.map((o) => o.code).toSet();
-              if (!codes.contains(_category)) {
-                options.insert(
-                    0,
-                    TravelCategoryOption(
-                        code: _category, label: TravelEnums.label(_category)));
-              }
-              return DropdownButtonFormField<String>(
-                value: _category,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.category_outlined, size: 20)),
-                items: [
-                  for (final o in options)
-                    DropdownMenuItem(value: o.code, child: Text(o.label)),
-                ],
-                onChanged: (v) => setState(() => _category = v ?? _category),
+        const SizedBox(height: 14),
+        ProField(
+          label: 'Amount',
+          required: true,
+          child: TextField(
+            controller: _amount,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(prefixText: '₹ ', hintText: 'Amount'),
+          ),
+        ),
+        const SizedBox(height: 14),
+        ProField(
+          label: 'Expense date',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            onTap: () async {
+              final d = await showDatePicker(
+                context: context,
+                initialDate: _date ?? DateTime.now(),
+                firstDate: DateTime(2015),
+                lastDate: DateTime(2035),
               );
-            }),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _amount,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(prefixText: '₹ ', hintText: 'Amount'),
+              if (d != null) setState(() => _date = d);
+            },
+            child: InputDecorator(
+              decoration:
+                  const InputDecoration(prefixIcon: Icon(Icons.event_rounded, size: 20)),
+              child: Text(_date == null ? 'Expense date' : df.format(_date!),
+                  style: TextStyle(
+                      fontSize: 15,
+                      color: _date == null ? AppColors.faint : AppColors.ink)),
             ),
-            const SizedBox(height: 12),
-            InkWell(
-              onTap: () async {
-                final d = await showDatePicker(
-                  context: context,
-                  initialDate: _date ?? DateTime.now(),
-                  firstDate: DateTime(2015),
-                  lastDate: DateTime(2035),
-                );
-                if (d != null) setState(() => _date = d);
-              },
-              child: InputDecorator(
-                decoration:
-                    const InputDecoration(prefixIcon: Icon(Icons.event_rounded, size: 20)),
-                child: Text(_date == null ? 'Expense date' : df.format(_date!),
-                    style: TextStyle(
-                        color: _date == null ? AppColors.muted : AppColors.ink)),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _desc,
-              minLines: 2,
-              maxLines: 4,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
-              decoration: const InputDecoration(hintText: 'Description (optional)'),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              AppErrorPanel(message: _error!),
-            ],
-            const SizedBox(height: 18),
-            SizedBox(
-              height: 48,
-              child: FilledButton(
-                onPressed: _saving ? null : _save,
-                child: Text(_saving ? 'Saving…' : (_isEdit ? 'Save' : 'Add expense')),
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
+        const SizedBox(height: 14),
+        ProField(
+          label: 'Description (optional)',
+          child: TextField(
+            controller: _desc,
+            minLines: 2,
+            maxLines: 4,
+            textCapitalization: TextCapitalization.words,
+            inputFormatters: const [TitleCaseTextFormatter()],
+            decoration: const InputDecoration(hintText: 'What was this for?'),
+          ),
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          AppErrorPanel(message: _error!),
+        ],
+        const SizedBox(height: 18),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: Text(_saving ? 'Saving…' : (_isEdit ? 'Save' : 'Add expense')),
+        ),
+      ],
     );
   }
 }
@@ -1199,54 +1094,29 @@ class _UploadBillsSheetState extends ConsumerState<_UploadBillsSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 16,
-        bottom: MediaQuery.of(context).viewInsets.bottom +
-            MediaQuery.of(context).padding.bottom +
-            20,
-      ),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: const BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.all(Radius.circular(AppRadii.xl)),
+    return TravelSheet(
+      title: widget.expenseId != null ? 'Upload expense bill' : 'Upload claim bill',
+      children: [
+        TravelFilePicker(
+          files: _files,
+          onChanged: () => setState(() {}),
+          title: 'Files',
+          subtitle: 'Photos of receipts or a PDF',
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(widget.expenseId != null ? 'Upload expense bill' : 'Upload claim bill',
-                style: const TextStyle(
-                    fontSize: 17, fontWeight: FontWeight.w800, color: AppColors.ink)),
-            const SizedBox(height: 16),
-            TravelFilePicker(
-              files: _files,
-              onChanged: () => setState(() {}),
-              title: 'Files',
-              subtitle: 'Photos of receipts or a PDF',
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              AppErrorPanel(message: _error!),
-            ],
-            const SizedBox(height: 16),
-            if (_uploading && _progress > 0 && _progress < 1) ...[
-              LinearProgressIndicator(value: _progress),
-              const SizedBox(height: 10),
-            ],
-            SizedBox(
-              height: 48,
-              child: FilledButton(
-                onPressed: _uploading ? null : _upload,
-                child: Text(_uploading ? 'Uploading…' : 'Upload'),
-              ),
-            ),
-          ],
+        if (_error != null) ...[
+          const SizedBox(height: 12),
+          AppErrorPanel(message: _error!),
+        ],
+        const SizedBox(height: 16),
+        if (_uploading && _progress > 0 && _progress < 1) ...[
+          ProBar(value: _progress),
+          const SizedBox(height: 10),
+        ],
+        FilledButton(
+          onPressed: _uploading ? null : _upload,
+          child: Text(_uploading ? 'Uploading…' : 'Upload'),
         ),
-      ),
+      ],
     );
   }
 }

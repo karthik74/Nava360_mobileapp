@@ -10,9 +10,11 @@
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -132,14 +134,14 @@ class _MisCenterLoader extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(
+          SizedBox(
             width: 18,
             height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2.4),
+            child: CircularProgressIndicator(
+                strokeWidth: 2.4, color: AppColors.primary),
           ),
           const SizedBox(width: 12),
-          Text(label,
-              style: const TextStyle(color: AppColors.muted, fontSize: 13.5)),
+          Text(label, style: const TextStyle(color: AppColors.muted, fontSize: 14)),
         ],
       ),
     );
@@ -147,6 +149,22 @@ class _MisCenterLoader extends StatelessWidget {
 }
 
 // ── Dashboard body ──────────────────────────────────────────────────────────
+
+/// The overview's resolved period: fiscal year + the two compared months.
+class _OverviewView {
+  const _OverviewView({
+    required this.fys,
+    required this.activeFy,
+    required this.displayKeys,
+    required this.left,
+    required this.right,
+  });
+  final List<int> fys;
+  final int activeFy;
+  final List<String> displayKeys;
+  final String left;
+  final String right;
+}
 
 class _MisDashboardBody extends ConsumerStatefulWidget {
   const _MisDashboardBody({required this.session});
@@ -184,6 +202,32 @@ class _MisDashboardBodyState extends ConsumerState<_MisDashboardBody> {
     return 'Good evening';
   }
 
+  /// Fiscal-year filter over the returned months + the two-month comparison
+  /// (phones are narrow — mirror the web mobile layout). Null when there is
+  /// nothing to show.
+  _OverviewView? _resolve(OverviewTable table) {
+    final allKeys = [...table.months]..sort();
+    if (allKeys.isEmpty || table.rows.isEmpty) return null;
+    final fys = allKeys.map(misFyStart).toSet().toList()
+      ..sort((a, b) => b.compareTo(a));
+    final activeFy = (_fy != null && fys.contains(_fy)) ? _fy! : fys.first;
+    final displayKeys = allKeys.where((k) => misFyStart(k) == activeFy).toList();
+    if (displayKeys.isEmpty) return null;
+    final newest = displayKeys.last;
+    final prevNewest =
+        displayKeys.length > 1 ? displayKeys[displayKeys.length - 2] : newest;
+    final left = (_left != null && displayKeys.contains(_left)) ? _left! : newest;
+    final right =
+        (_right != null && displayKeys.contains(_right)) ? _right! : prevNewest;
+    return _OverviewView(
+      fys: fys,
+      activeFy: activeFy,
+      displayKeys: displayKeys,
+      left: left,
+      right: right,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(misOverviewProvider(_drill));
@@ -198,97 +242,199 @@ class _MisDashboardBodyState extends ConsumerState<_MisDashboardBody> {
             ? user!.role!.trim()
             : misTierLabel(widget.session.scope?.tier);
 
-    return RefreshIndicator(
-      color: AppColors.primary,
+    final table = async.valueOrNull;
+    final view = table == null ? null : _resolve(table);
+
+    return ProPage(
       onRefresh: () async => ref.invalidate(misOverviewProvider(_drill)),
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(
-            16, 14, 16, MediaQuery.of(context).padding.bottom + 24),
-        children: [
-          // Greeting
-          Row(
-            children: [
-              Text('${_greeting()}, ',
-                  style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.muted)),
-              Flexible(
-                child: Text(
-                  user?.firstName ?? 'there',
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.4,
-                      color: AppColors.ink),
-                ),
-              ),
-              const SizedBox(width: 6),
-              const Icon(Icons.auto_awesome_rounded,
-                  size: 18, color: AppColors.warning),
-            ],
-          ),
-          const SizedBox(height: 2),
-          Text(
-            [roleLabel, user?.branch]
-                .where((s) => s != null && s.isNotEmpty)
-                .join(' · '),
-            style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
-          ),
-          const SizedBox(height: 14),
-          // Quick nav to the MIS sub-dashboards.
-          const _MisNavRow(),
-          const SizedBox(height: 16),
-          const AppPageHeader(
-            title: 'NLPL Overview',
-            subtitle: 'Month Highlights (Amount in Cr.)',
-          ),
-          const SizedBox(height: 12),
-          _scopeFilter(),
-          const SizedBox(height: 12),
-          async.when(
-            loading: () => const AppLoadingBlock(height: 280),
-            error: (e, _) => AppErrorPanel(
+      hero: _hero(user, roleLabel, table, view),
+      children: [
+        // Quick nav to the MIS sub-dashboards.
+        const _MisNavRow(),
+        _overviewCard(view),
+        ...async.when(
+          loading: () => const [AppLoadingBlock(height: 280)],
+          error: (e, _) => [
+            AppErrorPanel(
               message: e.toString(),
               onRetry: () => ref.invalidate(misOverviewProvider(_drill)),
             ),
-            data: (table) => _content(table),
+          ],
+          data: (table) => _content(table),
+        ),
+      ],
+    );
+  }
+
+  // ── Hero: greeting, product switch, headline figures ─────────────────────────
+
+  Widget _hero(MisUser? user, String roleLabel, OverviewTable? table,
+      _OverviewView? view) {
+    OverviewRow? rowFor(String key) {
+      if (table == null) return null;
+      for (final r in table.rows) {
+        if (r.key == key) return r;
+      }
+      return null;
+    }
+
+    // Headline figures straight from the Month Highlights table, for Month 1.
+    ProStat stat(String key, String label, String sub, Color dot) {
+      final row = rowFor(key);
+      final value = (table == null || view == null || row == null)
+          ? '—'
+          : misCell(row.type, table.cell(view.left, key));
+      return ProStat(label: label, value: value, sub: sub, dot: dot);
+    }
+
+    final productIdx = _products.indexWhere((p) => p.$1 == _product);
+
+    return ProHero(
+      title: 'MIS dashboard',
+      subtitle: [
+        '${_greeting()}, ${user?.firstName ?? 'there'}',
+        roleLabel,
+        user?.branch,
+      ].where((s) => s != null && s.isNotEmpty).join(' · '),
+      actions: [
+        ProHeroIconButton(
+          icon: Icons.refresh_rounded,
+          tooltip: 'Refresh figures',
+          onTap: () => ref.invalidate(misOverviewProvider(_drill)),
+        ),
+      ],
+      children: [
+        ProHeroSegmented(
+          labels: [for (final p in _products) p.$2],
+          selected: productIdx < 0 ? 0 : productIdx,
+          onChanged: (i) => setState(() => _product = _products[i].$1),
+        ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _HeroKicker(
+              left: view != null
+                  ? '${misMonthLabel(view.left)} at a glance'
+                  : 'At a glance',
+              right: _scopeLabel,
+            ),
+            const SizedBox(height: 8),
+            ProHeroStats(stats: [
+              stat('totalPos', 'Total POS', '₹ Cr',
+                  Color.lerp(AppColors.primary, Colors.white, 0.45)!),
+              stat('regCollPct', 'Regular coll.', 'of demand', AppColors.live),
+              stat('disbAmt', 'Disbursed', '₹ Cr', const Color(0xFFF2B347)),
+            ]),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ── Overview card: scope filter + period ─────────────────────────────────────
+
+  Widget _overviewCard(_OverviewView? view) {
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ProSectionHeader(
+            title: 'NLPL overview',
+            subtitle: 'Month highlights · amounts in ₹ Cr',
+            trailing: _region == null
+                ? null
+                : TextButton.icon(
+                    onPressed: () => setState(() {
+                      _region = _division = _area = _branch = null;
+                    }),
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size(0, 36),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                    ),
+                    icon: const Icon(Icons.close_rounded, size: 15),
+                    label: const Text('Reset filter'),
+                  ),
           ),
+          const SizedBox(height: 12),
+          _scopeFilter(),
+          if (view != null) ...[
+            const SizedBox(height: 8),
+            // Fiscal year + the two compared months.
+            if (view.fys.length > 1) ...[
+              MisDropdown<int>(
+                label: 'Fiscal year',
+                value: view.activeFy,
+                items: [
+                  for (final s in view.fys)
+                    DropdownMenuItem(value: s, child: Text(misFyLabel(s))),
+                ],
+                onChanged: (v) => setState(() {
+                  _fy = v;
+                  _left = null;
+                  _right = null;
+                  _chartMonths = {}; // months differ per FY → reset to all
+                }),
+              ),
+              const SizedBox(height: 8),
+            ],
+            Row(
+              children: [
+                Expanded(
+                  child: MisMonthPicker(
+                    label: 'Month 1',
+                    value: view.left,
+                    available: view.displayKeys,
+                    onChanged: (v) => setState(() {
+                      _left = v;
+                      if (v == view.right) {
+                        _right = view.left; // keep the two distinct
+                      }
+                    }),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: MisMonthPicker(
+                    label: 'Month 2',
+                    value: view.right,
+                    available: view.displayKeys,
+                    onChanged: (v) => setState(() {
+                      _right = v;
+                      if (v == view.left) _left = view.right;
+                    }),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _content(OverviewTable table) {
+  List<Widget> _content(OverviewTable table) {
     final allKeys = [...table.months]..sort();
     if (allKeys.isEmpty || table.rows.isEmpty) {
-      return const AppEmptyState(
-        icon: Icons.query_stats_rounded,
-        message: 'No overview data available yet for your scope.',
-      );
+      return const [
+        AppEmptyState(
+          icon: Icons.query_stats_rounded,
+          message: 'No overview data available yet for your scope.',
+        ),
+      ];
     }
-
-    // Fiscal-year filter over the returned months.
-    final fys = allKeys.map(misFyStart).toSet().toList()
-      ..sort((a, b) => b.compareTo(a));
-    final activeFy = (_fy != null && fys.contains(_fy)) ? _fy! : fys.first;
-    final displayKeys = allKeys.where((k) => misFyStart(k) == activeFy).toList();
-    if (displayKeys.isEmpty) {
-      return const AppEmptyState(
-        icon: Icons.query_stats_rounded,
-        message: 'No data for the selected fiscal year.',
-      );
+    final view = _resolve(table);
+    if (view == null) {
+      return const [
+        AppEmptyState(
+          icon: Icons.query_stats_rounded,
+          message: 'No data for the selected fiscal year.',
+        ),
+      ];
     }
-
-    // Two-month comparison (phones are narrow — mirror the web mobile layout).
-    final newest = displayKeys.last;
-    final prevNewest =
-        displayKeys.length > 1 ? displayKeys[displayKeys.length - 2] : newest;
-    var left = (_left != null && displayKeys.contains(_left)) ? _left! : newest;
-    var right =
-        (_right != null && displayKeys.contains(_right)) ? _right! : prevNewest;
+    final activeFy = view.activeFy;
+    final displayKeys = view.displayKeys;
+    final left = view.left;
+    final right = view.right;
 
     // Chart row: the selected metric, else the first "strong" row, else row 0.
     final chartRow = table.rows.firstWhere(
@@ -307,158 +453,142 @@ class _MisDashboardBodyState extends ConsumerState<_MisDashboardBody> {
       for (final k in effectiveKeys)
         _Pt(misMonthLabel(k), table.cell(k, chartRow.key)),
     ];
+    final fullAccess = widget.session.scope?.fullAccess ?? false;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Filter row: fiscal year + the two compared months.
-        Row(
-          children: [
-            if (fys.length > 1) ...[
-              Expanded(
-                child: _LabeledDropdown<int>(
-                  label: 'Fiscal Year',
-                  value: activeFy,
-                  items: [
-                    for (final s in fys)
-                      DropdownMenuItem(value: s, child: Text(misFyLabel(s))),
+    return [
+      // The table renders only the two compared columns; the export is the
+      // full picture — every month of an FY the user ticks.
+      GlassCard(
+        padding: EdgeInsets.zero,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadii.lg),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 12, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Month highlights',
+                              style: AppText.section),
+                          Text(
+                            '${misMonthLabel(left)} against ${misMonthLabel(right)}',
+                            style: AppText.caption.copyWith(
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures()
+                                ]),
+                          ),
+                        ],
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _openExport(table, allKeys, activeFy),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 40),
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      icon: const Icon(Icons.download_rounded, size: 17),
+                      label: const Text('Export'),
+                    ),
                   ],
-                  onChanged: (v) => setState(() {
-                    _fy = v;
-                    _left = null;
-                    _right = null;
-                    _chartMonths = {}; // months differ per FY → reset to all
-                  }),
                 ),
               ),
-              const SizedBox(width: 10),
-            ],
-            Expanded(
-              child: MisMonthPicker(
-                label: 'Month 1',
-                value: left,
-                available: displayKeys,
-                onChanged: (v) => setState(() {
-                  _left = v;
-                  if (v == right) _right = left; // keep the two distinct
-                }),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: MisMonthPicker(
-                label: 'Month 2',
-                value: right,
-                available: displayKeys,
-                onChanged: (v) => setState(() {
-                  _right = v;
-                  if (v == left) _left = right;
-                }),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-
-        // The table renders only the two compared columns; the export is the
-        // full picture — every month of an FY the user ticks.
-        Row(
-          children: [
-            const Expanded(
-              child: Text(
-                'Month Highlights',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: () => _openExport(table, allKeys, activeFy),
-              icon: const Icon(Icons.download_rounded, size: 17),
-              label: const Text('Export'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-
-        // Month Highlights table (Parameter | Month 1 | Month 2).
-        _HighlightsTable(table: table, left: left, right: right),
-
-        const SizedBox(height: 20),
-
-        // Analytics — trend of the selected metric across the FY.
-        Row(
-          children: [
-            const Text('Analytics',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink)),
-            const Spacer(),
-            _ChartTypeToggle(
-              bar: _bar,
-              onChanged: (b) => setState(() => _bar = b),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _LabeledDropdown<String>(
-                label: 'Parameter',
-                value: chartRow.key,
-                items: [
-                  for (final r in table.rows)
-                    DropdownMenuItem(value: r.key, child: Text(r.label)),
-                ],
-                onChanged: (v) => setState(() => _chartKey = v),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _MonthsMultiSelect(
-                label: 'Months',
-                all: displayKeys,
-                selected: _chartMonths,
-                onChanged: (sel) => setState(() {
-                  // Full selection is stored as empty ⇒ "all".
-                  _chartMonths =
-                      sel.length == displayKeys.length ? <String>{} : sel;
-                }),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        GlassCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${chartRow.label} — ${_bar ? 'by month' : 'trend'}',
-                style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink),
-              ),
-              const SizedBox(height: 14),
-              SizedBox(
-                height: 200,
-                child: _MisMetricChart(
-                    points: trend, bar: _bar, money: money, type: chartRow.type),
-              ),
+              // Month Highlights table (Parameter | Month 1 | Month 2).
+              _HighlightsTable(table: table, left: left, right: right),
             ],
           ),
         ),
+      ),
 
-        // Branch Matrix — full-access (CEO/Director) only; the widget itself
-        // renders nothing for anyone else. Sits last, after the charts.
-        MisBranchMatrix(fullAccess: widget.session.scope?.fullAccess ?? false),
-      ],
-    );
+      // Analytics — trend of the selected metric across the FY.
+      GlassCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ProSectionHeader(
+              title: 'Analytics',
+              trailing: _ChartTypeToggle(
+                bar: _bar,
+                onChanged: (b) => setState(() => _bar = b),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: MisDropdown<String>(
+                    label: 'Parameter',
+                    value: chartRow.key,
+                    items: [
+                      for (final r in table.rows)
+                        DropdownMenuItem(value: r.key, child: Text(r.label)),
+                    ],
+                    onChanged: (v) => setState(() => _chartKey = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _MonthsMultiSelect(
+                    label: 'Months',
+                    all: displayKeys,
+                    selected: _chartMonths,
+                    onChanged: (sel) => setState(() {
+                      // Full selection is stored as empty ⇒ "all".
+                      _chartMonths =
+                          sel.length == displayKeys.length ? <String>{} : sel;
+                    }),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.fromLTRB(10, 12, 12, 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFAFBFB),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.hairlineSoft),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Text(
+                      '${chartRow.label} — ${_bar ? 'by month' : 'trend'}',
+                      style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.ink),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    height: 210,
+                    child: _MisMetricChart(
+                        points: trend,
+                        bar: _bar,
+                        money: money,
+                        type: chartRow.type),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+
+      // Branch Matrix — full-access (CEO/Director) only; the widget itself
+      // renders nothing for anyone else. Sits last, after the charts.
+      if (fullAccess) MisBranchMatrix(fullAccess: fullAccess),
+    ];
   }
 
   // ── Cascading scope filter (Region → Division → Area → Branch) ───────────────
@@ -503,46 +633,12 @@ class _MisDashboardBodyState extends ConsumerState<_MisDashboardBody> {
     ];
 
     return LayoutBuilder(builder: (context, c) {
-      const gap = 10.0;
+      const gap = 8.0;
       final w = (c.maxWidth - gap) / 2;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: MisSegmented<String?>(
-              options: _products,
-              value: _product,
-              onChanged: (v) => setState(() => _product = v),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: gap,
-            runSpacing: gap,
-            children: [for (final cell in cells) SizedBox(width: w, child: cell)],
-          ),
-          if (_region != null) ...[
-            const SizedBox(height: 8),
-            GestureDetector(
-              onTap: () => setState(() {
-                _region = _division = _area = _branch = null;
-              }),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.close_rounded, size: 14, color: AppColors.primary),
-                  const SizedBox(width: 4),
-                  Text('Reset filter',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.primary)),
-                ],
-              ),
-            ),
-          ],
-        ],
+      return Wrap(
+        spacing: gap,
+        runSpacing: gap,
+        children: [for (final cell in cells) SizedBox(width: w, child: cell)],
       );
     });
   }
@@ -557,7 +653,7 @@ class _MisDashboardBodyState extends ConsumerState<_MisDashboardBody> {
       backgroundColor: AppColors.surface,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (_) => _OverviewExportSheet(
         table: table,
@@ -603,14 +699,54 @@ class _MisDashboardBodyState extends ConsumerState<_MisDashboardBody> {
   }
 }
 
+/// "Sep-26 at a glance · All regions" line above the hero stats.
+class _HeroKicker extends StatelessWidget {
+  const _HeroKicker({required this.left, required this.right});
+  final String left, right;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          left,
+          style: const TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: Color(0xBDFFFFFF),
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            right,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.right,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+              color: Color(0x94FFFFFF),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // ── Month Highlights table ──────────────────────────────────────────────────
 
 /// A category the overview rows are grouped under, mirroring the printed
-/// "Month Highlights" report: each group has its own accent color that tints
-/// the group header, the row's left stripe, and its headline values.
+/// "Month Highlights" report. [title] is the report's own category name (it
+/// also labels the CSV export); [label] is how the table shows it; [color]
+/// marks the group's dot.
 class _MisGroup {
-  const _MisGroup(this.title, this.color, this.keys);
+  const _MisGroup(this.title, this.label, this.color, this.keys);
   final String title;
+  final String label;
   final Color color;
   final Set<String> keys;
 }
@@ -674,28 +810,14 @@ class _OverviewExportSheetState extends State<_OverviewExportSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.hairline,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
+            const _SheetHandle(),
             const SizedBox(height: 14),
-            const Text('Export Month Highlights',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink)),
+            const Text('Export month highlights', style: _sheetTitle),
             const SizedBox(height: 2),
-            Text(widget.scopeLabel,
-                style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-            const SizedBox(height: 14),
-            if (_fys.length > 1)
-              _LabeledDropdown<int>(
+            Text(widget.scopeLabel, style: AppText.caption),
+            const SizedBox(height: 16),
+            if (_fys.length > 1) ...[
+              MisDropdown<int>(
                 label: 'Financial year',
                 value: _fy,
                 items: [
@@ -709,34 +831,34 @@ class _OverviewExportSheetState extends State<_OverviewExportSheet> {
                   _selected = _monthsOf(_fy).toSet();
                 }),
               ),
-            const SizedBox(height: 14),
+              const SizedBox(height: 14),
+            ],
             Row(
               children: [
-                const Text('Months',
-                    style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.muted)),
+                const Text('Months', style: AppText.label),
                 const Spacer(),
                 TextButton(
                   onPressed: () => setState(() => _selected = _selected.length ==
                           months.length
                       ? <String>{}
                       : months.toSet()),
-                  child: Text(
-                      _selected.length == months.length ? 'None' : 'All',
-                      style: const TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                  child:
+                      Text(_selected.length == months.length ? 'None' : 'All'),
                 ),
               ],
             ),
+            const SizedBox(height: 4),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
                 for (final k in months)
                   FilterChip(
-                    label: Text(misMonthLabel(k),
-                        style: const TextStyle(fontSize: 12)),
+                    label: Text(misMonthLabel(k)),
                     selected: _selected.contains(k),
                     onSelected: (on) => setState(() {
                       if (on) {
@@ -748,7 +870,7 @@ class _OverviewExportSheetState extends State<_OverviewExportSheet> {
                   ),
               ],
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
@@ -802,31 +924,33 @@ class _OverviewExportSheetState extends State<_OverviewExportSheet> {
 // File-level so the export sheet can label rows with the same categories the
 // table shows — one definition, one source of truth.
 const List<_MisGroup> _overviewGroups = [
-    _MisGroup('NETWORK OVERVIEW', Color(0xFF0F9AA0),
-        {'state', 'branch', 'foCount', 'totalStaff'}),
-    _MisGroup('DISBURSEMENT & ACCOUNTS', Color(0xFF2563EB),
-        {'disbAcc', 'disbAmt', 'activeAcc'}),
-    _MisGroup('COLLECTION PERFORMANCE', Color(0xFF7C3AED), {
-      'totalPos',
-      'incrPos',
-      'regCollPct',
-      'ftodAcc',
-      'ftodPar',
-      'total1Par',
-      'incr1Par',
-    }),
-    _MisGroup('NPA OVERVIEW', Color(0xFFEA580C),
-        {'totalNpa', 'incrNpa', 'npaCollAcc', 'npaCollAmt'}),
-    _MisGroup('PRODUCTIVITY METRICS', Color(0xFF16A34A), {
-      'borrowersPerBranch',
-      'posPerBranch',
-      'borrowersPerFo',
-      'posPerFo',
-      'avgLoanDisb',
-      'avgLoanOs',
-    }),
+  _MisGroup('NETWORK OVERVIEW', 'Network overview', Color(0xFF4253A8),
+      {'state', 'branch', 'foCount', 'totalStaff'}),
+  _MisGroup('DISBURSEMENT & ACCOUNTS', 'Disbursement & accounts',
+      AppColors.info, {'disbAcc', 'disbAmt', 'activeAcc'}),
+  _MisGroup('COLLECTION PERFORMANCE', 'Collection performance',
+      AppColors.success, {
+    'totalPos',
+    'incrPos',
+    'regCollPct',
+    'ftodAcc',
+    'ftodPar',
+    'total1Par',
+    'incr1Par',
+  }),
+  _MisGroup('NPA OVERVIEW', 'NPA overview', AppColors.danger,
+      {'totalNpa', 'incrNpa', 'npaCollAcc', 'npaCollAmt'}),
+  _MisGroup('PRODUCTIVITY METRICS', 'Productivity metrics', Color(0xFF9A5B00), {
+    'borrowersPerBranch',
+    'posPerBranch',
+    'borrowersPerFo',
+    'posPerFo',
+    'avgLoanDisb',
+    'avgLoanOs',
+  }),
 ];
-const _MisGroup _overviewOther = _MisGroup('OTHER', AppColors.muted, {});
+const _MisGroup _overviewOther =
+    _MisGroup('OTHER', 'Other', AppColors.muted, {});
 
 _MisGroup _groupFor(String key) {
   for (final g in _overviewGroups) {
@@ -835,7 +959,12 @@ _MisGroup _groupFor(String key) {
   return _overviewOther;
 }
 
-class _HighlightsTable extends StatelessWidget {
+/// Header-row fill of the Pro tables.
+const Color _headBg = Color(0xFFF6F8F8);
+
+/// Parameter | Month 1 | Month 2, grouped by category. Each category header
+/// folds its rows away on tap (all open by default).
+class _HighlightsTable extends StatefulWidget {
   const _HighlightsTable({
     required this.table,
     required this.left,
@@ -846,65 +975,134 @@ class _HighlightsTable extends StatelessWidget {
   final String right;
 
   @override
+  State<_HighlightsTable> createState() => _HighlightsTableState();
+}
+
+class _HighlightsTableState extends State<_HighlightsTable> {
+  final Set<String> _folded = {};
+
+  @override
   Widget build(BuildContext context) {
+    final table = widget.table;
+    // Category → its rows, in report order.
+    final runs = <(_MisGroup, List<OverviewRow>)>[];
+    for (final row in table.rows) {
+      final group = _groupFor(row.key);
+      if (runs.isEmpty || runs.last.$1 != group) {
+        runs.add((group, <OverviewRow>[]));
+      }
+      runs.last.$2.add(row);
+    }
+
     final children = <Widget>[
       _Row(
-        cells: ['Parameters', misMonthLabel(left), misMonthLabel(right)],
+        cells: [
+          'Parameter',
+          misMonthLabel(widget.left),
+          misMonthLabel(widget.right)
+        ],
         header: true,
       ),
     ];
-    _MisGroup? current;
-    for (final row in table.rows) {
-      final group = _groupFor(row.key);
-      if (group != current) {
-        children.add(_GroupHeader(group: group));
-        current = group;
-      }
-      final lv = table.cell(left, row.key);
-      final rv = table.cell(right, row.key);
-      children.add(_Row(
-        cells: [row.label, misCell(row.type, lv), misCell(row.type, rv)],
-        // Only the grouping is colored (header band + left stripe); the row
-        // text stays neutral and unbolded.
-        accent: group.color,
+    for (final run in runs) {
+      final group = run.$1;
+      final open = !_folded.contains(group.title);
+      children.add(_GroupHeader(
+        group: group,
+        count: run.$2.length,
+        open: open,
+        onTap: () => setState(() {
+          if (open) {
+            _folded.add(group.title);
+          } else {
+            _folded.remove(group.title);
+          }
+        }),
       ));
+      if (!open) continue;
+      for (final row in run.$2) {
+        final lv = table.cell(widget.left, row.key);
+        final rv = table.cell(widget.right, row.key);
+        children.add(_Row(
+          cells: [row.label, misCell(row.type, lv), misCell(row.type, rv)],
+        ));
+      }
     }
 
-    return GlassCard(
-      padding: EdgeInsets.zero,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        child: Column(children: children),
-      ),
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: Column(children: children),
     );
   }
 }
 
-/// Colored band that introduces a category of rows.
+/// Tappable band that introduces (and folds) a category of rows.
 class _GroupHeader extends StatelessWidget {
-  const _GroupHeader({required this.group});
+  const _GroupHeader({
+    required this.group,
+    required this.count,
+    required this.open,
+    required this.onTap,
+  });
   final _MisGroup group;
+  final int count;
+  final bool open;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(11, 8, 12, 8),
-      decoration: BoxDecoration(
-        color: Color.alphaBlend(
-            group.color.withOpacity(0.12), AppColors.surface),
-        border: Border(
-          top: const BorderSide(color: AppColors.hairline, width: 0.6),
-          left: BorderSide(color: group.color, width: 3),
-        ),
-      ),
-      child: Text(
-        group.title,
-        style: TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.4,
-          color: group.color,
+    return Material(
+      color: const Color(0xFFFAFBFB),
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 46),
+          padding: const EdgeInsets.fromLTRB(16, 8, 14, 8),
+          decoration: const BoxDecoration(
+            border: Border(top: BorderSide(color: AppColors.hairlineSoft)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration:
+                    BoxDecoration(color: group.color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  group.label,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.ink,
+                  ),
+                ),
+              ),
+              Text(
+                '$count',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.muted,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              const SizedBox(width: 6),
+              AnimatedRotation(
+                turns: open ? 0 : -0.25,
+                duration: const Duration(milliseconds: 200),
+                child: const Icon(Icons.keyboard_arrow_down_rounded,
+                    size: 18, color: AppColors.faint),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -912,69 +1110,51 @@ class _GroupHeader extends StatelessWidget {
 }
 
 class _Row extends StatelessWidget {
-  const _Row({
-    required this.cells,
-    this.header = false,
-    this.accent,
-  });
+  const _Row({required this.cells, this.header = false});
   final List<String> cells;
   final bool header;
-  final Color? accent;
 
   @override
   Widget build(BuildContext context) {
-    final bg = header ? AppColors.primary : AppColors.surface;
-    final labelColor = header ? Colors.white : AppColors.ink;
-    final valueColor = header ? Colors.white : AppColors.inkSoft;
-    final divider = header ? Colors.white24 : AppColors.hairline;
-
     Widget cell(String text, {required bool first}) {
       return Expanded(
         flex: first ? 5 : 3,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            border: first
-                ? null
-                : Border(left: BorderSide(color: divider, width: 0.5)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-            child: Text(
-              text,
-              textAlign: first ? TextAlign.left : TextAlign.right,
-              style: TextStyle(
-                fontSize: 12.5,
-                // No bold on data rows; the header keeps its weight.
-                fontWeight: header ? FontWeight.w700 : FontWeight.w500,
-                // Neutral text only — the grouping alone carries color.
-                color: first ? labelColor : valueColor,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(first ? 16 : 6, 10, first ? 6 : 14, 10),
+          child: Text(
+            text,
+            textAlign: first ? TextAlign.left : TextAlign.right,
+            style: header
+                ? const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.muted,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  )
+                : TextStyle(
+                    fontSize: 13,
+                    height: 1.38,
+                    fontWeight: first ? FontWeight.w500 : FontWeight.w400,
+                    color: first ? AppColors.ink : AppColors.inkSoft,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
           ),
         ),
       );
     }
 
     return Container(
+      constraints: BoxConstraints(minHeight: header ? 38 : 44),
       decoration: BoxDecoration(
-        color: bg,
-        border: header
-            ? null
-            : Border(
-                top: const BorderSide(color: AppColors.hairline, width: 0.6),
-                left: BorderSide(color: accent ?? Colors.transparent, width: 3),
-              ),
+        color: header ? _headBg : AppColors.surface,
+        border: const Border(top: BorderSide(color: AppColors.hairlineSoft)),
       ),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            cell(cells[0], first: true),
-            cell(cells[1], first: false),
-            cell(cells[2], first: false),
-          ],
-        ),
+      child: Row(
+        children: [
+          cell(cells[0], first: true),
+          cell(cells[1], first: false),
+          cell(cells[2], first: false),
+        ],
       ),
     );
   }
@@ -982,59 +1162,32 @@ class _Row extends StatelessWidget {
 
 // ── Small controls ──────────────────────────────────────────────────────────
 
-class _LabeledDropdown<T> extends StatelessWidget {
-  const _LabeledDropdown({
-    required this.label,
-    required this.value,
-    required this.items,
-    required this.onChanged,
-  });
-  final String label;
-  final T value;
-  final List<DropdownMenuItem<T>> items;
-  final ValueChanged<T?> onChanged;
+class _SheetHandle extends StatelessWidget {
+  const _SheetHandle();
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: AppColors.muted)),
-        const SizedBox(height: 4),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+  Widget build(BuildContext context) => Center(
+        child: Container(
+          width: 40,
+          height: 5,
           decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            border: Border.all(color: AppColors.hairline),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<T>(
-              value: value,
-              isExpanded: true,
-              isDense: true,
-              icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                  color: AppColors.muted),
-              style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.ink),
-              items: items,
-              onChanged: onChanged,
-            ),
+            color: const Color(0xFFC6D3D6),
+            borderRadius: BorderRadius.circular(5),
           ),
         ),
-      ],
-    );
-  }
+      );
 }
 
+const TextStyle _sheetTitle = TextStyle(
+  fontSize: 19,
+  height: 1.3,
+  fontWeight: FontWeight.w600,
+  letterSpacing: -0.4,
+  color: AppColors.ink,
+);
+
 /// Multi-select of overview-table columns (months) that feed the chart. Styled
-/// like [_LabeledDropdown]; opens a checklist sheet. An empty [selected] set
+/// like the other pick fields; opens a checklist sheet. An empty [selected] set
 /// means "all months".
 class _MonthsMultiSelect extends StatelessWidget {
   const _MonthsMultiSelect({
@@ -1053,44 +1206,10 @@ class _MonthsMultiSelect extends StatelessWidget {
     final isAll = selected.isEmpty || selected.length == all.length;
     final summary =
         isAll ? 'All (${all.length})' : '${selected.length} of ${all.length}';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: AppColors.muted)),
-        const SizedBox(height: 4),
-        InkWell(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          onTap: () => _open(context),
-          child: Container(
-            height: 44,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              border: Border.all(color: AppColors.hairline),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(summary,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.ink)),
-                ),
-                const Icon(Icons.keyboard_arrow_down_rounded,
-                    color: AppColors.muted),
-              ],
-            ),
-          ),
-        ),
-      ],
+    return MisPickField(
+      label: label,
+      value: summary,
+      onTap: () => _open(context),
     );
   }
 
@@ -1101,7 +1220,7 @@ class _MonthsMultiSelect extends StatelessWidget {
       context: context,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetCtx) => StatefulBuilder(
         builder: (sheetCtx, setSheet) {
@@ -1116,16 +1235,14 @@ class _MonthsMultiSelect extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                const SizedBox(height: 10),
+                const _SheetHandle(),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 4),
+                  padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
                   child: Row(
                     children: [
                       const Expanded(
-                        child: Text('Chart months',
-                            style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.ink)),
+                        child: Text('Chart months', style: _sheetTitle),
                       ),
                       TextButton(
                         onPressed: () => setSheet(() {
@@ -1156,7 +1273,11 @@ class _MonthsMultiSelect extends StatelessWidget {
                           value: working.contains(k),
                           title: Text(misMonthLabel(k),
                               style: const TextStyle(
-                                  fontSize: 13.5, color: AppColors.ink)),
+                                  fontSize: 15,
+                                  color: AppColors.ink,
+                                  fontFeatures: [
+                                    FontFeature.tabularFigures()
+                                  ])),
                           onChanged: (on) => setSheet(() {
                             if (on == true) {
                               working.add(k);
@@ -1188,6 +1309,7 @@ class _MonthsMultiSelect extends StatelessWidget {
   }
 }
 
+/// Line ↔ bar switch: a soft grey track with the choice lifted onto white.
 class _ChartTypeToggle extends StatelessWidget {
   const _ChartTypeToggle({required this.bar, required this.onChanged});
   final bool bar;
@@ -1196,34 +1318,52 @@ class _ChartTypeToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Widget seg(String label, bool active, VoidCallback onTap) {
-      return GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: BoxDecoration(
-            color: active ? AppColors.primary : Colors.transparent,
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: active ? Colors.white : AppColors.muted),
+      return Expanded(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            HapticFeedback.selectionClick();
+            onTap();
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: active ? AppColors.surface : Colors.transparent,
+              borderRadius: BorderRadius.circular(9),
+              boxShadow: active
+                  ? const [
+                      BoxShadow(
+                        color: Color(0x240B1D21),
+                        blurRadius: 2,
+                        offset: Offset(0, 1),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: active ? AppColors.ink : AppColors.muted,
+              ),
+            ),
           ),
         ),
       );
     }
 
     return Container(
+      width: 128,
+      height: 40,
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: AppColors.hairline),
+        color: AppColors.neutralTint,
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
           seg('Line', !bar, () => onChanged(false)),
           seg('Bar', bar, () => onChanged(true)),
@@ -1232,8 +1372,6 @@ class _ChartTypeToggle extends StatelessWidget {
     );
   }
 }
-
-// ── Chart ───────────────────────────────────────────────────────────────────
 
 /// Quick-nav tiles to the MIS sub-dashboards.
 class _MisNavRow extends StatelessWidget {
@@ -1245,95 +1383,107 @@ class _MisNavRow extends StatelessWidget {
       ('Portfolio', Icons.pie_chart_rounded, '/mis/portfolio', AppColors.primary),
       ('Collection', Icons.payments_rounded, '/mis/collection', AppColors.success),
       ('Disbursement', Icons.account_balance_rounded, '/mis/disbursement',
-          AppColors.warning),
-      ('Hourly', Icons.schedule_rounded, '/mis/hourly', AppColors.accent),
+          const Color(0xFF4253A8)),
+      ('Hourly', Icons.schedule_rounded, '/mis/hourly', const Color(0xFF9A5B00)),
       ('Comparison', Icons.compare_arrows_rounded, '/mis/comparison',
-          AppColors.pink),
+          AppColors.info),
       ('Analytical', Icons.query_stats_rounded, '/mis/analytical',
-          AppColors.danger),
-      ('Daily Report', Icons.edit_note_rounded, '/mis/daily-plan',
+          AppColors.pink),
+      ('Daily report', Icons.edit_note_rounded, '/mis/daily-plan',
           AppColors.primary),
-      ('Branch Report', Icons.assessment_rounded, '/mis/branch-report',
-          AppColors.warning),
-      ('Directory', Icons.contacts_rounded, '/mis/employees', AppColors.accent),
-      ('Locations', Icons.map_rounded, '/mis/locations', AppColors.success),
-      ('Feedback', Icons.forum_rounded, '/mis/feedback', AppColors.success),
+      ('Branch report', Icons.assessment_rounded, '/mis/branch-report',
+          const Color(0xFF43585D)),
+      ('Directory', Icons.contacts_rounded, '/mis/employees',
+          const Color(0xFF4253A8)),
+      ('Locations', Icons.map_rounded, '/mis/locations', AppColors.info),
+      ('Feedback', Icons.forum_rounded, '/mis/feedback', AppColors.pink),
     ];
-    return LayoutBuilder(builder: (context, c) {
-      const gap = 10.0;
-      // Four tiles per row.
-      final w = (c.maxWidth - gap * 3) / 4;
-      return Wrap(
-        spacing: gap,
-        runSpacing: gap,
+    return GlassCard(
+      padding: const EdgeInsets.fromLTRB(6, 14, 6, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final it in items)
-            SizedBox(
-              width: w,
-              child: Material(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(AppRadii.lg),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () => context.push(it.$3),
-                  splashColor: it.$4.withOpacity(0.10),
-                  highlightColor: it.$4.withOpacity(0.05),
-                  child: GlassCard(
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-                    shadow: AppShadows.soft,
-                    child: Column(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                it.$4,
-                                Color.lerp(it.$4, Colors.white, 0.28)!,
-                              ],
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: it.$4.withOpacity(0.32),
-                                blurRadius: 9,
-                                offset: const Offset(0, 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: ProSectionHeader(
+              title: 'Reports',
+              trailing: Text(
+                '${items.length} reports',
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.faint),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          LayoutBuilder(builder: (context, c) {
+            const gap = 2.0;
+            // Four tiles per row.
+            final w = (c.maxWidth - gap * 3) / 4;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: [
+                for (final it in items)
+                  SizedBox(
+                    width: w,
+                    child: Material(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(14),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: () => context.push(it.$3),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(2, 8, 2, 6),
+                          child: Column(
+                            children: [
+                              ProIconWell(icon: it.$2, color: it.$4, size: 46),
+                              const SizedBox(height: 7),
+                              SizedBox(
+                                height: 30,
+                                child: Text(
+                                  it.$1,
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    height: 1.25,
+                                    fontWeight: FontWeight.w500,
+                                    color: AppColors.inkSoft,
+                                  ),
+                                ),
                               ),
                             ],
                           ),
-                          child: Icon(it.$2, color: Colors.white, size: 20),
                         ),
-                        const SizedBox(height: 8),
-                        Text(it.$1,
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                height: 1.15,
-                                color: AppColors.inkSoft)),
-                      ],
+                      ),
                     ),
                   ),
-                ),
-              ),
-            ),
+              ],
+            );
+          }),
         ],
-      );
-    });
+      ),
+    );
   }
 }
+
+// ── Chart ───────────────────────────────────────────────────────────────────
 
 class _Pt {
   final String label;
   final double value;
   _Pt(this.label, double? v) : value = (v == null || v.isNaN) ? 0 : v;
 }
+
+/// Axis tick / month text: Geist 11, muted.
+const TextStyle _axisStyle = TextStyle(
+  fontSize: 11,
+  color: AppColors.muted,
+  fontFeatures: [FontFeature.tabularFigures()],
+);
 
 class _MisMetricChart extends StatelessWidget {
   const _MisMetricChart({
@@ -1346,6 +1496,9 @@ class _MisMetricChart extends StatelessWidget {
   final bool bar;
   final bool money;
   final String type;
+
+  static const double _leftPad = 46; // == leftTitles.reservedSize
+  static const double _bottomPad = 24; // == bottomTitles.reservedSize
 
   String _axis(double v) {
     if (type == 'pct') return '${v.toStringAsFixed(0)}%';
@@ -1366,7 +1519,7 @@ class _MisMetricChart extends StatelessWidget {
   Widget build(BuildContext context) {
     if (points.isEmpty) {
       return const Center(
-        child: Text('No data', style: TextStyle(color: AppColors.muted)),
+        child: Text('No data', style: AppText.caption),
       );
     }
     final values = points.map((p) => p.value).toList();
@@ -1390,12 +1543,12 @@ class _MisMetricChart extends StatelessWidget {
     // Printed-value sizing shrinks as months pile up; MisValueLabels then
     // rotates or thins them so no two can ever merge.
     final dense = points.length > 6;
-    final labelFont = points.length > 9 ? 8.5 : (dense ? 9.5 : 11.0);
+    final labelFont = points.length > 9 ? 9.0 : (dense ? 10.0 : 11.0);
 
     final bottomTitles = AxisTitles(
       sideTitles: SideTitles(
         showTitles: true,
-        reservedSize: 24,
+        reservedSize: _bottomPad,
         getTitlesWidget: (value, meta) {
           final i = value.toInt();
           if (i < 0 || i >= points.length) return const SizedBox.shrink();
@@ -1404,8 +1557,7 @@ class _MisMetricChart extends StatelessWidget {
           if (points.length > 7 && i % step != 0) return const SizedBox.shrink();
           return Padding(
             padding: const EdgeInsets.only(top: 6),
-            child: Text(points[i].label,
-                style: const TextStyle(fontSize: 9.5, color: AppColors.muted)),
+            child: Text(points[i].label, maxLines: 1, style: _axisStyle),
           );
         },
       ),
@@ -1413,9 +1565,12 @@ class _MisMetricChart extends StatelessWidget {
     final leftTitles = AxisTitles(
       sideTitles: SideTitles(
         showTitles: true,
-        reservedSize: 40,
-        getTitlesWidget: (value, meta) => Text(_axis(value),
-            style: const TextStyle(fontSize: 9, color: AppColors.muted)),
+        reservedSize: _leftPad,
+        getTitlesWidget: (value, meta) => Padding(
+          padding: const EdgeInsets.only(right: 6),
+          child: Text(_axis(value),
+              maxLines: 1, textAlign: TextAlign.right, style: _axisStyle),
+        ),
       ),
     );
     final grid = FlGridData(
@@ -1426,9 +1581,9 @@ class _MisMetricChart extends StatelessWidget {
       verticalInterval: 1,
       horizontalInterval: range / 4,
       getDrawingHorizontalLine: (_) =>
-          const FlLine(color: AppColors.hairline, strokeWidth: 0.6),
+          const FlLine(color: AppColors.hairlineSoft, strokeWidth: 1),
       getDrawingVerticalLine: (_) =>
-          const FlLine(color: AppColors.hairline, strokeWidth: 0.5),
+          const FlLine(color: AppColors.hairlineSoft, strokeWidth: 1),
     );
     final border = FlBorderData(show: false);
 
@@ -1438,9 +1593,13 @@ class _MisMetricChart extends StatelessWidget {
       // pills overlap into an unreadable smear. MisValueLabels rotates or thins
       // the labels instead, so they never merge.
       return LayoutBuilder(builder: (context, c) {
-        const leftPad = 40.0;
-        const bottomPad = 24.0;
-        final plotW = (c.maxWidth - leftPad).clamp(1.0, double.infinity);
+        final plotW = (c.maxWidth - _leftPad).clamp(1.0, double.infinity);
+        final barW = points.length > 8 ? 10.0 : 16.0;
+        // fl_chart's BarChartAlignment.spaceEvenly geometry (equal gaps
+        // before/between/after fixed-width bars), so each printed value sits
+        // exactly over its bar.
+        final eachSpace =
+            (plotW - points.length * barW) / (points.length + 1);
         return Stack(
           children: [
             Positioned.fill(
@@ -1456,9 +1615,10 @@ class _MisMetricChart extends StatelessWidget {
                           BarChartRodData(
                             toY: points[i].value,
                             color: AppColors.primary,
-                            width: points.length > 8 ? 8 : 14,
+                            width: barW,
                             borderRadius: const BorderRadius.vertical(
-                                top: Radius.circular(3)),
+                                top: Radius.circular(5),
+                                bottom: Radius.circular(2)),
                           ),
                         ],
                       ),
@@ -1477,14 +1637,14 @@ class _MisMetricChart extends StatelessWidget {
             ),
             Positioned.fill(
               child: MisValueLabels(
-                leftPad: leftPad,
-                bottomPad: bottomPad,
+                leftPad: _leftPad,
+                bottomPad: _bottomPad,
                 fontSize: labelFont,
                 slotWidth: plotW / points.length,
                 labels: [
                   for (var i = 0; i < points.length; i++)
                     MisPlotLabel(
-                      xFrac: (i + 0.5) / points.length,
+                      xFrac: ((i + 1) * eachSpace + (i + 0.5) * barW) / plotW,
                       yFrac: (points[i].value - bottom) / range,
                       text: _fmt(points[i].value),
                       color: AppColors.ink,
@@ -1505,18 +1665,27 @@ class _MisMetricChart extends StatelessWidget {
       isCurved: true,
       preventCurveOverShooting: true,
       color: AppColors.primary,
-      barWidth: 2.6,
+      barWidth: 2.4,
+      isStrokeCapRound: true,
       dotData: FlDotData(
         show: points.length <= 12,
         getDotPainter: (spot, _, __, ___) => FlDotCirclePainter(
-          radius: 3,
-          color: AppColors.primary,
-          strokeWidth: 0,
+          radius: 3.5,
+          color: Colors.white,
+          strokeWidth: 2.4,
+          strokeColor: AppColors.primary,
         ),
       ),
       belowBarData: BarAreaData(
         show: true,
-        color: AppColors.primary.withOpacity(0.12),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            AppColors.primary.withValues(alpha: 0.16),
+            AppColors.primary.withValues(alpha: 0),
+          ],
+        ),
       ),
     );
 
@@ -1526,10 +1695,8 @@ class _MisMetricChart extends StatelessWidget {
     // them rather than letting any two merge.
     return LayoutBuilder(
       builder: (context, constraints) {
-        const leftPad = 40.0; // == leftTitles.reservedSize
-        const bottomPad = 24.0; // == bottomTitles.reservedSize
         final plotW =
-            (constraints.maxWidth - leftPad).clamp(1.0, double.infinity);
+            (constraints.maxWidth - _leftPad).clamp(1.0, double.infinity);
         final n = points.length;
         return Stack(
           clipBehavior: Clip.none,
@@ -1554,8 +1721,8 @@ class _MisMetricChart extends StatelessWidget {
             ),
             Positioned.fill(
               child: MisValueLabels(
-                leftPad: leftPad,
-                bottomPad: bottomPad,
+                leftPad: _leftPad,
+                bottomPad: _bottomPad,
                 fontSize: labelFont,
                 // Line points sit ON the edges, so the gap between neighbours
                 // is plotW/(n-1), not plotW/n.

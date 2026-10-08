@@ -3,11 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'travel_models.dart';
 import 'travel_repository.dart';
+import 'travel_status_ui.dart';
 
 /// Active travel plans the employee can attach a claim to.
 final _myActivePlansProvider =
@@ -133,139 +135,198 @@ class _TravelClaimFormScreenState extends ConsumerState<TravelClaimFormScreen> {
     final df = DateFormat('d MMM yyyy');
     final plans = ref.watch(_myActivePlansProvider);
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Text(_isEdit ? 'Edit Claim' : 'New Travel Claim'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            if (!_isEdit)
-              GlassCard(
-                color: AppColors.info.withOpacity(0.06),
-                shadow: AppShadows.soft,
-                child: const Row(
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: _isEdit ? 'Edit claim' : 'New travel claim',
+        subtitle: _isEdit ? 'Trip details' : 'Step 1 of 3 · Trip details',
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          if (!_isEdit) ...[
+            const ProStepBar(total: 3, current: 0),
+            const SizedBox(height: 14),
+            const ProNote(
+              'Select your travel plan first — the claim details fill in automatically. Then add expense lines, bills and submit for approval.',
+              tone: ProNoteTone.info,
+            ),
+            const SizedBox(height: 14),
+          ],
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const ProSectionHeader(title: 'Trip details'),
+                const SizedBox(height: 12),
+                // ── Plan first: picking it auto-fills title / purpose / dates ──
+                ProField(
+                  label: 'Travel plan',
+                  required: true,
+                  child: plans.when(
+                    loading: () => const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2)),
+                    ),
+                    error: (e, _) => const Text('Could not load plans.',
+                        style: TextStyle(color: AppColors.muted, fontSize: 12.5)),
+                    data: (rows) {
+                      final picked = rows.where((x) => x.id == _planId).firstOrNull;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          DropdownButtonFormField<int?>(
+                            value: _planId,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                                prefixIcon: Icon(Icons.luggage_rounded, size: 20),
+                                hintText: 'Select the plan this claim is for'),
+                            items: [
+                              for (final p in rows)
+                                DropdownMenuItem<int?>(value: p.id, child: Text(p.title)),
+                            ],
+                            onChanged: (v) {
+                              if (v == null) return;
+                              final p = rows.where((x) => x.id == v).firstOrNull;
+                              if (p != null) _applyPlan(p);
+                            },
+                          ),
+                          if (picked != null &&
+                              ((picked.destination ?? '').isNotEmpty ||
+                                  picked.travelMode != null)) ...[
+                            const SizedBox(height: 8),
+                            _PlanSummary(plan: picked),
+                          ],
+                          if (rows.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 6),
+                              child: Text(
+                                'No travel plans yet — create a travel plan first, then raise the claim for it.',
+                                style: AppText.caption,
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 14),
+                ProField(
+                  label: 'Title',
+                  required: true,
+                  child: TextField(
+                    controller: _title,
+                    maxLength: 150,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [TitleCaseTextFormatter()],
+                    decoration: const InputDecoration(hintText: 'Filled from your plan'),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                ProField(
+                  label: 'Purpose',
+                  child: TextField(
+                    controller: _purpose,
+                    minLines: 2,
+                    maxLines: 5,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [TitleCaseTextFormatter()],
+                    decoration: const InputDecoration(hintText: 'Why did you travel?'),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
                   children: [
-                    Icon(Icons.info_outline_rounded, color: AppColors.info),
-                    SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        'Select your travel plan first — the claim details fill in automatically. Then add expense lines, bills and submit for approval.',
-                        style: TextStyle(fontSize: 12.5, color: AppColors.inkSoft, height: 1.4),
+                      child: _DateField(
+                        label: 'From',
+                        value: _fromDate == null ? 'Not set' : df.format(_fromDate!),
+                        onTap: () => _pickDate(isFrom: true),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _DateField(
+                        label: 'To',
+                        value: _toDate == null ? 'Not set' : df.format(_toDate!),
+                        onTap: () => _pickDate(isFrom: false),
                       ),
                     ),
                   ],
                 ),
-              ),
-            if (!_isEdit) const SizedBox(height: 14),
-            // ── Plan first: picking it auto-fills title / purpose / dates ──
-            _label('Travel plan *'),
-            plans.when(
-              loading: () => const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: SizedBox(
-                    height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-              ),
-              error: (e, _) => const Text('Could not load plans.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 12)),
-              data: (rows) => Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  DropdownButtonFormField<int?>(
-                    value: _planId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.luggage_rounded, size: 20),
-                        hintText: 'Select the plan this claim is for'),
-                    items: [
-                      for (final p in rows)
-                        DropdownMenuItem<int?>(value: p.id, child: Text(p.title)),
-                    ],
-                    onChanged: (v) {
-                      if (v == null) return;
-                      final p = rows.where((x) => x.id == v).firstOrNull;
-                      if (p != null) _applyPlan(p);
-                    },
-                  ),
-                  if (rows.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 6),
-                      child: Text(
-                        'No travel plans yet — create a travel plan first, then raise the claim for it.',
-                        style: TextStyle(fontSize: 11.5, color: AppColors.muted),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            _label('Title *'),
-            TextField(
-              controller: _title,
-              maxLength: 150,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
-            ),
-            _label('Purpose'),
-            TextField(
-              controller: _purpose,
-              minLines: 2,
-              maxLines: 5,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: _DateField(
-                    label: 'From',
-                    value: _fromDate == null ? 'Not set' : df.format(_fromDate!),
-                    onTap: () => _pickDate(isFrom: true),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _DateField(
-                    label: 'To',
-                    value: _toDate == null ? 'Not set' : df.format(_toDate!),
-                    onTap: () => _pickDate(isFrom: false),
-                  ),
-                ),
               ],
             ),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              AppErrorPanel(message: _error!),
-            ],
-            const SizedBox(height: 18),
-            SizedBox(
-              height: 50,
-              child: FilledButton(
-                onPressed: _saving ? null : _save,
-                child: Text(_saving
-                    ? 'Saving…'
-                    : (_isEdit ? 'Save changes' : 'Create & add expenses')),
-              ),
-            ),
-            const SizedBox(height: 24),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            AppErrorPanel(message: _error!),
           ],
-        ),
+        ],
+      ),
+      bottomNavigationBar: ProBottomBar(
+        children: [
+          FilledButton(
+            onPressed: _saving ? null : _save,
+            child: Text(_saving
+                ? 'Saving…'
+                : (_isEdit ? 'Save changes' : 'Create & add expenses')),
+          ),
+        ],
       ),
     );
   }
+}
 
-  Widget _label(String t) => Padding(
-        padding: const EdgeInsets.only(bottom: 4, top: 4),
-        child: Text(t,
-            style: const TextStyle(
-                fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
-      );
+/// Route / mode / dates of the picked plan, shown under the plan dropdown.
+class _PlanSummary extends StatelessWidget {
+  const _PlanSummary({required this.plan});
+  final TravelPlan plan;
+
+  @override
+  Widget build(BuildContext context) {
+    final route = [
+      if ((plan.fromLocation ?? '').isNotEmpty) plan.fromLocation!,
+      if ((plan.destination ?? '').isNotEmpty) plan.destination!,
+    ].join(' → ');
+    final df = DateFormat('d MMM');
+    final meta = [
+      if (plan.travelMode != null) TravelEnums.label(plan.travelMode),
+      if (plan.startDate != null && plan.endDate != null)
+        '${df.format(plan.startDate!)} – ${df.format(plan.endDate!)}',
+    ].join(' · ');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.hairlineSoft),
+      ),
+      child: Row(
+        children: [
+          ProIconWell(icon: travelModeIcon(plan.travelMode), color: AppColors.primary, size: 30),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (route.isNotEmpty)
+                  Text(route,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 13.5, fontWeight: FontWeight.w600, color: AppColors.ink)),
+                if (meta.isNotEmpty) Text(meta, style: AppText.caption),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _DateField extends StatelessWidget {
@@ -276,38 +337,26 @@ class _DateField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadii.md),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: Border.all(color: AppColors.hairline),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.calendar_today_rounded, size: 15, color: AppColors.primary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(label,
-                      style: const TextStyle(
-                          fontSize: 10.5, fontWeight: FontWeight.w600, color: AppColors.muted)),
-                  const SizedBox(height: 2),
-                  Text(value,
-                      style: const TextStyle(
-                          fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.ink),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                ],
-              ),
+    return ProField(
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        child: InputDecorator(
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.calendar_today_rounded, size: 17),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          ),
+          child: Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w500,
+              color: value == 'Not set' ? AppColors.faint : AppColors.ink,
             ),
-          ],
+          ),
         ),
       ),
     );

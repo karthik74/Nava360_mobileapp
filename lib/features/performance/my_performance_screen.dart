@@ -2,12 +2,13 @@
 //  FO Scorecard Performance — My Performance (self-service) screen.
 //
 //  Route: /my-performance. Card-first scorecard for the signed-in FO with a
-//  sticky month selector, pull-to-refresh and graceful empty/error states.
+//  month selector, pull-to-refresh and graceful empty/error states.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -29,8 +30,8 @@ class _MyPerformanceScreenState extends ConsumerState<MyPerformanceScreen> {
   /// to the latest available period).
   PeriodOption? _selected;
 
-  /// Last-known period list + sync label, so the sticky selector stays stable
-  /// while a newly-selected period is loading.
+  /// Last-known period list + sync label, so the selector stays stable while a
+  /// newly-selected period is loading.
   List<PeriodOption> _periods = const [];
   String? _lastSynced;
 
@@ -41,7 +42,7 @@ class _MyPerformanceScreenState extends ConsumerState<MyPerformanceScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('My Performance')),
+      appBar: AppBar(title: const Text('My performance')),
       body: empId == null
           ? const Padding(
               padding: EdgeInsets.all(16),
@@ -68,43 +69,72 @@ class _MyPerformanceScreenState extends ConsumerState<MyPerformanceScreen> {
 
     final async = ref.watch(myPerformanceProvider(query));
     final selectedForSelector = _selected ?? _periodFromAsync(async);
+    final detail = async.asData?.value;
+    final s = detail?.summary;
+    final loaded = detail != null;
+    final code = s?.employeeCode ?? detail?.employeeCode;
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-          child: PerfMonthSelector(
-            periods: _periods,
-            selected: selectedForSelector,
-            lastSyncedLabel:
-                _lastSynced == null ? null : 'Synced $_lastSynced',
-            onChanged: (p) => setState(() => _selected = p),
-          ),
+    String rank(int? r) => !loaded || r == null ? '—' : '#$r';
+    final periodTitle = (selectedForSelector?.label ?? '').isNotEmpty
+        ? selectedForSelector!.label
+        : (s?.monthLabel ?? 'Latest scorecard');
+
+    return ProPage(
+      onRefresh: () async => ref.invalidate(myPerformanceProvider(query)),
+      hero: ProHero(
+        kicker: 'My performance',
+        title: periodTitle,
+        subtitle: (s?.hierarchyLabel ?? '').isEmpty ? null : s!.hierarchyLabel,
+        overlap: PerfMonthSelector(
+          raised: true,
+          periods: _periods,
+          selected: selectedForSelector,
+          lastSyncedLabel: _lastSynced == null ? null : 'Synced $_lastSynced',
+          onChanged: (p) => setState(() => _selected = p),
         ),
-        Expanded(
-          child: RefreshIndicator(
-            color: AppColors.primary,
-            onRefresh: () async =>
-                ref.invalidate(myPerformanceProvider(query)),
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: EdgeInsets.fromLTRB(
-                  16, 6, 16, MediaQuery.of(context).padding.bottom + 24),
+        children: [
+          ProHeroStats(stats: [
+            ProStat(
+              label: 'Overall',
+              value: loaded ? perfPct(s?.overallPercentage) : '—',
+              dot: perfToneOnDark(s?.overallPercentage),
+            ),
+            ProStat(
+              label: 'Branch rank',
+              value: rank(s?.branchRank),
+              dot: Colors.white54,
+            ),
+            ProStat(
+              label: 'NLPL rank',
+              value: rank(s?.nlplRank),
+              dot: const Color(0xFFF2B347),
+            ),
+          ]),
+          if ((code ?? '').isNotEmpty || (s?.branchGrade ?? '').isNotEmpty)
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
               children: [
-                async.when(
-                  loading: () => const AppLoadingBlock(height: 240),
-                  error: (e, _) => AppErrorPanel(
-                    message: e.toString(),
-                    onRetry: () =>
-                        ref.invalidate(myPerformanceProvider(query)),
-                  ),
-                  data: (detail) => PerformanceScorecardBody(
-                    detail: detail,
-                    selectedPeriod: selectedForSelector,
-                  ),
-                ),
+                if ((code ?? '').isNotEmpty)
+                  ProHeroTag(code!, icon: Icons.badge_rounded),
+                if ((s?.branchGrade ?? '').isNotEmpty)
+                  ProHeroTag('Grade ${s!.branchGrade}',
+                      icon: Icons.workspace_premium_rounded),
               ],
             ),
+        ],
+      ),
+      children: [
+        async.when(
+          loading: () => const AppLoadingBlock(height: 240),
+          error: (e, _) => AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(myPerformanceProvider(query)),
+          ),
+          data: (detail) => PerformanceScorecardBody(
+            detail: detail,
+            selectedPeriod: selectedForSelector,
+            showSummary: false,
           ),
         ),
       ],

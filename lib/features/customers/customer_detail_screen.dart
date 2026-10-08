@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/text_formatters.dart';
 import '../../core/branding.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../tasks/task_detail_screen.dart';
@@ -43,6 +44,9 @@ class CustomerDetailScreen extends ConsumerStatefulWidget {
 class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
   bool _starting = false;
 
+  /// Selected section tab (Contact / Details / Tasks).
+  int _section = 0;
+
   void _refresh() {
     ref.invalidate(customerTasksProvider(widget.customerId));
   }
@@ -55,7 +59,7 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (_) => const _TemplatePickerSheet(),
     );
@@ -83,54 +87,87 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
     }
   }
 
+  void _openNotices(Customer customer) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CustomerNoticeScreen(customer: customer),
+      ),
+    );
+  }
+
+  /// Opens the dialler with the customer's number.
+  Future<void> _call(Customer c) async {
+    final cleaned = (c.mobileNumber ?? '').replaceAll(RegExp(r'[^0-9+#*]'), '');
+    if (cleaned.isEmpty) return;
+    try {
+      if (await launchUrl(Uri(scheme: 'tel', path: cleaned),
+          mode: LaunchMode.externalApplication)) {
+        return;
+      }
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open the dialler.')),
+      );
+    }
+  }
+
+  /// Directions to the customer's stored pin — only the coordinates leave
+  /// the app.
+  Future<void> _navigate(Customer c) async {
+    if (!c.hasLocation) return;
+    final uri = Uri.parse('https://www.google.com/maps/dir/?api=1'
+        '&destination=${c.latitude},${c.longitude}&travelmode=driving');
+    try {
+      if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open maps.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final customerAsync = ref.watch(customerProvider(widget.customerId));
     final tasksAsync = ref.watch(customerTasksProvider(widget.customerId));
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
       appBar: AppBar(
         title: const Text('Customer'),
-        backgroundColor: Colors.white,
-        foregroundColor: AppColors.ink,
-        elevation: 0.5,
         actions: [
           customerAsync.maybeWhen(
             data: (customer) => IconButton(
               tooltip: 'Notices',
               icon: const Icon(Icons.description_outlined),
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => CustomerNoticeScreen(customer: customer),
-                ),
-              ),
+              onPressed: () => _openNotices(customer),
             ),
             orElse: () => const SizedBox.shrink(),
           ),
         ],
       ),
       bottomNavigationBar: customerAsync.maybeWhen(
-        data: (customer) => SafeArea(
-          minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: FilledButton.icon(
-            onPressed: _starting ? null : () => _performTask(customer),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              minimumSize: const Size.fromHeight(50),
+        data: (customer) => ProBottomBar(
+          children: [
+            FilledButton.icon(
+              onPressed: _starting ? null : () => _performTask(customer),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+              ),
+              icon: _starting
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation(Colors.white),
+                      ),
+                    )
+                  : const Icon(Icons.add_task_rounded, size: 20),
+              label: Text(_starting ? 'Starting…' : 'Perform task'),
             ),
-            icon: _starting
-                ? const SizedBox(
-                    height: 18,
-                    width: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation(Colors.white),
-                    ),
-                  )
-                : const Icon(Icons.add_task_rounded, size: 20),
-            label: Text(_starting ? 'Starting…' : 'Perform task'),
-          ),
+          ],
         ),
         orElse: () => const SizedBox.shrink(),
       ),
@@ -138,194 +175,293 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen> {
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Padding(
           padding: const EdgeInsets.all(24),
-          child: Center(child: Text(e.toString())),
-        ),
-        data: (customer) => RefreshIndicator(
-          onRefresh: () async {
-            ref.invalidate(customerProvider(widget.customerId));
-            _refresh();
-          },
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _CustomerHeader(customer: customer),
-              if (customer.customFields.isNotEmpty) ...[
-                const SizedBox(height: 22),
-                const _SectionLabel('Details'),
-                const SizedBox(height: 12),
-                _CustomFieldsCard(fields: customer.customFields),
-              ],
-              const SizedBox(height: 22),
-              Row(
-                children: [
-                  const _SectionLabel('Task history'),
-                  const Spacer(),
-                  tasksAsync.maybeWhen(
-                    data: (t) => Text(
-                      '${t.length} total',
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.muted,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    orElse: () => const SizedBox.shrink(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              tasksAsync.when(
-                loading: () => const AppLoadingBlock(height: 120),
-                error: (e, _) => AppErrorPanel(
-                  message: e.toString(),
-                  onRetry: _refresh,
-                ),
-                data: (tasks) => _TaskHistory(
-                  tasks: tasks,
-                  onOpen: (task) async {
-                    await Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => TaskDetailScreen(taskId: task.id),
-                      ),
-                    );
-                    _refresh();
-                  },
-                ),
-              ),
-              const SizedBox(height: 24),
-            ],
+          child: Center(
+            child: AppErrorPanel(
+              message: e.toString(),
+              onRetry: () => ref.invalidate(customerProvider(widget.customerId)),
+            ),
           ),
         ),
+        data: (customer) => _body(customer, tasksAsync),
       ),
     );
   }
+
+  Widget _body(Customer customer, AsyncValue<List<Task>> tasksAsync) {
+    final c = customer;
+    final sections = <String>[
+      'Contact',
+      if (c.customFields.isNotEmpty) 'Details',
+      tasksAsync.hasValue ? 'Tasks · ${tasksAsync.value!.length}' : 'Tasks',
+    ];
+    final section = _section.clamp(0, sections.length - 1);
+    final isTasks = section == sections.length - 1;
+    final isDetails = c.customFields.isNotEmpty && section == 1;
+
+    final role = [
+      if (c.customerCode != null && c.customerCode!.isNotEmpty) c.customerCode!,
+      if (c.branchName != null && c.branchName!.isNotEmpty) c.branchName!,
+    ].join(' · ');
+    final live = _liveLine(tasksAsync.valueOrNull);
+
+    return DefaultTabController(
+      key: ValueKey(sections.length),
+      length: sections.length,
+      initialIndex: section,
+      child: ProPage(
+        onRefresh: () async {
+          ref.invalidate(customerProvider(widget.customerId));
+          _refresh();
+        },
+        hero: ProHero(
+          overlap: ProKpiStrip(cells: _kpis(c, tasksAsync)),
+          children: [
+            ProHeroIdentity(
+              name: c.customerName,
+              role: role.isEmpty ? null : role,
+              initials: ProAvatar.initialsOf(c.customerName),
+              ringColor: c.isActive ? AppColors.live : const Color(0xFFB3C0C3),
+              tags: [
+                ProHeroTag(
+                  _sentence(c.status ?? 'ACTIVE'),
+                  tone: c.isActive ? ProTagTone.ok : ProTagTone.neutral,
+                ),
+                _locationTag(c),
+                if (c.createdAt != null)
+                  ProHeroTag('Since ${DateFormat('MMM y').format(c.createdAt!)}'),
+              ],
+            ),
+            if (live != null) live,
+            ProHeroActions(actions: [
+              ProAction(
+                icon: Icons.call_rounded,
+                label: 'Call',
+                onTap: (c.mobileNumber ?? '').trim().isEmpty ? null : () => _call(c),
+              ),
+              ProAction(
+                icon: Icons.directions_rounded,
+                label: 'Navigate',
+                onTap: c.hasLocation ? () => _navigate(c) : null,
+              ),
+              ProAction(
+                icon: Icons.add_task_rounded,
+                label: _starting ? 'Starting…' : 'Perform task',
+                primary: true,
+                onTap: _starting ? null : () => _performTask(c),
+              ),
+              ProAction(
+                icon: Icons.description_outlined,
+                label: 'Notices',
+                onTap: () => _openNotices(c),
+              ),
+            ]),
+          ],
+        ),
+        children: [
+          TabBar(
+            isScrollable: false,
+            dividerColor: AppColors.hairline,
+            onTap: (i) => setState(() => _section = i),
+            tabs: [for (final s in sections) Tab(text: s, height: 42)],
+          ),
+          if (isTasks)
+            ..._taskSection(tasksAsync)
+          else if (isDetails)
+            _CustomFieldsCard(fields: c.customFields)
+          else
+            _ContactCard(customer: c),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _taskSection(AsyncValue<List<Task>> tasksAsync) {
+    return [
+      ProSectionHeader(
+        title: 'Task history',
+        subtitle: tasksAsync.maybeWhen(
+          data: (t) => '${t.length} total',
+          orElse: () => null,
+        ),
+      ),
+      tasksAsync.when(
+        loading: () => const AppLoadingBlock(height: 120),
+        error: (e, _) => AppErrorPanel(
+          message: e.toString(),
+          onRetry: _refresh,
+        ),
+        data: (tasks) => _TaskHistory(
+          tasks: tasks,
+          onOpen: (task) async {
+            await Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => TaskDetailScreen(taskId: task.id),
+              ),
+            );
+            _refresh();
+          },
+        ),
+      ),
+    ];
+  }
+
+  /// "3 open tasks · next due 08 Oct" — built from the task history already
+  /// loaded for this screen.
+  Widget? _liveLine(List<Task>? tasks) {
+    if (tasks == null) return null;
+    const openStatuses = {
+      TaskStatuses.todo,
+      TaskStatuses.inProgress,
+      TaskStatuses.inReview,
+    };
+    final open = tasks.where((t) => openStatuses.contains(t.status)).toList();
+    if (open.isEmpty) return null;
+    final today = DateUtils.dateOnly(DateTime.now());
+    final dues = open.map((t) => t.dueDate).whereType<DateTime>().toList()
+      ..sort();
+    final overdue = dues.any((d) => DateUtils.dateOnly(d).isBefore(today));
+    final next = dues.isEmpty ? null : dues.first;
+    final text = '${open.length} open task${open.length == 1 ? '' : 's'}'
+        '${next == null ? '' : overdue ? ' · overdue since ${DateFormat('d MMM').format(next)}' : ' · next due ${DateFormat('d MMM').format(next)}'}';
+    return ProLiveLine(
+      text: text,
+      color: overdue ? const Color(0xFFF2B347) : null,
+    );
+  }
+
+  ProHeroTag _locationTag(Customer c) {
+    switch ((c.locationStatus ?? '').toUpperCase()) {
+      case 'VERIFIED':
+        return const ProHeroTag('Location verified',
+            tone: ProTagTone.ok, icon: Icons.verified_rounded);
+      case 'NEEDS_CORRECTION':
+        return const ProHeroTag('Pin under review',
+            tone: ProTagTone.warn, icon: Icons.place_outlined);
+      case 'REJECTED':
+        return const ProHeroTag('Pin rejected',
+            tone: ProTagTone.bad, icon: Icons.location_off_outlined);
+    }
+    return c.hasLocation
+        ? const ProHeroTag('Location pinned', icon: Icons.place_outlined)
+        : const ProHeroTag('No location',
+            tone: ProTagTone.warn, icon: Icons.location_off_outlined);
+  }
+
+  /// KPI strip: loan / outstanding / dues read from the customer's own
+  /// fields when the deployment has them, topped up with task counts.
+  List<ProKpi> _kpis(Customer c, AsyncValue<List<Task>> tasksAsync) {
+    final cells = <ProKpi>[];
+    final used = <String>{};
+    final patterns = <RegExp>[
+      RegExp(r'loan.*(amount|amt)|disburs|sanction'),
+      RegExp(r'outstanding|(^|_)pos(_|$)|balance'),
+      RegExp(r'overdue|(^|_)dues?(_|$)|emi|dpd'),
+    ];
+    for (final p in patterns) {
+      for (final e in c.customFields.entries) {
+        final k = e.key.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+        if (used.contains(e.key) || !p.hasMatch(k)) continue;
+        final raw = e.value?.toString().trim() ?? '';
+        if (raw.isEmpty) continue;
+        used.add(e.key);
+        final isDays = k.contains('dpd') || k.contains('day');
+        cells.add(ProKpi(
+          value: isDays ? raw : _money(raw),
+          label: _CustomFieldsCard.humanizeKey(e.key),
+          valueColor: p == patterns[2] && !isDays ? AppColors.danger : null,
+        ));
+        break;
+      }
+    }
+    final tasks = tasksAsync.valueOrNull;
+    String n(bool Function(Task) test) =>
+        tasks == null ? '—' : '${tasks.where(test).length}';
+    final taskCells = [
+      ProKpi(
+        value: n((t) =>
+            t.status == TaskStatuses.todo ||
+            t.status == TaskStatuses.inProgress ||
+            t.status == TaskStatuses.inReview),
+        label: 'Open tasks',
+      ),
+      ProKpi(
+        value: n((t) => t.status == TaskStatuses.done),
+        label: 'Completed',
+        valueColor: AppColors.success,
+      ),
+      ProKpi(value: tasks == null ? '—' : '${tasks.length}', label: 'Total tasks'),
+    ];
+    for (final t in taskCells) {
+      if (cells.length >= 3) break;
+      cells.add(t);
+    }
+    return cells;
+  }
+
+  static final _inr = NumberFormat.decimalPatternDigits(locale: 'en_IN', decimalDigits: 0);
+
+  /// Formats a numeric field value as rupees; anything else is shown as is.
+  static String _money(String raw) {
+    final n = num.tryParse(raw.replaceAll(RegExp(r'[₹,\s]'), ''));
+    if (n == null) return raw;
+    return '₹ ${_inr.format(n)}';
+  }
+
+  static String _sentence(String raw) {
+    final s = raw.replaceAll('_', ' ').trim().toLowerCase();
+    if (s.isEmpty) return raw;
+    return s[0].toUpperCase() + s.substring(1);
+  }
 }
 
-// ─────────────────────────────── Header ───────────────────────────────────
+// ─────────────────────────────── Contact ──────────────────────────────────
 
-class _CustomerHeader extends StatelessWidget {
-  const _CustomerHeader({required this.customer});
+class _ContactCard extends StatelessWidget {
+  const _ContactCard({required this.customer});
   final Customer customer;
 
   @override
   Widget build(BuildContext context) {
     final c = customer;
-    final rows = <Widget>[
+    final rows = <MapEntry<String, String>>[
       if (c.mobileNumber != null && c.mobileNumber!.isNotEmpty)
-        _InfoRow(icon: Icons.call_outlined, label: 'Mobile', value: c.mobileNumber!),
-      if (c.email != null && c.email!.isNotEmpty)
-        _InfoRow(icon: Icons.mail_outline_rounded, label: 'Email', value: c.email!),
+        MapEntry('Mobile', c.mobileNumber!),
+      if (c.email != null && c.email!.isNotEmpty) MapEntry('Email', c.email!),
       if (c.address != null && c.address!.isNotEmpty)
-        _InfoRow(icon: Icons.place_outlined, label: 'Address', value: c.address!),
+        MapEntry('Address', c.address!),
       if (c.branchName != null && c.branchName!.isNotEmpty)
-        _InfoRow(
-            icon: Icons.store_mall_directory_outlined,
-            label: Branding.current.term('branch'),
-            value: c.branchName!),
+        MapEntry(Branding.current.term('branch'), c.branchName!),
       if (c.assignedEmployeeName != null && c.assignedEmployeeName!.isNotEmpty)
-        _InfoRow(
-            icon: Icons.person_outline,
-            label: 'Account owner',
-            value: c.assignedEmployeeName!),
+        MapEntry('Account owner', c.assignedEmployeeName!),
       if (c.createdBy != null && c.createdBy!.isNotEmpty)
-        _InfoRow(
-            icon: Icons.person_add_alt_outlined,
-            label: 'Created by',
-            value: c.createdAt != null
+        MapEntry(
+            'Created by',
+            c.createdAt != null
                 ? '${c.createdBy} · ${DateFormat('d MMM y').format(c.createdAt!)}'
                 : c.createdBy!),
       if (c.updatedBy != null && c.updatedBy!.isNotEmpty)
-        _InfoRow(
-            icon: Icons.update_rounded,
-            label: 'Last updated',
-            value: c.updatedAt != null
+        MapEntry(
+            'Last updated',
+            c.updatedAt != null
                 ? '${c.updatedBy} · ${DateFormat('d MMM y').format(c.updatedAt!)}'
                 : c.updatedBy!),
     ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            UserAvatar(name: c.customerName, size: 52, radius: 15),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (c.customerCode != null && c.customerCode!.isNotEmpty)
-                    Text(
-                      c.customerCode!,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.muted,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
-                  const SizedBox(height: 2),
-                  Text(
-                    c.customerName,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.ink,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: (c.isActive ? AppColors.success : AppColors.muted)
-                          .withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(AppRadii.pill),
-                      border: Border.all(
-                        color: (c.isActive ? AppColors.success : AppColors.muted)
-                            .withOpacity(0.25),
-                      ),
-                    ),
-                    child: Text(
-                      (c.status ?? 'ACTIVE').toUpperCase(),
-                      style: TextStyle(
-                        fontSize: 9.5,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.4,
-                        color: c.isActive ? AppColors.success : AppColors.muted,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        if (rows.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              border: Border.all(color: AppColors.muted.withOpacity(0.15)),
-            ),
-            child: Column(
-              children: [
-                for (var i = 0; i < rows.length; i++) ...[
-                  if (i > 0)
-                    Divider(height: 1, color: AppColors.muted.withOpacity(0.12)),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    child: rows[i],
-                  ),
-                ],
-              ],
-            ),
-          ),
+    return GlassCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const ProSectionHeader(title: 'Contact and ownership'),
+          const SizedBox(height: 4),
+          if (rows.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text('No contact details on file.', style: AppText.caption),
+            )
+          else
+            ProKeyValue(rows: rows),
         ],
-      ],
+      ),
     );
   }
 }
@@ -338,7 +474,7 @@ class _CustomFieldsCard extends StatelessWidget {
   const _CustomFieldsCard({required this.fields});
   final Map<String, dynamic> fields;
 
-  static String _humanizeKey(String key) {
+  static String humanizeKey(String key) {
     const acronyms = {'id', 'od', 'dpd', 'igl', 'fig'};
     return key
         .split(RegExp(r'[_\s]+'))
@@ -379,31 +515,32 @@ class _CustomFieldsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final entries = fields.entries.toList();
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(color: AppColors.muted.withOpacity(0.15)),
-      ),
+    return GlassCard(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (var i = 0; i < entries.length; i++) ...[
-            if (i > 0)
-              Divider(height: 1, color: AppColors.muted.withOpacity(0.12)),
-            Padding(
+          const ProSectionHeader(title: 'Details'),
+          const SizedBox(height: 4),
+          for (var i = 0; i < entries.length; i++)
+            Container(
               padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                border: i == 0
+                    ? null
+                    : const Border(top: BorderSide(color: AppColors.hairlineSoft)),
+              ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     flex: 4,
                     child: Text(
-                      _humanizeKey(entries[i].key),
+                      humanizeKey(entries[i].key),
                       style: const TextStyle(
-                        fontSize: 12.5,
+                        fontSize: 14,
                         color: AppColors.muted,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ),
@@ -415,11 +552,12 @@ class _CustomFieldsCard extends StatelessWidget {
                       final text = Text(
                         _formatValue(entries[i].value),
                         textAlign: TextAlign.right,
-                        style: TextStyle(
-                          fontSize: 12.5,
+                        style: AppText.number.copyWith(
+                          fontSize: 14,
                           color: coords == null ? AppColors.ink : AppColors.primary,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w500,
                           decoration: coords == null ? null : TextDecoration.underline,
+                          decorationColor: AppColors.primary,
                         ),
                       );
                       if (coords == null) return text;
@@ -432,7 +570,7 @@ class _CustomFieldsCard extends StatelessWidget {
                             Flexible(child: text),
                             const SizedBox(width: 4),
                             Icon(Icons.place_outlined,
-                                size: 14, color: AppColors.primary),
+                                size: 15, color: AppColors.primary),
                           ],
                         ),
                       );
@@ -441,47 +579,8 @@ class _CustomFieldsCard extends StatelessWidget {
                 ],
               ),
             ),
-          ],
         ],
       ),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.icon, required this.label, required this.value});
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 16, color: AppColors.muted),
-        const SizedBox(width: 10),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12.5,
-            color: AppColors.muted,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            value,
-            textAlign: TextAlign.right,
-            style: const TextStyle(
-              fontSize: 12.5,
-              color: AppColors.ink,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -496,9 +595,10 @@ class _TaskHistory extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (tasks.isEmpty) {
-      return const AppEmptyState(
+      return const ProEmpty(
         icon: Icons.fact_check_outlined,
-        message: 'No tasks yet for this customer.\nTap “Perform task” to start one.',
+        title: 'No tasks yet for this customer',
+        message: 'Tap “Perform task” to start one.',
       );
     }
 
@@ -537,119 +637,64 @@ class _TaskHistory extends StatelessWidget {
     }
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: sections,
     );
   }
 
   Widget _group(String label, String status, List<Task> group) {
     final color = statusColor(status);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8, top: 4),
-          child: Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '$label · ${group.length}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.inkSoft,
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ],
-          ),
-        ),
-        for (final t in group)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              onTap: () => onOpen(t),
-              child: _TaskTile(task: t),
-            ),
-          ),
-        const SizedBox(height: 8),
-      ],
-    );
-  }
-}
-
-class _TaskTile extends StatelessWidget {
-  const _TaskTile({required this.task});
-  final Task task;
-
-  @override
-  Widget build(BuildContext context) {
-    final due = task.dueDate == null
-        ? null
-        : DateFormat.yMMMd().format(task.dueDate!);
-    return GlassCard(
-      padding: const EdgeInsets.all(12),
-      radius: AppRadii.md,
-      shadow: AppShadows.soft,
-      child: Row(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(2, 0, 2, 8),
+            child: Row(
               children: [
-                if (task.taskCode != null && task.taskCode!.isNotEmpty)
-                  Text(
-                    task.taskCode!,
-                    style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.muted,
-                      letterSpacing: 0.3,
-                    ),
-                  ),
-                Text(
-                  task.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.ink,
-                  ),
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
                 ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    TaskStatusPill(status: task.status),
-                    if (due != null) ...[
-                      const SizedBox(width: 8),
-                      Icon(Icons.calendar_today_outlined,
-                          size: 12, color: AppColors.muted),
-                      const SizedBox(width: 3),
-                      Text(
-                        due,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.muted,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ],
+                const SizedBox(width: 8),
+                Text(
+                  '$label · ${group.length}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.muted,
+                  ),
                 ),
               ],
             ),
           ),
-          const Icon(Icons.chevron_right_rounded,
-              size: 18, color: AppColors.muted),
+          ProListGroup(
+            children: [
+              for (final t in group) _taskRow(t, color),
+            ],
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _taskRow(Task task, Color color) {
+    final due = task.dueDate == null
+        ? null
+        : DateFormat('d MMM y').format(task.dueDate!);
+    final sub = [
+      if (task.taskCode != null && task.taskCode!.isNotEmpty) task.taskCode!,
+      if (due != null) 'Due $due',
+    ].join(' · ');
+    return ProListRow(
+      leading: ProIconWell(icon: Icons.assignment_outlined, color: color),
+      title: task.title,
+      titleMaxLines: 2,
+      subtitle: sub.isEmpty ? null : sub,
+      pill: TaskStatusPill(status: task.status),
+      onTap: () => onOpen(task),
     );
   }
 }
@@ -724,33 +769,42 @@ class _TemplatePickerSheetState extends ConsumerState<_TemplatePickerSheet> {
             const SizedBox(height: 10),
             Container(
               width: 40,
-              height: 4,
+              height: 5,
               decoration: BoxDecoration(
-                color: AppColors.muted.withOpacity(0.3),
-                borderRadius: BorderRadius.circular(2),
+                color: const Color(0xFFC6D3D6),
+                borderRadius: BorderRadius.circular(3),
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 14, 20, 2),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Choose a task',
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 12, 0),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Choose a task',
+                      style: TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.3,
+                        color: AppColors.ink,
+                      ),
+                    ),
                   ),
-                ),
+                  IconButton(
+                    tooltip: 'Close',
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
               ),
             ),
             const Padding(
-              padding: EdgeInsets.fromLTRB(20, 0, 20, 10),
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
                   'Pick the task you want to perform for this customer.',
-                  style: TextStyle(fontSize: 12.5, color: AppColors.muted),
+                  style: AppText.caption,
                 ),
               ),
             ),
@@ -765,11 +819,11 @@ class _TemplatePickerSheetState extends ConsumerState<_TemplatePickerSheet> {
                 textInputAction: TextInputAction.search,
                 decoration: InputDecoration(
                   hintText: 'Search task template',
-                  isDense: true,
                   prefixIcon: const Icon(Icons.search_rounded, size: 20),
                   suffixIcon: _query.isEmpty
                       ? null
                       : IconButton(
+                          tooltip: 'Clear search',
                           icon: const Icon(Icons.close_rounded, size: 18),
                           onPressed: () {
                             _searchCtrl.clear();
@@ -780,132 +834,77 @@ class _TemplatePickerSheetState extends ConsumerState<_TemplatePickerSheet> {
               ),
             ),
             // ── Category filter chips ───────────────────────────────────
-            SizedBox(
-              height: 36,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                children: [
-                  _FilterChip(
-                    label: 'All',
-                    selected: _filter == null,
-                    onTap: () => setState(() => _filter = null),
-                  ),
-                  for (final f in _kTemplateFilters)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 8),
-                      child: _FilterChip(
-                        label: f,
-                        selected: _filter == f,
-                        onTap: () =>
-                            setState(() => _filter = _filter == f ? null : f),
-                      ),
-                    ),
-                ],
-              ),
+            ProChipBar(
+              labels: const ['All', ..._kTemplateFilters],
+              selected: _filter == null ? 0 : _kTemplateFilters.indexOf(_filter!) + 1,
+              onSelected: (i) => setState(() {
+                if (i == 0) {
+                  _filter = null;
+                } else {
+                  final f = _kTemplateFilters[i - 1];
+                  _filter = _filter == f ? null : f;
+                }
+              }),
             ),
-            const SizedBox(height: 8),
-            const Divider(height: 1),
+            const SizedBox(height: 10),
+            const Divider(height: 1, color: AppColors.hairline),
             // ── Template list ───────────────────────────────────────────
             Expanded(
-              child: async.when(
-                loading: () =>
-                    const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text('Could not load tasks: $e',
-                      style: const TextStyle(color: AppColors.danger)),
-                ),
-                data: (all) {
-                  if (all.isEmpty) {
-                    return const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(28),
-                        child: Text(
-                          'No customer task templates are available. Ask your admin to publish one.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: AppColors.muted),
+              child: ColoredBox(
+                color: AppColors.bg,
+                child: async.when(
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (e, _) => Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: ProNote('Could not load tasks: $e', tone: ProNoteTone.bad),
+                  ),
+                  data: (all) {
+                    if (all.isEmpty) {
+                      return const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: ProEmpty(
+                          icon: Icons.assignment_outlined,
+                          title: 'No task templates',
+                          message:
+                              'No customer task templates are available. Ask your admin to publish one.',
                         ),
-                      ),
-                    );
-                  }
-                  final templates = _visible(all);
-                  if (templates.isEmpty) {
-                    return const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(28),
-                        child: Text(
-                          'No templates match your search.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: AppColors.muted),
-                        ),
-                      ),
-                    );
-                  }
-                  return ListView.separated(
-                    physics: const BouncingScrollPhysics(
-                      parent: AlwaysScrollableScrollPhysics(),
-                    ),
-                    // Bottom inset keeps the last card clear of the system nav
-                    // bar / app bottom navigation.
-                    padding: EdgeInsets.fromLTRB(
-                        16, 12, 16, mq.padding.bottom + 24),
-                    itemCount: templates.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
-                    itemBuilder: (_, i) {
-                      final t = templates[i];
-                      return _TemplateTile(
-                        template: t,
-                        onTap: () => Navigator.pop(context, t),
                       );
-                    },
-                  );
-                },
+                    }
+                    final templates = _visible(all);
+                    if (templates.isEmpty) {
+                      return const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: ProEmpty(
+                          icon: Icons.search_off_rounded,
+                          title: 'No matches',
+                          message: 'No templates match your search.',
+                        ),
+                      );
+                    }
+                    return ListView.separated(
+                      physics: const BouncingScrollPhysics(
+                        parent: AlwaysScrollableScrollPhysics(),
+                      ),
+                      // Bottom inset keeps the last card clear of the system nav
+                      // bar / app bottom navigation.
+                      padding: EdgeInsets.fromLTRB(
+                          16, 14, 16, mq.padding.bottom + 24),
+                      itemCount: templates.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) {
+                        final t = templates[i];
+                        return _TemplateTile(
+                          template: t,
+                          onTap: () => Navigator.pop(context, t),
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Pill-style category filter used in the template picker header.
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: selected ? AppColors.primary : AppColors.surfaceAlt,
-      borderRadius: BorderRadius.circular(AppRadii.pill),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        onTap: onTap,
-        child: Container(
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadii.pill),
-            border: Border.all(
-              color: selected ? AppColors.primary : AppColors.hairline,
-            ),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: selected ? Colors.white : AppColors.inkSoft,
-            ),
-          ),
         ),
       ),
     );
@@ -932,37 +931,23 @@ class _TemplateTile extends StatelessWidget {
         t.categoryName != null && t.categoryName!.trim().isNotEmpty;
 
     return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(AppRadii.lg),
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AppColors.hairline),
+      ),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.lg),
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(AppRadii.lg),
-            border: Border.all(color: AppColors.hairline),
-            boxShadow: AppShadows.soft,
-          ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 13, 12, 13),
           child: Row(
             // Arrow + icon stay vertically centred against the (variable-height)
             // text block.
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: accent.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: accent.withOpacity(0.22)),
-                ),
-                alignment: Alignment.center,
-                child:
-                    Icon(Icons.assignment_outlined, size: 21, color: accent),
-              ),
-              const SizedBox(width: 14),
+              ProIconWell(icon: Icons.assignment_outlined, color: accent, size: 40),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -971,17 +956,16 @@ class _TemplateTile extends StatelessWidget {
                     // Line 1: short category (when available).
                     if (hasCategory) ...[
                       Text(
-                        t.categoryName!.toUpperCase(),
+                        t.categoryName!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                           color: AppColors.muted,
-                          letterSpacing: 0.5,
                         ),
                       ),
-                      const SizedBox(height: 7),
+                      const SizedBox(height: 3),
                     ],
                     // Full task name — wraps to up to 3 lines, never a
                     // single-line ellipsis. Card grows with the text.
@@ -991,52 +975,31 @@ class _TemplateTile extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       softWrap: true,
                       style: const TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: -0.15,
                         color: AppColors.ink,
                         height: 1.3,
                       ),
                     ),
                     if (t.description != null && t.description!.isNotEmpty) ...[
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 3),
                       Text(
                         t.description!,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.muted,
-                          height: 1.3,
-                        ),
+                        style: AppText.caption,
                       ),
                     ],
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               const Icon(Icons.chevron_right_rounded,
-                  size: 20, color: AppColors.muted),
+                  size: 20, color: Color(0xFFB3C0C3)),
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel(this.text);
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text.toUpperCase(),
-      style: const TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w800,
-        letterSpacing: 0.6,
-        color: AppColors.muted,
       ),
     );
   }

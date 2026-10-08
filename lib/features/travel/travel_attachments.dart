@@ -4,8 +4,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
-import '../../core/widgets.dart';
 import 'travel_models.dart';
 
 /// Stages bills/evidence on-device (camera photo, gallery image, or PDF) for a
@@ -29,22 +29,63 @@ class TravelFilePicker extends StatelessWidget {
   Future<void> _addImage(BuildContext context) async {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
-      backgroundColor: AppColors.surface,
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(Icons.photo_camera_rounded, color: AppColors.primary),
-              title: const Text('Take a photo'),
-              onTap: () => Navigator.pop(context, ImageSource.camera),
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFC6D3D6),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    'Add a receipt photo',
+                    style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.35,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ProListGroup(
+                  children: [
+                    ProListRow(
+                      leading: ProIconWell(
+                          icon: Icons.photo_camera_rounded, color: AppColors.primary),
+                      title: 'Take a photo',
+                      onTap: () => Navigator.pop(context, ImageSource.camera),
+                    ),
+                    ProListRow(
+                      leading: ProIconWell(
+                          icon: Icons.photo_library_rounded, color: AppColors.primary),
+                      title: 'Choose from gallery',
+                      onTap: () => Navigator.pop(context, ImageSource.gallery),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            ListTile(
-              leading: Icon(Icons.photo_library_rounded, color: AppColors.primary),
-              title: const Text('Choose from gallery'),
-              onTap: () => Navigator.pop(context, ImageSource.gallery),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -84,75 +125,151 @@ class TravelFilePicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AppSectionHeader(title: title, subtitle: subtitle),
+        ProSectionHeader(title: title, subtitle: subtitle),
         const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        Row(
           children: [
-            OutlinedButton.icon(
-              onPressed: () => _addImage(context),
-              icon: const Icon(Icons.add_a_photo_rounded, size: 18),
-              label: const Text('Add Image'),
+            Expanded(
+              child: _UploadTile(
+                icon: Icons.add_a_photo_rounded,
+                label: 'Add Image',
+                hint: 'Camera or gallery',
+                onTap: () => _addImage(context),
+              ),
             ),
-            OutlinedButton.icon(
-              onPressed: () => _addDocument(context),
-              icon: const Icon(Icons.attach_file_rounded, size: 18),
-              label: const Text('Add File'),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _UploadTile(
+                icon: Icons.attach_file_rounded,
+                label: 'Add File',
+                hint: 'PDF, JPG or PNG',
+                onTap: () => _addDocument(context),
+              ),
             ),
           ],
         ),
         if (files.isNotEmpty) ...[
           const SizedBox(height: 12),
-          for (int i = 0; i < files.length; i++)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: GlassCard(
-                padding: const EdgeInsets.all(10),
-                shadow: AppShadows.soft,
-                child: Row(
-                  children: [
-                    if (_isImage(files[i].fileName))
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.file(File(files[i].path),
-                            width: 44, height: 44, fit: BoxFit.cover),
-                      )
-                    else
-                      Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(8),
+          ProListGroup(
+            dividerIndent: 68,
+            children: [
+              for (int i = 0; i < files.length; i++)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+                  child: Row(
+                    children: [
+                      if (_isImage(files[i].fileName))
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.file(File(files[i].path),
+                              width: 44, height: 44, fit: BoxFit.cover),
+                        )
+                      else
+                        ProIconWell(
+                          icon: Icons.picture_as_pdf_rounded,
+                          color: AppColors.primary,
+                          size: 44,
                         ),
-                        child: Icon(Icons.picture_as_pdf_rounded, color: AppColors.primary),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          files[i].fileName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.ink),
+                        ),
                       ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        files[i].fileName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.ink),
+                      IconButton(
+                        onPressed: () {
+                          files.removeAt(i);
+                          onChanged();
+                        },
+                        icon: const Icon(Icons.delete_outline_rounded,
+                            size: 20, color: AppColors.danger),
+                        tooltip: 'Remove',
                       ),
-                    ),
-                    IconButton(
-                      onPressed: () {
-                        files.removeAt(i);
-                        onChanged();
-                      },
-                      icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
-                      tooltip: 'Remove',
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ),
+            ],
+          ),
         ],
       ],
     );
   }
+}
+
+/// Dashed receipt-upload tile.
+class _UploadTile extends StatelessWidget {
+  const _UploadTile({
+    required this.icon,
+    required this.label,
+    required this.hint,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String label;
+  final String hint;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: CustomPaint(
+          painter: _DashedRRectPainter(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+            child: Column(
+              children: [
+                ProIconWell(icon: icon, color: AppColors.primary),
+                const SizedBox(height: 8),
+                Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13.5, fontWeight: FontWeight.w600, color: AppColors.ink)),
+                Text(hint,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.caption),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashedRRectPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rrect = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(14));
+    canvas.drawRRect(rrect, Paint()..color = AppColors.surfaceAlt);
+    final path = Path()..addRRect(rrect.deflate(0.5));
+    final paint = Paint()
+      ..color = const Color(0xFFC6D3D6)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    for (final metric in path.computeMetrics()) {
+      double d = 0;
+      while (d < metric.length) {
+        canvas.drawPath(metric.extractPath(d, d + 5), paint);
+        d += 9;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

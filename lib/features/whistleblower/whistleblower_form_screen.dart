@@ -3,9 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/employee_lookup.dart';
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
-import '../../core/widgets.dart';
 import 'whistleblower_evidence.dart';
 import 'whistleblower_models.dart';
 import 'whistleblower_repository.dart';
@@ -99,23 +99,41 @@ class _WhistleblowerFormScreenState extends ConsumerState<WhistleblowerFormScree
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
+        contentPadding: const EdgeInsets.fromLTRB(24, 28, 24, 8),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          children: const [
-            Icon(Icons.check_circle_rounded, color: AppColors.success, size: 48),
-            SizedBox(height: 12),
-            Text('Submitted successfully',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink)),
-            SizedBox(height: 6),
-            Text('Your concern has been received and will be handled confidentially.',
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: const BoxDecoration(
+                color: AppColors.successTint,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check_rounded, color: AppColors.success, size: 32),
+            ),
+            const SizedBox(height: 14),
+            const Text('Submitted successfully',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12.5, color: AppColors.inkSoft, height: 1.4)),
+                style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.35,
+                    color: AppColors.ink)),
+            const SizedBox(height: 6),
+            const Text('Your concern has been received and will be handled confidentially.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, color: AppColors.muted, height: 1.45)),
           ],
         ),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
         actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Done'),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Done'),
+            ),
           ),
         ],
       ),
@@ -125,158 +143,286 @@ class _WhistleblowerFormScreenState extends ConsumerState<WhistleblowerFormScree
 
   @override
   Widget build(BuildContext context) {
+    final uploading = _submitting && _progress > 0 && _progress < 1;
     return Scaffold(
-      appBar: AppBar(title: const Text('Report a Concern')),
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: 'Report a concern',
+        subtitle: 'Confidential · handled by the review team',
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
+          _ConfidentialCard(anonymous: _anonymous),
+          const SizedBox(height: 14),
           GlassCard(
-            color: AppColors.info.withOpacity(0.06),
-            shadow: AppShadows.soft,
-            child: const Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(Icons.shield_outlined, color: AppColors.info),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Your report will be handled confidentially. Please provide accurate and genuine information.',
-                    style: TextStyle(fontSize: 12.5, color: AppColors.inkSoft, height: 1.4),
+                const ProSectionHeader(title: 'Your concern'),
+                const SizedBox(height: 12),
+                ProField(
+                  label: 'Category',
+                  required: true,
+                  child: DropdownButtonFormField<String>(
+                    value: _category,
+                    isExpanded: true,
+                    hint: const Text('Choose a category'),
+                    decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.category_outlined, size: 20)),
+                    items: [
+                      for (final c in _categories)
+                        DropdownMenuItem(value: c.value, child: Text(c.label)),
+                    ],
+                    onChanged: (v) => setState(() => _category = v),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                ProField(
+                  label: 'Subject',
+                  required: true,
+                  child: TextField(
+                    controller: _subject,
+                    maxLength: 200,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [TitleCaseTextFormatter()],
+                    decoration: const InputDecoration(
+                        hintText: 'A short line about what happened'),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                ProField(
+                  label: 'Description',
+                  required: true,
+                  child: TextField(
+                    controller: _description,
+                    minLines: 4,
+                    maxLines: 8,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [TitleCaseTextFormatter()],
+                    decoration: const InputDecoration(
+                        hintText: 'What happened, when and where, and who saw it'),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                ProField(
+                  label: 'Incident date',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                    onTap: () async {
+                      final d = await showDatePicker(
+                        context: context,
+                        initialDate: _incidentDate ?? DateTime.now(),
+                        firstDate: DateTime(2015),
+                        lastDate: DateTime.now(),
+                      );
+                      if (d != null) setState(() => _incidentDate = d);
+                    },
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                          prefixIcon: Icon(Icons.event_rounded, size: 20)),
+                      child: Text(
+                        _incidentDate == null ? 'Not set' : DateFormat('d MMM yyyy').format(_incidentDate!),
+                        style: TextStyle(
+                            fontSize: 15,
+                            color: _incidentDate == null ? AppColors.faint : AppColors.ink),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                ProField(
+                  label: 'Branch or department involved',
+                  child: TextField(
+                    controller: _department,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [TitleCaseTextFormatter()],
+                    decoration: const InputDecoration(hintText: 'e.g. Branch, team or counter'),
                   ),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 14),
-          _label('Category *'),
-          DropdownButtonFormField<String>(
-            value: _category,
-            isExpanded: true,
-            decoration: const InputDecoration(prefixIcon: Icon(Icons.category_outlined, size: 20)),
-            items: [
-              for (final c in _categories) DropdownMenuItem(value: c.value, child: Text(c.label)),
-            ],
-            onChanged: (v) => setState(() => _category = v),
-          ),
-          const SizedBox(height: 12),
-          _label('Subject *'),
-          TextField(
-            controller: _subject,
-            maxLength: 200,
-            textCapitalization: TextCapitalization.words,
-            inputFormatters: const [TitleCaseTextFormatter()],
-          ),
-          _label('Description *'),
-          TextField(
-            controller: _description,
-            minLines: 4,
-            maxLines: 8,
-            textCapitalization: TextCapitalization.words,
-            inputFormatters: const [TitleCaseTextFormatter()],
-          ),
-          const SizedBox(height: 12),
-          _label('Incident Date'),
-          InkWell(
-            onTap: () async {
-              final d = await showDatePicker(
-                context: context,
-                initialDate: _incidentDate ?? DateTime.now(),
-                firstDate: DateTime(2015),
-                lastDate: DateTime.now(),
-              );
-              if (d != null) setState(() => _incidentDate = d);
-            },
-            child: InputDecorator(
-              decoration: const InputDecoration(prefixIcon: Icon(Icons.event_rounded, size: 20)),
-              child: Text(
-                _incidentDate == null ? 'Not set' : DateFormat('d MMM yyyy').format(_incidentDate!),
-                style: TextStyle(color: _incidentDate == null ? AppColors.muted : AppColors.ink),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          _label('Branch / Department involved'),
-          TextField(
-            controller: _department,
-            textCapitalization: TextCapitalization.words,
-            inputFormatters: const [TitleCaseTextFormatter()],
-          ),
-          const SizedBox(height: 12),
-          _label('Person(s) involved'),
-          _PersonSelector(
-            selected: _selectedPersons,
-            onAdd: (e) => setState(() {
-              if (!_selectedPersons.contains(e)) _selectedPersons.add(e);
-            }),
-            onRemove: (e) => setState(() => _selectedPersons.remove(e)),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _persons,
-            textCapitalization: TextCapitalization.words,
-            inputFormatters: const [TitleCaseTextFormatter()],
-            decoration: const InputDecoration(
-              hintText: 'Add others not in the directory (optional)',
-              prefixIcon: Icon(Icons.person_add_alt_1_outlined, size: 20),
-            ),
-          ),
-          const SizedBox(height: 16),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            value: _anonymous,
-            onChanged: (v) => setState(() => _anonymous = v),
-            title: const Text('Submit anonymously'),
-            subtitle: const Text('Your name will be hidden from reviewers.'),
-          ),
-          const SizedBox(height: 8),
-          EvidenceSection(evidence: _evidence, onChanged: () => setState(() {})),
-          const SizedBox(height: 16),
-          const Text(
-            'Please ensure the uploaded evidence is genuine and relevant to the concern raised.',
-            style: TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.4),
-          ),
-          const SizedBox(height: 8),
           GlassCard(
-            color: AppColors.warning.withOpacity(0.08),
-            shadow: AppShadows.soft,
-            child: const Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 18),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'False or malicious complaints may lead to disciplinary action as per company policy.',
-                    style: TextStyle(fontSize: 11.5, color: AppColors.inkSoft, height: 1.4),
+                ProSectionHeader(
+                  title: 'People involved',
+                  trailing: _selectedPersons.isEmpty
+                      ? null
+                      : ProPill.info('${_selectedPersons.length}'),
+                ),
+                const SizedBox(height: 12),
+                _PersonSelector(
+                  selected: _selectedPersons,
+                  onAdd: (e) => setState(() {
+                    if (!_selectedPersons.contains(e)) _selectedPersons.add(e);
+                  }),
+                  onRemove: (e) => setState(() => _selectedPersons.remove(e)),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _persons,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [TitleCaseTextFormatter()],
+                  decoration: const InputDecoration(
+                    hintText: 'Add others not in the directory (optional)',
+                    prefixIcon: Icon(Icons.person_add_alt_1_outlined, size: 20),
                   ),
                 ),
               ],
             ),
           ),
-          if (_error != null) ...[
-            const SizedBox(height: 12),
-            AppErrorPanel(message: _error!),
-          ],
-          const SizedBox(height: 18),
-          if (_submitting && _progress > 0 && _progress < 1) ...[
-            LinearProgressIndicator(value: _progress),
-            const SizedBox(height: 10),
-          ],
-          SizedBox(
-            height: 50,
-            child: FilledButton(
-              onPressed: _submitting ? null : _submit,
-              child: Text(_submitting ? 'Submitting…' : 'Submit Report'),
+          const SizedBox(height: 14),
+          GlassCard(
+            padding: const EdgeInsets.fromLTRB(14, 4, 8, 4),
+            child: SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              secondary: const ProIconWell(
+                  icon: Icons.visibility_off_outlined, color: AppColors.info),
+              value: _anonymous,
+              onChanged: (v) => setState(() => _anonymous = v),
+              title: const Text('Submit anonymously'),
+              subtitle: const Text('Your name will be hidden from reviewers.'),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                EvidenceSection(evidence: _evidence, onChanged: () => setState(() {})),
+                const SizedBox(height: 12),
+                const Text(
+                  'Please ensure the uploaded evidence is genuine and relevant to the concern raised.',
+                  style: AppText.caption,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          const ProNote(
+            'False or malicious complaints may lead to disciplinary action as per company policy.',
+            tone: ProNoteTone.neutral,
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            ProNote(_error!, tone: ProNoteTone.warn),
+          ],
+        ],
+      ),
+      bottomNavigationBar: ProBottomBar(
+        top: uploading
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text('Uploading evidence',
+                            style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF43585D))),
+                      ),
+                      Text('${(_progress * 100).round()}%',
+                          style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF43585D),
+                              fontFeatures: [FontFeature.tabularFigures()])),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(value: _progress, minHeight: 6),
+                  ),
+                ],
+              )
+            : null,
+        children: [
+          FilledButton(
+            onPressed: _submitting ? null : _submit,
+            child: Text(_submitting ? 'Submitting…' : 'Submit report'),
+          ),
         ],
       ),
     );
   }
+}
 
-  Widget _label(String t) => Padding(
-        padding: const EdgeInsets.only(bottom: 4, top: 4),
-        child: Text(t, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
-      );
+/// Deep confidentiality banner with the current anonymity status.
+class _ConfidentialCard extends StatelessWidget {
+  const _ConfidentialCard({required this.anonymous});
+  final bool anonymous;
+
+  @override
+  Widget build(BuildContext context) {
+    return ProDeepSurface(
+      radius: 18,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+                ),
+                child: const Icon(Icons.shield_outlined, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Your report will be handled confidentially. Please provide accurate and genuine information.',
+                  style: TextStyle(
+                      fontSize: 14.5, height: 1.45, fontWeight: FontWeight.w500, color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            child: Container(
+              key: ValueKey(anonymous),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.07),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+              ),
+              child: Row(
+                children: [
+                  Icon(anonymous ? Icons.visibility_off_outlined : Icons.person_outline_rounded,
+                      size: 17, color: const Color(0xE0FFFFFF)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      anonymous
+                          ? 'Reporting anonymously. Your name will be hidden from reviewers.'
+                          : 'Reporting with your name. Turn on “Submit anonymously” to hide it.',
+                      style: const TextStyle(fontSize: 13, height: 1.4, color: Color(0xE0FFFFFF)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Multi-select employee picker: search the org directory and add one or more
@@ -315,21 +461,25 @@ class _PersonSelectorState extends ConsumerState<_PersonSelector> {
         : null;
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (widget.selected.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: 10),
             child: Wrap(
-              spacing: 6,
-              runSpacing: 6,
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 for (final e in widget.selected)
                   Chip(
-                    label: Text(e.label, style: const TextStyle(fontSize: 12)),
+                    label: Text(e.label),
+                    labelStyle: TextStyle(
+                        fontSize: 13.5, fontWeight: FontWeight.w600, color: AppColors.primary),
                     onDeleted: () => widget.onRemove(e),
                     deleteIcon: const Icon(Icons.close_rounded, size: 16),
+                    deleteIconColor: AppColors.primary,
                     backgroundColor: AppColors.primary.withValues(alpha: 0.10),
+                    side: BorderSide.none,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
               ],
@@ -352,38 +502,53 @@ class _PersonSelectorState extends ConsumerState<_PersonSelector> {
               child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
             ),
             error: (e, _) => const Padding(
-              padding: EdgeInsets.only(top: 6),
-              child: Text('Could not search employees', style: TextStyle(fontSize: 12, color: AppColors.danger)),
+              padding: EdgeInsets.only(top: 8),
+              child: Text('Could not search employees',
+                  style: TextStyle(fontSize: 12.5, color: Color(0xFF9A5B00))),
             ),
             data: (list) {
               final available = list.where((e) => !widget.selected.contains(e)).toList();
               if (available.isEmpty) {
                 return const Padding(
                   padding: EdgeInsets.only(top: 8),
-                  child: Text('No matching employees', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+                  child: Text('No matching employees', style: AppText.caption),
                 );
               }
               return Container(
-                margin: const EdgeInsets.only(top: 6),
+                margin: const EdgeInsets.only(top: 8),
                 constraints: const BoxConstraints(maxHeight: 220),
                 decoration: BoxDecoration(
                   color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(AppRadii.md),
+                  borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: AppColors.hairline),
                 ),
-                child: ListView(
+                clipBehavior: Clip.antiAlias,
+                child: ListView.separated(
                   shrinkWrap: true,
                   padding: EdgeInsets.zero,
-                  children: [
-                    for (final e in available)
-                      ListTile(
-                        dense: true,
-                        title: Text(e.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                        subtitle: e.code == null ? null : Text(e.code!, style: const TextStyle(fontSize: 11.5)),
-                        trailing: Icon(Icons.add_circle_outline_rounded, size: 20, color: AppColors.primary),
-                        onTap: () => _add(e),
+                  itemCount: available.length,
+                  separatorBuilder: (_, __) =>
+                      const Divider(height: 1, indent: 56, color: AppColors.hairlineSoft),
+                  itemBuilder: (_, i) {
+                    final e = available[i];
+                    return ProListRow(
+                      dense: true,
+                      chevron: false,
+                      leading: ProAvatar(name: e.name, size: 34),
+                      title: e.name,
+                      subtitle: e.code,
+                      trailing: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(Icons.add_rounded, size: 19, color: AppColors.primary),
                       ),
-                  ],
+                      onTap: () => _add(e),
+                    );
+                  },
                 ),
               );
             },

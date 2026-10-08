@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -101,330 +101,286 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
   @override
   Widget build(BuildContext context) {
     final contacts = ref.watch(groupCandidatesProvider(_query));
-    final mq = MediaQuery.of(context);
+    final n = _selected.length;
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: PreferredSize(
-          preferredSize:
-              Size.fromHeight(mq.padding.top + AppChrome.appBarHeight),
-          child: ClipRect(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: GlassBlur.chrome,
-                sigmaY: GlassBlur.chrome,
-              ),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.62),
-                  border: Border(
-                    bottom: BorderSide(color: Colors.white.withOpacity(0.5)),
-                  ),
-                ),
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                          onPressed: () => Navigator.pop(context),
-                          color: AppColors.inkSoft,
-                        ),
-                        const Expanded(
-                          child: Text(
-                            'Create Group',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.ink,
-                              letterSpacing: -0.2,
-                            ),
-                          ),
-                        ),
-                        _creating
-                            ? SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppColors.primary,
-                                ),
-                              )
-                            : IconButton(
-                                icon: const Icon(Icons.check_rounded, size: 22),
-                                onPressed: _create,
-                                color: AppColors.primary,
-                              ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: 'Create group',
+        subtitle: 'Name the group, then add colleagues',
+      ),
+      body: ListView(
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
         ),
-        body: Column(
-          children: [
-            // Group name
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: GlassCard(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                shadow: AppShadows.soft,
-                child: Row(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          // ── Group details ──────────────────────────────────────────────
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const ProSectionHeader(title: 'Group details'),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        gradient: AppColors.heroGradient,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(Icons.group_rounded,
-                          color: Colors.white, size: 20),
+                    ProIconWell(
+                      icon: Icons.group_rounded,
+                      color: AppColors.primary,
+                      size: 48,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: TextField(
-                        controller: _nameCtrl,
-                        textCapitalization: TextCapitalization.words,
-                        inputFormatters: const [TitleCaseTextFormatter()],
-                        cursorColor: AppColors.primary,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.ink,
-                        ),
-                        decoration: const InputDecoration(
-                          isCollapsed: true,
-                          contentPadding: EdgeInsets.symmetric(vertical: 10),
-                          border: InputBorder.none,
-                          hintText: 'Group name',
-                          hintStyle: TextStyle(
-                            color: AppColors.muted,
-                            fontSize: 14,
+                      child: ProField(
+                        label: 'Group name',
+                        required: true,
+                        child: TextField(
+                          controller: _nameCtrl,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: const [TitleCaseTextFormatter()],
+                          cursorColor: AppColors.primary,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.ink,
+                          ),
+                          decoration: const InputDecoration(
+                            hintText: 'Type a group name',
                           ),
                         ),
                       ),
                     ),
                   ],
                 ),
-              ),
+              ],
             ),
-            // Selected members chips
-            if (_selected.isNotEmpty)
-              SizedBox(
-                height: 48,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  children: _selected.map((c) {
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: InputChip(
-                        avatar: UserAvatar(name: c.name, size: 24, radius: 12),
-                        label: Text(
-                          c.name.split(' ').first,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        deleteIcon: const Icon(Icons.close_rounded, size: 14),
-                        onDeleted: () => _toggleMember(c),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(AppRadii.pill),
-                          side: BorderSide(
-                              color: AppColors.primary.withOpacity(0.3)),
-                        ),
-                        backgroundColor: AppColors.primary.withOpacity(0.08),
-                        deleteIconColor: AppColors.primary,
-                      ),
-                    );
-                  }).toList(),
+          ),
+          const SizedBox(height: 14),
+          // ── Members picked so far ──────────────────────────────────────
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ProSectionHeader(
+                  title: 'Members',
+                  trailing: n == 0
+                      ? ProPill.neutral('None yet')
+                      : ProPill.info('$n selected'),
                 ),
-              ),
-            // Search members
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                  child: Container(
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.50),
-                      borderRadius: BorderRadius.circular(AppRadii.md),
-                      border: Border.all(color: Colors.white.withOpacity(0.6)),
-                    ),
-                    child: Row(
-                      children: [
-                        const SizedBox(width: 12),
-                        const Icon(Icons.search_rounded,
-                            size: 18, color: AppColors.muted),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _searchCtrl,
-                            onChanged: _onSearchChanged,
-                            textCapitalization: TextCapitalization.words,
-                            inputFormatters: const [TitleCaseTextFormatter()],
-                            cursorColor: AppColors.primary,
-                            cursorWidth: 1.5,
-                            style: const TextStyle(
-                              fontSize: 13.5,
-                              color: AppColors.ink,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            decoration: const InputDecoration(
-                              isCollapsed: true,
-                              contentPadding:
-                                  EdgeInsets.symmetric(vertical: 13),
-                              border: InputBorder.none,
-                              hintText: 'Add members…',
-                              hintStyle: TextStyle(
-                                color: AppColors.muted,
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
+                const SizedBox(height: 12),
+                if (_selected.isEmpty)
+                  const ProNote(
+                    'Tap colleagues below to add them. They show up here.',
+                    tone: ProNoteTone.info,
+                  )
+                else
+                  SizedBox(
+                    height: 40,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: _selected.map((c) {
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: _MemberChip(
+                            name: c.name,
+                            onRemove: () => _toggleMember(c),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                      ],
+                        );
+                      }).toList(),
                     ),
                   ),
-                ),
-              ),
+              ],
             ),
-            const SizedBox(height: 4),
-            // Contact list with checkboxes
-            Expanded(
-              child: contacts.when(
-                data: (list) {
-                  if (list.isEmpty) {
-                    return Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: AppEmptyState(
-                        icon: Icons.person_search_rounded,
-                        message: _query.isEmpty
-                            ? 'Search to find colleagues'
-                            : 'No colleagues found',
-                      ),
-                    );
-                  }
-                  return ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
-                    itemCount: list.length,
-                    itemBuilder: (_, i) {
-                      final c = list[i];
-                      final selected = _isSelected(c);
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: GlassCard(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          shadow: const [],
-                          child: ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                UserAvatar(
-                                    name: c.name, size: 40, radius: 20),
-                                if (c.online)
-                                  Positioned(
-                                    bottom: 0,
-                                    right: 0,
-                                    child: Container(
-                                      width: 12,
-                                      height: 12,
-                                      decoration: BoxDecoration(
-                                        color: AppColors.success,
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                            color: Colors.white, width: 2),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            title: Text(
-                              c.name,
-                              style: const TextStyle(
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.ink,
-                              ),
-                            ),
-                            subtitle: Text(
-                              c.designation ?? '',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: AppColors.muted,
-                              ),
-                            ),
-                            trailing: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              width: 24,
-                              height: 24,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: selected
-                                    ? AppColors.heroGradient
-                                    : null,
-                                color: selected
-                                    ? null
-                                    : Colors.white.withOpacity(0.5),
-                                border: Border.all(
-                                  color: selected
-                                      ? AppColors.primary
-                                      : AppColors.muted.withOpacity(0.4),
-                                  width: 1.5,
-                                ),
-                              ),
-                              child: selected
-                                  ? const Icon(Icons.check_rounded,
-                                      size: 14, color: Colors.white)
-                                  : null,
-                            ),
-                            onTap: () => _toggleMember(c),
-                            shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(AppRadii.lg),
-                            ),
+          ),
+          const SizedBox(height: 14),
+          // ── Search members ─────────────────────────────────────────────
+          _MemberSearchField(
+            controller: _searchCtrl,
+            onChanged: _onSearchChanged,
+          ),
+          const SizedBox(height: 14),
+          // ── Contact list with ticks ────────────────────────────────────
+          contacts.when(
+            data: (list) {
+              if (list.isEmpty) {
+                return ProEmpty(
+                  icon: Icons.person_search_rounded,
+                  title: _query.isEmpty
+                      ? 'Search to find colleagues'
+                      : 'No colleagues found',
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ProSectionHeader(
+                    title: 'Colleagues · ${list.length}',
+                    small: true,
+                  ),
+                  const SizedBox(height: 10),
+                  ProListGroup(
+                    dividerIndent: 66,
+                    children: [
+                      for (final c in list)
+                        ProListRow(
+                          leading: ProAvatar(
+                            name: c.name,
+                            dot: c.online ? AppColors.live : null,
                           ),
+                          title: c.name,
+                          subtitle: (c.designation ?? '').isEmpty
+                              ? null
+                              : c.designation,
+                          chevron: false,
+                          onTap: () => _toggleMember(c),
+                          trailing: _Tick(selected: _isSelected(c)),
                         ),
-                      );
-                    },
-                  );
-                },
-                loading: () => const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(40),
-                    child: AppLoadingBlock(height: 80),
+                    ],
                   ),
-                ),
-                error: (err, _) => Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: AppErrorPanel(
-                    message: err.toString(),
-                    onRetry: () =>
-                        ref.invalidate(groupCandidatesProvider(_query)),
-                  ),
-                ),
-              ),
+                ],
+              );
+            },
+            loading: () => const AppLoadingBlock(height: 80),
+            error: (err, _) => AppErrorPanel(
+              message: err.toString(),
+              onRetry: () => ref.invalidate(groupCandidatesProvider(_query)),
             ),
-          ],
+          ),
+        ],
+      ),
+      bottomNavigationBar: ProBottomBar(
+        children: [
+          FilledButton.icon(
+            onPressed: _creating ? null : _create,
+            icon: _creating
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.check_rounded, size: 20),
+            label: Text(
+              _creating
+                  ? 'Creating…'
+                  : (n == 0 ? 'Create group' : 'Create group · $n'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pieces
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Search field (ProSearchField look, keeps the title-case formatter).
+class _MemberSearchField extends StatelessWidget {
+  const _MemberSearchField({required this.controller, required this.onChanged});
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(15),
+      borderSide: const BorderSide(color: Color(0xFFDBE3E5)),
+    );
+    return TextField(
+      controller: controller,
+      onChanged: onChanged,
+      textInputAction: TextInputAction.search,
+      textCapitalization: TextCapitalization.words,
+      inputFormatters: const [TitleCaseTextFormatter()],
+      style: const TextStyle(fontSize: 15, color: AppColors.ink),
+      decoration: InputDecoration(
+        hintText: 'Add members…',
+        filled: true,
+        fillColor: AppColors.surface,
+        prefixIcon: const Icon(Icons.search_rounded, size: 21),
+        contentPadding: const EdgeInsets.symmetric(vertical: 15),
+        border: border,
+        enabledBorder: border,
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(15),
+          borderSide: BorderSide(color: AppColors.primary, width: 1.6),
         ),
       ),
+    );
+  }
+}
+
+/// Removable chip for a picked member.
+class _MemberChip extends StatelessWidget {
+  const _MemberChip({required this.name, required this.onRemove});
+  final String name;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Color.alphaBlend(
+          AppColors.primary.withOpacity(0.08), AppColors.surface),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(999),
+        side: BorderSide(color: AppColors.primary.withOpacity(0.25)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onRemove,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 4, 10, 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ProAvatar(name: name, size: 28),
+              const SizedBox(width: 8),
+              Text(
+                name.split(' ').first,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(Icons.close_rounded, size: 15, color: AppColors.primary),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Round selection tick.
+class _Tick extends StatelessWidget {
+  const _Tick({required this.selected});
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: selected ? AppColors.primary : AppColors.surface,
+        border: Border.all(
+          color: selected ? AppColors.primary : const Color(0xFFC6D3D6),
+          width: 1.5,
+        ),
+      ),
+      child: selected
+          ? const Icon(Icons.check_rounded, size: 15, color: Colors.white)
+          : null,
     );
   }
 }

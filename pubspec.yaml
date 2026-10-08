@@ -1,7 +1,7 @@
 name: nava360
 description: Nava360 mobile app — employee self-service and manager approvals.
 publish_to: "none"
-version: 0.1.39+39
+version: 0.1.40+40
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -135,6 +135,17 @@ flutter:
     - assets/insights/nava360_character.webp
 
   fonts:
+    # App typeface (Pro redesign). Geist, SIL OFL 1.1 — see assets/fonts/GEIST-OFL.txt.
+    - family: Geist
+      fonts:
+        - asset: assets/fonts/Geist-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Geist-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Geist-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Geist-Bold.ttf
+          weight: 700
     # Business-card name typeface (reference design uses Playfair Display 700).
     # Variable font — select the weight via FontVariation('wght', 700).
     - family: PlayfairDisplay

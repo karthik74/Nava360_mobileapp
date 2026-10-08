@@ -17,8 +17,17 @@ import 'performance_repository.dart';
 import 'performance_widgets.dart';
 
 class PerformanceTabBody extends ConsumerStatefulWidget {
-  const PerformanceTabBody({super.key, required this.employeeId});
+  const PerformanceTabBody({
+    super.key,
+    required this.employeeId,
+    this.nested = false,
+  });
   final int employeeId;
+
+  /// True when shown as a tab body under a [NestedScrollView] whose pinned
+  /// header is wrapped in a [SliverOverlapAbsorber]: the list then injects
+  /// that overlap so its first card never sits under the pinned header.
+  final bool nested;
 
   @override
   ConsumerState<PerformanceTabBody> createState() => _PerformanceTabBodyState();
@@ -45,34 +54,52 @@ class _PerformanceTabBodyState extends ConsumerState<PerformanceTabBody> {
     final async = ref.watch(employeePerformanceProvider(q));
     final selectedForSelector = _selected ?? _periodFromAsync(async);
     final mq = MediaQuery.of(context);
+    final padding = EdgeInsets.fromLTRB(16, 14, 16, mq.padding.bottom + 24);
+
+    final children = <Widget>[
+      PerfMonthSelector(
+        periods: _periods,
+        selected: selectedForSelector,
+        lastSyncedLabel: _lastSynced == null ? null : 'Synced $_lastSynced',
+        onChanged: (p) => setState(() => _selected = p),
+      ),
+      const SizedBox(height: 14),
+      async.when(
+        loading: () => const AppLoadingBlock(height: 240),
+        error: (e, _) => AppErrorPanel(
+          message: e.toString(),
+          onRetry: () => ref.invalidate(employeePerformanceProvider(q)),
+        ),
+        data: (detail) => PerformanceScorecardBody(
+          detail: detail,
+          selectedPeriod: selectedForSelector,
+        ),
+      ),
+    ];
 
     return RefreshIndicator(
       color: AppColors.primary,
+      backgroundColor: Colors.white,
       onRefresh: () async => ref.invalidate(employeePerformanceProvider(q)),
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(16, 14, 16, mq.padding.bottom + 24),
-        children: [
-          PerfMonthSelector(
-            periods: _periods,
-            selected: selectedForSelector,
-            lastSyncedLabel: _lastSynced == null ? null : 'Synced $_lastSynced',
-            onChanged: (p) => setState(() => _selected = p),
-          ),
-          const SizedBox(height: 12),
-          async.when(
-            loading: () => const AppLoadingBlock(height: 240),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(employeePerformanceProvider(q)),
+      child: widget.nested
+          ? CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverOverlapInjector(
+                  handle:
+                      NestedScrollView.sliverOverlapAbsorberHandleFor(context),
+                ),
+                SliverPadding(
+                  padding: padding,
+                  sliver: SliverList.list(children: children),
+                ),
+              ],
+            )
+          : ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: padding,
+              children: children,
             ),
-            data: (detail) => PerformanceScorecardBody(
-              detail: detail,
-              selectedPeriod: selectedForSelector,
-            ),
-          ),
-        ],
-      ),
     );
   }
 

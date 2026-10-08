@@ -2,11 +2,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/theme.dart';
-import '../../core/widgets.dart';
+import '../../core/pro_ui.dart';
 import 'customer_models.dart';
 import 'customer_notice_repository.dart';
 
@@ -110,37 +111,69 @@ class _CustomerNoticeScreenState extends ConsumerState<CustomerNoticeScreen> {
     final sent = await showModalBottomSheet<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheet) => Padding(
+        builder: (ctx, setSheet) => Container(
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
           padding: EdgeInsets.fromLTRB(
-              20, 18, 20, MediaQuery.of(ctx).padding.bottom + 18),
+              20, 10, 20, MediaQuery.of(ctx).padding.bottom + 18),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFC6D3D6),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
               Text('Send ${n.referenceNumber}',
                   style: const TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 10),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                    'WhatsApp (${widget.customer.mobileNumber ?? 'no number'})',
-                    style: const TextStyle(fontSize: 13.5)),
-                value: whatsapp,
-                onChanged: (widget.customer.mobileNumber ?? '').isEmpty
-                    ? null
-                    : (v) => setSheet(() => whatsapp = v ?? false),
+                      fontSize: 19,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.3,
+                      color: AppColors.ink)),
+              const SizedBox(height: 12),
+              GlassCard(
+                padding: EdgeInsets.zero,
+                child: Column(
+                  children: [
+                    CheckboxListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+                      secondary: const ProIconWell(
+                          icon: Icons.chat_rounded, color: AppColors.success),
+                      title: Text(
+                          'WhatsApp (${widget.customer.mobileNumber ?? 'no number'})',
+                          style: const TextStyle(
+                              fontSize: 14.5, fontWeight: FontWeight.w500)),
+                      value: whatsapp,
+                      onChanged: (widget.customer.mobileNumber ?? '').isEmpty
+                          ? null
+                          : (v) => setSheet(() => whatsapp = v ?? false),
+                    ),
+                    const Divider(height: 1, indent: 62),
+                    CheckboxListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+                      secondary: const ProIconWell(
+                          icon: Icons.mail_outline_rounded, color: AppColors.info),
+                      title: Text('Email (${widget.customer.email ?? 'no email'})',
+                          style: const TextStyle(
+                              fontSize: 14.5, fontWeight: FontWeight.w500)),
+                      value: email,
+                      onChanged: (widget.customer.email ?? '').isEmpty
+                          ? null
+                          : (v) => setSheet(() => email = v ?? false),
+                    ),
+                  ],
+                ),
               ),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text('Email (${widget.customer.email ?? 'no email'})',
-                    style: const TextStyle(fontSize: 13.5)),
-                value: email,
-                onChanged: (widget.customer.email ?? '').isEmpty
-                    ? null
-                    : (v) => setSheet(() => email = v ?? false),
-              ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
@@ -182,101 +215,136 @@ class _CustomerNoticeScreenState extends ConsumerState<CustomerNoticeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = widget.customer;
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(
-        title: const Text('Customer Notices'),
-        backgroundColor: Colors.white,
-        foregroundColor: AppColors.ink,
-        elevation: 0.5,
+      appBar: proLightAppBar(
+        context,
+        title: 'Customer notices',
+        subtitle: 'Customers · ${c.customerName}',
       ),
+      bottomNavigationBar: _loading
+          ? null
+          : ProBottomBar(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _working ? null : _doPreview,
+                  icon: const Icon(Icons.visibility_outlined, size: 18),
+                  label: const Text('Preview'),
+                ),
+                FilledButton.icon(
+                  onPressed: _working ? null : _doGenerate,
+                  icon: _working
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation(Colors.white),
+                          ),
+                        )
+                      : const Icon(Icons.description_outlined, size: 18),
+                  label: Text(_working ? 'Working…' : 'Generate'),
+                ),
+              ],
+            ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
+              color: AppColors.primary,
               onRefresh: _load,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                 children: [
-                  Text(widget.customer.customerName,
-                      style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.ink)),
-                  Text(widget.customer.customerCode ?? '',
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.muted)),
+                  // ── Customer ──
+                  GlassCard(
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      children: [
+                        ProAvatar(name: c.customerName, size: 44),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(c.customerName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppText.title),
+                              if ((c.customerCode ?? '').isNotEmpty)
+                                Text(c.customerCode!, style: AppText.caption),
+                            ],
+                          ),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text('${_history.length}',
+                                style: AppText.number.copyWith(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.ink)),
+                            const Text('past notices', style: AppText.caption),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 14),
 
                   // ── Generate ──
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: AppColors.hairline),
-                    ),
+                  GlassCard(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Text('Generate a notice',
-                            style: TextStyle(
-                                fontSize: 13, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 8),
-                        DropdownButtonFormField<int>(
-                          value: _templateId,
-                          isExpanded: true,
-                          decoration:
-                              const InputDecoration(labelText: 'Template'),
-                          items: [
-                            for (final t in _templates)
-                              DropdownMenuItem(
-                                value: t.id,
-                                child: Text(
-                                    '${t.name}${t.language != null ? ' (${t.language})' : ''}',
-                                    overflow: TextOverflow.ellipsis),
-                              ),
-                          ],
-                          onChanged: (v) => setState(() {
-                            _templateId = v;
-                            _preview = null;
-                          }),
+                        const ProSectionHeader(title: 'Generate a notice'),
+                        const SizedBox(height: 12),
+                        ProField(
+                          label: 'Template',
+                          required: true,
+                          child: DropdownButtonFormField<int>(
+                            value: _templateId,
+                            isExpanded: true,
+                            hint: const Text('Choose a template'),
+                            items: [
+                              for (final t in _templates)
+                                DropdownMenuItem(
+                                  value: t.id,
+                                  child: Text(
+                                      '${t.name}${t.language != null ? ' (${t.language})' : ''}',
+                                      overflow: TextOverflow.ellipsis),
+                                ),
+                            ],
+                            onChanged: (v) => setState(() {
+                              _templateId = v;
+                              _preview = null;
+                            }),
+                          ),
                         ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: _working ? null : _doPreview,
-                                child: const Text('Preview'),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: FilledButton(
-                                onPressed: _working ? null : _doGenerate,
-                                child: Text(
-                                    _working ? 'Working…' : 'Generate'),
-                              ),
-                            ),
-                          ],
+                        const SizedBox(height: 12),
+                        const ProNote(
+                          'Preview the notice, then generate it from the bar below.',
+                          tone: ProNoteTone.info,
                         ),
                         if (_preview != null) ...[
-                          const SizedBox(height: 10),
-                          if (_preview!.missingVariables.isNotEmpty)
-                            Text(
+                          if (_preview!.missingVariables.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            ProNote(
                               'Missing: ${_preview!.missingVariables.map((v) => '{{$v}}').join(', ')}',
-                              style: const TextStyle(
-                                  fontSize: 11.5, color: AppColors.warning),
+                              tone: ProNoteTone.warn,
                             ),
+                          ],
+                          const SizedBox(height: 12),
+                          const Text('Preview', style: AppText.label),
                           Container(
                             width: double.infinity,
                             margin: const EdgeInsets.only(top: 6),
-                            padding: const EdgeInsets.all(10),
-                            constraints:
-                                const BoxConstraints(maxHeight: 260),
+                            padding: const EdgeInsets.all(12),
+                            constraints: const BoxConstraints(maxHeight: 260),
                             decoration: BoxDecoration(
                               color: AppColors.surfaceAlt,
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppColors.hairlineSoft),
                             ),
                             child: SingleChildScrollView(
                               child: Text(
@@ -284,7 +352,7 @@ class _CustomerNoticeScreenState extends ConsumerState<CustomerNoticeScreen> {
                                     ? _preview!.text!
                                     : _stripHtml(_preview!.html),
                                 style: const TextStyle(
-                                    fontSize: 12, height: 1.45),
+                                    fontSize: 13, height: 1.5, color: AppColors.inkSoft),
                               ),
                             ),
                           ),
@@ -292,16 +360,16 @@ class _CustomerNoticeScreenState extends ConsumerState<CustomerNoticeScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 22),
 
                   // ── History ──
-                  const Text('Past notices',
-                      style: TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w700)),
+                  ProSectionHeader(
+                      title: 'Past notices · ${_history.length}', small: true),
                   const SizedBox(height: 8),
                   if (_history.isEmpty)
-                    const AppEmptyState(
+                    const ProEmpty(
                       icon: Icons.description_outlined,
+                      title: 'No notices yet',
                       message: 'No notices generated for this customer yet.',
                     ),
                   for (final n in _history) _historyCard(n),
@@ -312,89 +380,92 @@ class _CustomerNoticeScreenState extends ConsumerState<CustomerNoticeScreen> {
   }
 
   Widget _historyCard(GeneratedNoticeSummary n) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.hairline),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(n.referenceNumber,
-                    style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.ink)),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: n.status == 'CANCELLED'
-                      ? AppColors.muted.withValues(alpha: 0.12)
-                      : AppColors.primary.withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(999),
+    final cancelled = n.status == 'CANCELLED';
+    final generated =
+        n.generatedAt == null ? null : DateTime.tryParse(n.generatedAt!);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: GlassCard(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ProIconWell(
+                  icon: Icons.description_outlined,
+                  color: cancelled ? AppColors.muted : AppColors.primary,
                 ),
-                child: Text(n.status,
-                    style: const TextStyle(
-                        fontSize: 10, fontWeight: FontWeight.w700)),
-              ),
-            ],
-          ),
-          Text(n.templateName,
-              style:
-                  const TextStyle(fontSize: 12, color: AppColors.inkSoft)),
-          if (n.deliveries.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Wrap(
-                spacing: 6,
-                children: [
-                  for (final d in n.deliveries.take(3))
-                    Text('${d.channel}: ${d.status}',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
-                          color: d.status == 'FAILED'
-                              ? AppColors.danger
-                              : AppColors.success,
-                        )),
-                ],
-              ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(n.referenceNumber,
+                          style: AppText.number.copyWith(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.ink)),
+                      Text(
+                        generated == null
+                            ? n.templateName
+                            : '${n.templateName} · ${DateFormat('d MMM y').format(generated)}',
+                        style: AppText.caption,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                cancelled
+                    ? ProPill.neutral(_sentence(n.status))
+                    : ProPill.info(_sentence(n.status)),
+              ],
             ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.share_rounded, size: 15),
-                  label: const Text('Share PDF',
-                      style: TextStyle(fontSize: 12)),
-                  onPressed: _working ? null : () => _sharePdf(n),
+            if (n.deliveries.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 10, left: 46),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final d in n.deliveries.take(3))
+                      d.status == 'FAILED'
+                          ? ProPill.bad('${_sentence(d.channel)}: ${_sentence(d.status)}')
+                          : ProPill.ok('${_sentence(d.channel)}: ${_sentence(d.status)}'),
+                  ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton.icon(
-                  icon: const Icon(Icons.send_rounded, size: 15),
-                  label:
-                      const Text('Send', style: TextStyle(fontSize: 12)),
-                  onPressed: _working || n.status == 'CANCELLED'
-                      ? null
-                      : () => _sendSheet(n),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.share_rounded, size: 16),
+                    label: const Text('Share PDF'),
+                    onPressed: _working ? null : () => _sharePdf(n),
+                  ),
                 ),
-              ),
-            ],
-          ),
-        ],
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.send_rounded, size: 16),
+                    label: const Text('Send'),
+                    onPressed: _working || cancelled ? null : () => _sendSheet(n),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  static String _sentence(String raw) {
+    final s = raw.replaceAll('_', ' ').trim().toLowerCase();
+    if (s.isEmpty) return raw;
+    return s[0].toUpperCase() + s.substring(1);
   }
 
   static String _stripHtml(String html) => html

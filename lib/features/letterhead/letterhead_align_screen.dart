@@ -7,6 +7,8 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../../core/download_saver.dart';
+import '../../core/pro_ui.dart';
+import '../../core/theme.dart';
 
 const _a4WidthMm = 210.0;
 const _a4HeightMm = 297.0;
@@ -142,14 +144,54 @@ class _LetterheadAlignScreenState extends State<LetterheadAlignScreen> {
     }
   }
 
-  Widget _stepper(String label, double value, String unit, double step, void Function(_Adj a, double v) set) {
-    return Row(
-      children: [
-        SizedBox(width: 60, child: Text(label)),
-        IconButton(onPressed: () => _change((a) => set(a, value - step)), icon: const Icon(Icons.remove_circle_outline)),
-        Expanded(child: Center(child: Text('${value.toStringAsFixed(1)} $unit'))),
-        IconButton(onPressed: () => _change((a) => set(a, value + step)), icon: const Icon(Icons.add_circle_outline)),
-      ],
+  Widget _stepper(String label, String hint, double value, String unit, double step,
+      void Function(_Adj a, double v) set) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.ink,
+                  ),
+                ),
+                Text(hint, style: AppText.caption),
+              ],
+            ),
+          ),
+          _StepButton(
+            icon: Icons.remove_rounded,
+            tooltip: 'Decrease $label',
+            onTap: () => _change((a) => set(a, value - step)),
+          ),
+          SizedBox(
+            width: 86,
+            child: Center(
+              child: Text(
+                '${value.toStringAsFixed(1)} $unit',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.ink,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ),
+          _StepButton(
+            icon: Icons.add_rounded,
+            tooltip: 'Increase $label',
+            onTap: () => _change((a) => set(a, value + step)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -157,38 +199,118 @@ class _LetterheadAlignScreenState extends State<LetterheadAlignScreen> {
   Widget build(BuildContext context) {
     final hasPdf = _pages.isNotEmpty;
     return Scaffold(
-      appBar: AppBar(title: const Text('Align & export PDF')),
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: 'Align & export PDF',
+        subtitle: 'Letter head · A4 print layout',
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
-          const Text(
+          const ProNote(
             'Upload the PDF with your letter content, adjust its position on an A4 sheet, then export a '
             'print-ready PDF for pre-printed letterhead paper. The letterhead artwork is not included.',
-            style: TextStyle(fontSize: 12.5),
+            tone: ProNoteTone.info,
           ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: _busy ? null : _pick,
-            icon: const Icon(Icons.upload_file_rounded),
-            label: Text(hasPdf ? 'Choose another PDF' : 'Choose PDF'),
-          ),
-          if (_busy) const Padding(padding: EdgeInsets.all(12), child: LinearProgressIndicator()),
-          if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: const TextStyle(color: Colors.red))),
-          if (hasPdf) ...[
-            const SizedBox(height: 12),
-            Text(_fileName, style: const TextStyle(fontWeight: FontWeight.w700)),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+          const SizedBox(height: 14),
+          GlassCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                IconButton(
-                    onPressed: _current > 0 ? () => setState(() => _current--) : null,
-                    icon: const Icon(Icons.chevron_left)),
-                Text('Page ${_current + 1} of ${_pages.length}'),
-                IconButton(
-                    onPressed: _current < _pages.length - 1 ? () => setState(() => _current++) : null,
-                    icon: const Icon(Icons.chevron_right)),
+                Row(
+                  children: [
+                    ProIconWell(
+                      icon: Icons.picture_as_pdf_rounded,
+                      color: hasPdf ? AppColors.danger : AppColors.primary,
+                      size: 40,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            hasPdf ? _fileName : 'No PDF chosen',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.ink,
+                            ),
+                          ),
+                          Text(
+                            hasPdf
+                                ? '${_pages.length} ${_pages.length == 1 ? 'page' : 'pages'}'
+                                : 'Letter content as a PDF',
+                            style: AppText.caption,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (hasPdf)
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _pick,
+                    icon: const Icon(Icons.upload_file_rounded, size: 18),
+                    label: const Text('Choose another PDF'),
+                  )
+                else
+                  FilledButton.icon(
+                    onPressed: _busy ? null : _pick,
+                    icon: const Icon(Icons.upload_file_rounded, size: 18),
+                    label: const Text('Choose PDF'),
+                  ),
+                if (_busy) ...[
+                  const SizedBox(height: 12),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: LinearProgressIndicator(
+                      minHeight: 3,
+                      color: AppColors.primary,
+                      backgroundColor: AppColors.hairlineSoft,
+                    ),
+                  ),
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  ProNote(_error!, tone: ProNoteTone.bad),
+                ],
               ],
             ),
+          ),
+          if (hasPdf) ...[
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                _StepButton(
+                  icon: Icons.chevron_left_rounded,
+                  tooltip: 'Previous page',
+                  onTap: _current > 0 ? () => setState(() => _current--) : null,
+                ),
+                Expanded(
+                  child: Text(
+                    'Page ${_current + 1} of ${_pages.length}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.inkSoft,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+                _StepButton(
+                  icon: Icons.chevron_right_rounded,
+                  tooltip: 'Next page',
+                  onTap: _current < _pages.length - 1 ? () => setState(() => _current++) : null,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
             Center(
               child: AspectRatio(
                 aspectRatio: _a4WidthMm / _a4HeightMm,
@@ -196,7 +318,11 @@ class _LetterheadAlignScreenState extends State<LetterheadAlignScreen> {
                   final (l, t, w, h) = _rect(_current);
                   final sx = c.maxWidth / _a4WidthMm;
                   return Container(
-                    decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.black26)),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border.all(color: AppColors.hairline),
+                      boxShadow: AppShadows.card,
+                    ),
                     child: ClipRect(
                       child: Stack(children: [
                         Positioned(
@@ -212,39 +338,151 @@ class _LetterheadAlignScreenState extends State<LetterheadAlignScreen> {
                 }),
               ),
             ),
-            const SizedBox(height: 8),
-            _stepper('X', _a.x, 'mm', 1, (a, v) => a.x = v),
-            _stepper('Y', _a.y, 'mm', 1, (a, v) => a.y = v),
-            _stepper('Zoom', _a.zoom, '%', 1, (a, v) => a.zoom = v.clamp(50, 150).toDouble()),
-            Row(children: [
-              TextButton(onPressed: () => _change((a) {
-                    a.x = 0;
-                    a.y = 0;
-                    a.zoom = 100;
-                  }), child: const Text('Reset')),
-            ]),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Apply adjustments to all pages'),
-              value: _applyToAll,
-              onChanged: (v) => setState(() => _applyToAll = v),
-            ),
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(value: false, label: Text('Current page')),
-                ButtonSegment(value: true, label: Text('All pages')),
+            const SizedBox(height: 10),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _ValueChip(label: 'X', value: '${_a.x.toStringAsFixed(1)} mm'),
+                _ValueChip(label: 'Y', value: '${_a.y.toStringAsFixed(1)} mm'),
+                _ValueChip(label: 'Zoom', value: '${_a.zoom.toStringAsFixed(1)} %'),
               ],
-              selected: {_allPages},
-              onSelectionChanged: (s) => setState(() => _allPages = s.first),
             ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _busy ? null : _export,
-              icon: const Icon(Icons.picture_as_pdf_rounded),
-              label: const Text('Export A4 PDF'),
+            const SizedBox(height: 14),
+            GlassCard(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ProSectionHeader(
+                    title: 'Position',
+                    actionLabel: 'Reset',
+                    onAction: () => _change((a) {
+                      a.x = 0;
+                      a.y = 0;
+                      a.zoom = 100;
+                    }),
+                  ),
+                  _stepper('X', 'Left / right offset', _a.x, 'mm', 1, (a, v) => a.x = v),
+                  const Divider(height: 1),
+                  _stepper('Y', 'Up / down offset', _a.y, 'mm', 1, (a, v) => a.y = v),
+                  const Divider(height: 1),
+                  _stepper('Zoom', 'Scale 50 – 150%', _a.zoom, '%', 1,
+                      (a, v) => a.zoom = v.clamp(50, 150).toDouble()),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            GlassCard(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text(
+                      'Apply adjustments to all pages',
+                      style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w500),
+                    ),
+                    value: _applyToAll,
+                    onChanged: (v) => setState(() => _applyToAll = v),
+                  ),
+                  const SizedBox(height: 6),
+                  ProField(
+                    label: 'Export',
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment(value: false, label: Text('Current page')),
+                          ButtonSegment(value: true, label: Text('All pages')),
+                        ],
+                        selected: {_allPages},
+                        onSelectionChanged: (s) => setState(() => _allPages = s.first),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ],
+      ),
+      bottomNavigationBar: hasPdf
+          ? ProBottomBar(
+              children: [
+                FilledButton.icon(
+                  onPressed: _busy ? null : _export,
+                  icon: const Icon(Icons.picture_as_pdf_rounded),
+                  label: const Text('Export A4 PDF'),
+                ),
+              ],
+            )
+          : null,
+    );
+  }
+}
+
+/// 40px round-cornered stepper / pager button.
+class _StepButton extends StatelessWidget {
+  const _StepButton({required this.icon, required this.tooltip, required this.onTap});
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: AppColors.hairline),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Icon(icon, size: 20, color: enabled ? AppColors.ink : AppColors.faint),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ValueChip extends StatelessWidget {
+  const _ValueChip({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: Text.rich(
+        TextSpan(children: [
+          TextSpan(
+            text: '$label  ',
+            style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.muted),
+          ),
+          TextSpan(text: value),
+        ]),
+        style: const TextStyle(
+          fontSize: 12.5,
+          color: AppColors.ink,
+          fontFeatures: [FontFeature.tabularFigures()],
+        ),
       ),
     );
   }

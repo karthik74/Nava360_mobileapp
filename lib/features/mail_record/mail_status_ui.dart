@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import 'mail_models.dart';
 
@@ -60,3 +61,14 @@ const IconData mailShipmentIcon = Icons.local_shipping_rounded;
 
 /// Icon for a complaint's list-card thumbnail.
 const IconData mailComplaintIcon = Icons.report_problem_rounded;
+
+/// [ProPill] in the tone family of a [StatusTone] colour (ok / warn / bad /
+/// info / neutral), so mail statuses read the same everywhere.
+ProPill mailTonePill(StatusTone tone) {
+  final c = tone.color;
+  if (c == AppColors.success) return ProPill.ok(tone.label);
+  if (c == AppColors.danger) return ProPill.bad(tone.label);
+  if (c == AppColors.warning) return ProPill.warn(tone.label);
+  if (c == AppColors.info) return ProPill.info(tone.label);
+  return ProPill.neutral(tone.label);
+}

@@ -1,11 +1,13 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../auth/auth_controller.dart';
 import 'chat_controller.dart';
 import 'chat_models.dart';
 import 'chat_repository.dart';
@@ -100,7 +102,6 @@ class _ForwardMessageScreenState extends ConsumerState<ForwardMessageScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final mq = MediaQuery.of(context);
     final convs = ref.watch(conversationsProvider).valueOrNull ?? const [];
     final q = _query.toLowerCase();
     final chats = convs
@@ -114,257 +115,182 @@ class _ForwardMessageScreenState extends ConsumerState<ForwardMessageScreen> {
     final contacts = q.length >= 2
         ? ref.watch(contactsSearchProvider(_query))
         : const AsyncValue<List<ChatContact>>.data([]);
+    final myId = ref.watch(authUserProvider)?.employeeId;
+    final msg = widget.message;
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: PreferredSize(
-          preferredSize:
-              Size.fromHeight(mq.padding.top + AppChrome.appBarHeight),
-          child: ClipRect(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: GlassBlur.chrome,
-                sigmaY: GlassBlur.chrome,
-              ),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.62),
-                  border: Border(
-                    bottom: BorderSide(color: Colors.white.withOpacity(0.5)),
-                  ),
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: 'Forward to…',
+        subtitle: 'Pick the chats that should get this message',
+      ),
+      body: ListView(
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        children: [
+          // ── The message being forwarded ────────────────────────────────
+          GlassCard(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ProIconWell(
+                  icon: Icons.forward_rounded,
+                  color: AppColors.primary,
                 ),
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                          onPressed: () => Navigator.pop(context),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${msg.senderId == myId ? 'You' : msg.senderName}'
+                        ' · ${DateFormat('h:mm a').format(msg.createdAt)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        msg.previewText,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          height: 1.4,
                           color: AppColors.inkSoft,
                         ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Text(
-                                'Forward to…',
-                                style: TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800,
-                                  color: AppColors.ink,
-                                  letterSpacing: -0.2,
-                                ),
-                              ),
-                              Text(
-                                widget.message.previewText,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 11.5,
-                                  color: AppColors.muted,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
+              ],
             ),
           ),
-        ),
-        body: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                  child: Container(
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.50),
-                      borderRadius: BorderRadius.circular(AppRadii.md),
-                      border: Border.all(color: Colors.white.withOpacity(0.6)),
-                    ),
-                    child: Row(
-                      children: [
-                        const SizedBox(width: 12),
-                        const Icon(Icons.search_rounded,
-                            size: 18, color: AppColors.muted),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _searchCtrl,
-                            onChanged: _onSearchChanged,
-                            autofocus: true,
-                            cursorColor: AppColors.primary,
-                            cursorWidth: 1.5,
-                            style: const TextStyle(
-                              fontSize: 13.5,
-                              color: AppColors.ink,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            decoration: const InputDecoration(
-                              isCollapsed: true,
-                              contentPadding:
-                                  EdgeInsets.symmetric(vertical: 13),
-                              border: InputBorder.none,
-                              hintText: 'Search chats or colleagues…',
-                              hintStyle: TextStyle(
-                                color: AppColors.muted,
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ),
-                        if (_searchCtrl.text.isNotEmpty)
-                          IconButton(
-                            icon: const Icon(Icons.close_rounded,
-                                size: 16, color: AppColors.muted),
-                            onPressed: () {
-                              _searchCtrl.clear();
-                              setState(() => _query = '');
-                            },
-                          )
-                        else
-                          const SizedBox(width: 8),
-                      ],
-                    ),
-                  ),
-                ),
+          const SizedBox(height: 14),
+          ProSearchField(
+            controller: _searchCtrl,
+            onChanged: _onSearchChanged,
+            autofocus: true,
+            hint: 'Search chats or colleagues…',
+            onClear: () => setState(() => _query = ''),
+          ),
+          if (chats.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const ProSectionHeader(
+              title: 'Chats',
+              small: true,
+              trailing: Text(
+                'Up to $_kMaxForwardTargets at once',
+                style: AppText.caption,
               ),
             ),
-            Expanded(
-              child: ListView(
-                padding: EdgeInsets.fromLTRB(
-                    12, 6, 12, mq.padding.bottom + 90),
-                children: [
-                  if (chats.isNotEmpty) ...[
-                    const AppSectionHeader(title: 'Chats'),
-                    const SizedBox(height: 6),
-                    for (final c in chats)
-                      _TargetTile(
-                        title: c.title,
-                        subtitle: c.isGroup
-                            ? 'Group · ${c.members.length} members'
-                            : (c.members
-                                    .where((m) =>
-                                        m.employeeId == c.otherEmployeeId)
-                                    .firstOrNull
-                                    ?.designation ??
-                                ''),
-                        isGroup: c.isGroup,
-                        imageUrl: c.otherAvatarUrl,
-                        selected: _convIds.contains(c.id),
-                        onTap: () => _toggleConv(c.id),
-                      ),
-                  ],
-                  contacts.when(
-                    data: (list) {
-                      final people = list
-                          .where((p) => !dmEmployeeIds.contains(p.employeeId))
-                          .toList();
-                      if (people.isEmpty) {
-                        if (chats.isEmpty) {
-                          return Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: AppEmptyState(
-                              icon: Icons.forward_to_inbox_rounded,
-                              message: q.length < 2
-                                  ? 'No chats yet — type a name to find a colleague'
-                                  : 'Nothing matches "$_query"',
-                            ),
-                          );
-                        }
-                        return const SizedBox.shrink();
-                      }
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(height: 10),
-                          const AppSectionHeader(title: 'Colleagues'),
-                          const SizedBox(height: 6),
-                          for (final p in people)
-                            _TargetTile(
-                              title: p.name,
-                              subtitle: p.designation ?? '',
-                              imageUrl: p.avatarUrl,
-                              selected: _empIds.contains(p.employeeId),
-                              onTap: () => _toggleEmp(p.employeeId),
-                            ),
-                        ],
-                      );
-                    },
-                    loading: () => const Padding(
-                      padding: EdgeInsets.all(20),
-                      child: AppLoadingBlock(height: 60),
-                    ),
-                    error: (_, __) => const SizedBox.shrink(),
+            const SizedBox(height: 10),
+            ProListGroup(
+              dividerIndent: 66,
+              children: [
+                for (final c in chats)
+                  _TargetTile(
+                    title: c.title,
+                    subtitle: c.isGroup
+                        ? 'Group · ${c.members.length} members'
+                        : (c.members
+                                .where((m) =>
+                                    m.employeeId == c.otherEmployeeId)
+                                .firstOrNull
+                                ?.designation ??
+                            ''),
+                    isGroup: c.isGroup,
+                    imageUrl: c.otherAvatarUrl,
+                    selected: _convIds.contains(c.id),
+                    onTap: () => _toggleConv(c.id),
                   ),
-                ],
-              ),
+              ],
             ),
           ],
-        ),
-        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-        floatingActionButton: _total == 0
-            ? null
-            : Padding(
-                padding: EdgeInsets.only(bottom: mq.padding.bottom + 8),
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: AppColors.heroGradient,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: AppShadows.lifted,
-                  ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(20),
-                      onTap: _sending ? null : _send,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 11),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (_sending)
-                              const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white),
-                              )
-                            else
-                              const Icon(Icons.send_rounded,
-                                  color: Colors.white, size: 16),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Forward ($_total)',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+          contacts.when(
+            data: (list) {
+              final people = list
+                  .where((p) => !dmEmployeeIds.contains(p.employeeId))
+                  .toList();
+              if (people.isEmpty) {
+                if (chats.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 16),
+                    child: ProEmpty(
+                      icon: Icons.forward_to_inbox_rounded,
+                      title: q.length < 2
+                          ? 'No chats yet — type a name to find a colleague'
+                          : 'Nothing matches "$_query"',
                     ),
+                  );
+                }
+                return const SizedBox.shrink();
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 16),
+                  const ProSectionHeader(title: 'Colleagues', small: true),
+                  const SizedBox(height: 10),
+                  ProListGroup(
+                    dividerIndent: 66,
+                    children: [
+                      for (final p in people)
+                        _TargetTile(
+                          title: p.name,
+                          subtitle: p.designation ?? '',
+                          imageUrl: p.avatarUrl,
+                          selected: _empIds.contains(p.employeeId),
+                          onTap: () => _toggleEmp(p.employeeId),
+                        ),
+                    ],
                   ),
+                ],
+              );
+            },
+            loading: () => const Padding(
+              padding: EdgeInsets.only(top: 16),
+              child: AppLoadingBlock(height: 60),
+            ),
+            error: (_, __) => const SizedBox.shrink(),
+          ),
+        ],
+      ),
+      // Send bar appears once something is ticked (was a floating button).
+      bottomNavigationBar: _total == 0
+          ? null
+          : ProBottomBar(
+              top: Text(
+                '$_total of $_kMaxForwardTargets selected',
+                style: AppText.caption.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.inkSoft,
                 ),
               ),
-      ),
+              children: [
+                FilledButton.icon(
+                  onPressed: _sending ? null : _send,
+                  icon: _sending
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.send_rounded, size: 18),
+                  label: Text('Forward ($_total)'),
+                ),
+              ],
+            ),
     );
   }
 }
@@ -387,58 +313,55 @@ class _TargetTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: GlassCard(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        shadow: const [],
-        border: selected
-            ? Border.all(color: AppColors.primary.withOpacity(0.5))
-            : null,
-        child: ListTile(
-          contentPadding: EdgeInsets.zero,
-          onTap: onTap,
-          leading: isGroup
-              ? Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    gradient: AppColors.heroGradient,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(Icons.group_rounded,
-                      color: Colors.white, size: 20),
-                )
-              : UserAvatar(
-                  name: title, size: 40, radius: 20, imageUrl: imageUrl),
-          title: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w700,
-              color: AppColors.ink,
+    final url = imageUrl;
+    return ProListRow(
+      onTap: onTap,
+      chevron: false,
+      leading: isGroup
+          ? ProIconWell(
+              icon: Icons.group_rounded,
+              color: AppColors.primary,
+              size: 42,
+            )
+          : SizedBox(
+              width: 42,
+              height: 42,
+              child: Stack(
+                children: [
+                  ProAvatar(name: title),
+                  if (url != null && url.isNotEmpty)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(42 * 0.31),
+                      child: Image.network(
+                        url,
+                        width: 42,
+                        height: 42,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        loadingBuilder: (_, child, progress) =>
+                            progress == null ? child : const SizedBox.shrink(),
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
-          subtitle: subtitle.isEmpty
-              ? null
-              : Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11, color: AppColors.muted),
-                ),
-          trailing: Icon(
-            selected
-                ? Icons.check_circle_rounded
-                : Icons.radio_button_unchecked_rounded,
-            color: selected ? AppColors.primary : AppColors.muted,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.lg),
+      title: title,
+      subtitle: subtitle.isEmpty ? null : subtitle,
+      trailing: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 24,
+        height: 24,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: selected ? AppColors.primary : AppColors.surface,
+          border: Border.all(
+            color: selected ? AppColors.primary : const Color(0xFFC6D3D6),
+            width: 1.5,
           ),
         ),
+        child: selected
+            ? const Icon(Icons.check_rounded, size: 15, color: Colors.white)
+            : null,
       ),
     );
   }

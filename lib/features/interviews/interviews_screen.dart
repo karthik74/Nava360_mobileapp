@@ -2,79 +2,177 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'interview_models.dart';
 import 'interview_repository.dart';
 
+const _amber = Color(0xFFF2B347);
+const _red = Color(0xFFE5484D);
+
+/// Decided bucket used by the hero filters (presentation only).
+bool _isSelected(Interview i) => !i.isPending && i.statusTone.color == AppColors.success;
+bool _isRejected(Interview i) => !i.isPending && i.statusTone.color == AppColors.danger;
+
+String _when(Interview i) =>
+    i.interviewAt == null ? '' : DateFormat('EEE, d MMM yyyy · h:mm a').format(i.interviewAt!.toLocal());
+
+String _roleLine(Interview item) => <String>[
+      if (item.designation != null && item.designation!.isNotEmpty) item.designation!,
+      if (item.department != null && item.department!.isNotEmpty) item.department!,
+    ].join(' · ');
+
+ProPill _pill(StatusTone tone) => ProPill(tone.label, color: tone.color);
+
 /// "My interviews" — candidates the signed-in user is assigned to interview.
 /// Reachable only by users with the INTERVIEW_VIEW permission (gated at the
 /// entry point in the profile screen).
-class InterviewsScreen extends ConsumerWidget {
+class InterviewsScreen extends ConsumerStatefulWidget {
   const InterviewsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<InterviewsScreen> createState() => _InterviewsScreenState();
+}
+
+class _InterviewsScreenState extends ConsumerState<InterviewsScreen> {
+  /// -1 = all, 0 = awaiting, 1 = selected, 2 = rejected.
+  int _f = -1;
+
+  void _toggle(int i) => setState(() => _f = _f == i ? -1 : i);
+
+  @override
+  Widget build(BuildContext context) {
     final async = ref.watch(myInterviewsProvider);
+    final items = async.valueOrNull;
+    final all = items ?? const <Interview>[];
+    final pending = all.where((i) => i.isPending).toList();
+    final decided = all.where((i) => !i.isPending).toList();
+    final selected = all.where(_isSelected).length;
+    final rejected = all.where(_isRejected).length;
+
+    final shownPending = _f == -1 || _f == 0 ? pending : const <Interview>[];
+    final shownDecided = switch (_f) {
+      -1 => decided,
+      1 => decided.where(_isSelected).toList(),
+      2 => decided.where(_isRejected).toList(),
+      _ => const <Interview>[],
+    };
+
+    final children = <Widget>[
+      ...async.when<List<Widget>>(
+        loading: () => const [AppLoadingBlock(height: 150), AppLoadingBlock(height: 150)],
+        error: (e, _) => [
+          AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(myInterviewsProvider),
+          ),
+        ],
+        data: (items) {
+          if (items.isEmpty) {
+            return const [
+              ProEmpty(
+                icon: Icons.event_note_outlined,
+                title: 'No interviews yet',
+                message: 'No interviews assigned to you yet.',
+              ),
+            ];
+          }
+          return [
+            if (shownPending.isNotEmpty) ...[
+              ProSectionHeader(
+                title: 'Awaiting your decision · ${shownPending.length}',
+                small: true,
+              ),
+              const ProSwipeHint(text: 'Swipe right to select, left to reject'),
+              for (final i in shownPending) _InterviewCard(key: ValueKey('p${i.id}'), item: i),
+            ],
+            if (shownDecided.isNotEmpty) ...[
+              ProSectionHeader(title: 'Decided · ${shownDecided.length}', small: true),
+              ProListGroup(
+                children: [
+                  for (final i in shownDecided)
+                    ProListRow(
+                      leading: ProAvatar(name: i.fullName, size: 40),
+                      title: i.fullName,
+                      subtitle: <String>[
+                        if (_roleLine(i).isNotEmpty) _roleLine(i),
+                        if (i.requisitionTitle != null && i.requisitionTitle!.isNotEmpty)
+                          i.requisitionTitle!,
+                      ].join(' · '),
+                      meta: <String>[
+                        if (i.interviewAt != null) _when(i),
+                        if (i.phone != null && i.phone!.isNotEmpty) i.phone!,
+                      ].join(' · '),
+                      pill: _pill(i.statusTone),
+                    ),
+                ],
+              ),
+            ],
+            if (shownPending.isEmpty && shownDecided.isEmpty)
+              ProEmpty(
+                icon: Icons.event_note_outlined,
+                title: 'Nothing here',
+                message: 'No candidates in this view.',
+                action: OutlinedButton(
+                  onPressed: () => setState(() => _f = -1),
+                  child: const Text('Show all'),
+                ),
+              ),
+          ];
+        },
+      ),
+    ];
 
     return Scaffold(
-      appBar: AppBar(title: const Text('My interviews')),
-      body: GlassBackdrop(
-        child: SafeArea(
-          child: RefreshIndicator(
-            color: AppColors.primary,
-            onRefresh: () async => ref.invalidate(myInterviewsProvider),
-            child: async.when(
-              loading: () => ListView(
-                children: const [
-                  SizedBox(height: 120),
-                  Center(child: CircularProgressIndicator()),
-                ],
+      appBar: AppBar(title: const Text('Interviews')),
+      body: ProPage(
+        onRefresh: () async => ref.invalidate(myInterviewsProvider),
+        hero: ProHero(
+          title: 'My interviews',
+          subtitle: 'Candidates you are assigned to interview',
+          children: [
+            if (items != null)
+              ProLiveLine(
+                text: pending.isEmpty
+                    ? 'All caught up · no decisions pending'
+                    : '${pending.length} ${pending.length == 1 ? 'candidate' : 'candidates'} awaiting your decision',
+                color: pending.isEmpty ? AppColors.live : _amber,
               ),
-              error: (e, _) => ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                children: [
-                  const SizedBox(height: 8),
-                  AppErrorPanel(
-                    message: e.toString(),
-                    onRetry: () => ref.invalidate(myInterviewsProvider),
-                  ),
-                ],
+            ProHeroStats(stats: [
+              ProStat(
+                label: 'Awaiting',
+                value: items == null ? '—' : '${pending.length}',
+                dot: _amber,
+                selected: _f == 0,
+                onTap: items == null ? null : () => _toggle(0),
               ),
-              data: (items) {
-                if (items.isEmpty) {
-                  return ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(16),
-                    children: const [
-                      SizedBox(height: 60),
-                      AppEmptyState(
-                        icon: Icons.event_note_outlined,
-                        message: 'No interviews assigned to you yet.',
-                      ),
-                    ],
-                  );
-                }
-                return ListView.separated(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                  itemCount: items.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (_, i) => _InterviewCard(item: items[i]),
-                );
-              },
-            ),
-          ),
+              ProStat(
+                label: 'Selected',
+                value: items == null ? '—' : '$selected',
+                dot: AppColors.live,
+                selected: _f == 1,
+                onTap: items == null ? null : () => _toggle(1),
+              ),
+              ProStat(
+                label: 'Rejected',
+                value: items == null ? '—' : '$rejected',
+                dot: _red,
+                selected: _f == 2,
+                onTap: items == null ? null : () => _toggle(2),
+              ),
+            ]),
+          ],
         ),
+        children: children,
       ),
     );
   }
 }
 
 class _InterviewCard extends ConsumerStatefulWidget {
-  const _InterviewCard({required this.item});
+  const _InterviewCard({super.key, required this.item});
   final Interview item;
 
   @override
@@ -119,46 +217,109 @@ class _InterviewCardState extends ConsumerState<_InterviewCard> {
   Future<String?> _askNote(BuildContext context, String outcome) {
     final controller = TextEditingController();
     final isSelect = outcome == 'SELECTED';
-    return showDialog<String>(
+    return showModalBottomSheet<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(isSelect ? 'Select candidate?' : 'Reject candidate?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              isSelect
-                  ? 'Mark ${widget.item.fullName} as selected.'
-                  : 'Mark ${widget.item.fullName} as rejected.',
-              style: const TextStyle(fontSize: 13, color: AppColors.inkSoft),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              minLines: 2,
-              maxLines: 4,
-              textCapitalization: TextCapitalization.words,
-              inputFormatters: const [TitleCaseTextFormatter()],
-              decoration: const InputDecoration(
-                labelText: 'Feedback (optional)',
-                alignLabelWithHint: true,
+      isScrollControlled: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFC6D3D6),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        ProIconWell(
+                          icon: isSelect ? Icons.check_rounded : Icons.close_rounded,
+                          color: isSelect ? AppColors.success : AppColors.danger,
+                          size: 44,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                isSelect ? 'Select candidate?' : 'Reject candidate?',
+                                style: const TextStyle(
+                                  fontSize: 19,
+                                  height: 1.3,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.35,
+                                  color: AppColors.ink,
+                                ),
+                              ),
+                              Text(
+                                isSelect
+                                    ? 'Mark ${widget.item.fullName} as selected.'
+                                    : 'Mark ${widget.item.fullName} as rejected.',
+                                style: const TextStyle(
+                                    fontSize: 13.5, height: 1.4, color: AppColors.muted),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    ProField(
+                      label: 'Feedback (optional)',
+                      child: TextField(
+                        controller: controller,
+                        minLines: 3,
+                        maxLines: 4,
+                        textCapitalization: TextCapitalization.words,
+                        inputFormatters: const [TitleCaseTextFormatter()],
+                        decoration: const InputDecoration(
+                          hintText: 'What stood out in the interview?',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              ProBottomBar(
+                children: [
+                  OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    style: isSelect
+                        ? null
+                        : FilledButton.styleFrom(
+                            backgroundColor: AppColors.dangerTint,
+                            foregroundColor: AppColors.danger,
+                          ),
+                    onPressed: () => Navigator.pop(ctx, controller.text),
+                    child: Text(isSelect ? 'Select' : 'Reject'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: isSelect ? AppColors.success : AppColors.danger,
-            ),
-            onPressed: () => Navigator.pop(ctx, controller.text),
-            child: Text(isSelect ? 'Select' : 'Reject'),
-          ),
-        ],
       ),
     );
   }
@@ -166,22 +327,15 @@ class _InterviewCardState extends ConsumerState<_InterviewCard> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    final tone = item.statusTone;
-    final meta = <String>[
-      if (item.designation != null && item.designation!.isNotEmpty)
-        item.designation!,
-      if (item.department != null && item.department!.isNotEmpty)
-        item.department!,
-    ].join(' · ');
+    final meta = _roleLine(item);
 
-    return GlassCard(
+    final card = GlassCard(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              UserAvatar(name: item.fullName, size: 40, radius: 12),
+              ProAvatar(name: item.fullName, size: 42),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -189,49 +343,50 @@ class _InterviewCardState extends ConsumerState<_InterviewCard> {
                   children: [
                     Text(
                       item.fullName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.2,
                         color: AppColors.ink,
                       ),
                     ),
-                    if (meta.isNotEmpty) ...[
-                      const SizedBox(height: 2),
+                    if (meta.isNotEmpty)
                       Text(
                         meta,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.muted,
-                          fontWeight: FontWeight.w500,
-                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.caption,
                       ),
-                    ],
                   ],
                 ),
               ),
               const SizedBox(width: 8),
-              StatusPill(label: tone.label, color: tone.color),
+              _pill(item.statusTone),
             ],
           ),
-          if (item.requisitionTitle != null &&
-              item.requisitionTitle!.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            _MetaRow(
-              icon: Icons.work_outline_rounded,
-              text: item.requisitionTitle!,
+          if ((item.requisitionTitle?.isNotEmpty ?? false) ||
+              item.interviewAt != null ||
+              (item.phone?.isNotEmpty ?? false)) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceAlt,
+                borderRadius: BorderRadius.circular(AppRadii.md),
+              ),
+              child: Column(
+                children: [
+                  if (item.requisitionTitle != null && item.requisitionTitle!.isNotEmpty)
+                    _MetaRow(icon: Icons.work_outline_rounded, text: item.requisitionTitle!),
+                  if (item.interviewAt != null)
+                    _MetaRow(icon: Icons.event_outlined, text: _when(item)),
+                  if (item.phone != null && item.phone!.isNotEmpty)
+                    _MetaRow(icon: Icons.call_outlined, text: item.phone!),
+                ],
+              ),
             ),
-          ],
-          if (item.interviewAt != null) ...[
-            const SizedBox(height: 6),
-            _MetaRow(
-              icon: Icons.event_outlined,
-              text: DateFormat('EEE, d MMM yyyy · h:mm a')
-                  .format(item.interviewAt!.toLocal()),
-            ),
-          ],
-          if (item.phone != null && item.phone!.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            _MetaRow(icon: Icons.call_outlined, text: item.phone!),
           ],
           if (item.isPending) ...[
             const SizedBox(height: 14),
@@ -250,15 +405,14 @@ class _InterviewCardState extends ConsumerState<_InterviewCard> {
               Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton.icon(
+                    child: FilledButton.icon(
                       onPressed: () => _decide('REJECTED'),
-                      icon: const Icon(Icons.close_rounded,
-                          size: 18, color: AppColors.danger),
-                      label: const Text('Reject',
-                          style: TextStyle(color: AppColors.danger)),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: AppColors.danger),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.dangerTint,
+                        foregroundColor: AppColors.danger,
                       ),
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                      label: const Text('Reject'),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -267,15 +421,23 @@ class _InterviewCardState extends ConsumerState<_InterviewCard> {
                       onPressed: () => _decide('SELECTED'),
                       icon: const Icon(Icons.check_rounded, size: 18),
                       label: const Text('Select'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.success,
-                      ),
                     ),
                   ),
                 ],
               ),
           ],
         ],
+      ),
+    );
+
+    if (!item.isPending || _busy) return card;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: ProSwipeDecision(
+        approveLabel: 'Select',
+        onApprove: () => _decide('SELECTED'),
+        onReject: () => _decide('REJECTED'),
+        child: card,
       ),
     );
   }
@@ -288,21 +450,25 @@ class _MetaRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 14, color: AppColors.muted),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            text,
-            style: const TextStyle(
-              fontSize: 12.5,
-              color: AppColors.inkSoft,
-              fontWeight: FontWeight.w500,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: AppColors.muted),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppColors.inkSoft,
+                fontWeight: FontWeight.w500,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

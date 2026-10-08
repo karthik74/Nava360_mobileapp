@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../../core/pro_ui.dart';
 import '../../../core/theme.dart';
 import '../task_models.dart';
 
@@ -343,14 +344,18 @@ class _VideoQaRecorderScreenState extends State<VideoQaRecorderScreen>
         if (!didPop) _confirmLeave();
       },
       child: Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor: AppColors.deep,
         appBar: AppBar(
-          backgroundColor: Colors.black,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          title: Text(widget.title, style: const TextStyle(fontSize: 16)),
+          title: Text(
+            widget.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
           leading: IconButton(
-            icon: const Icon(Icons.close),
+            tooltip: 'Close',
+            color: Colors.white,
+            icon: const Icon(Icons.close_rounded),
             onPressed: _recording ? _confirmLeave : () => Navigator.of(context).pop(),
           ),
         ),
@@ -373,6 +378,7 @@ class _VideoQaRecorderScreenState extends State<VideoQaRecorderScreen>
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
             child: const Text('Discard'),
           ),
         ],
@@ -391,17 +397,27 @@ class _VideoQaRecorderScreenState extends State<VideoQaRecorderScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.videocam_off_outlined, color: Colors.white54, size: 48),
-            const SizedBox(height: 12),
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+              ),
+              child: const Icon(Icons.videocam_off_outlined,
+                  color: Colors.white70, size: 28),
+            ),
+            const SizedBox(height: 14),
             Text(
               _initError!,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white70),
+              style: const TextStyle(color: Colors.white70, fontSize: 14.5, height: 1.45),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
             OutlinedButton(
               onPressed: openAppSettings,
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+              style: _onDarkOutline,
               child: const Text('Open settings'),
             ),
           ],
@@ -433,30 +449,37 @@ class _VideoQaRecorderScreenState extends State<VideoQaRecorderScreen>
     );
   }
 
+  /// Outlined button that reads on the deep surface (the global theme fills
+  /// outlined buttons white).
+  static final ButtonStyle _onDarkOutline = OutlinedButton.styleFrom(
+    foregroundColor: Colors.white,
+    backgroundColor: Colors.white.withValues(alpha: 0.08),
+    disabledForegroundColor: Colors.white38,
+    side: BorderSide(color: Colors.white.withValues(alpha: 0.22)),
+  );
+
   Widget _recordingBadge() => Positioned(
         top: 12,
         right: 12,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          padding: const EdgeInsets.fromLTRB(6, 4, 12, 4),
           decoration: BoxDecoration(
             color: Colors.black54,
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(999),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  color: AppColors.danger,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 6),
+              const ProPulseDot(color: Color(0xFFE5484D), size: 7),
+              const SizedBox(width: 4),
               Text(
                 'Question ${_index + 1} of ${_questions.length}',
-                style: const TextStyle(color: Colors.white, fontSize: 12),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
               ),
             ],
           ),
@@ -466,8 +489,8 @@ class _VideoQaRecorderScreenState extends State<VideoQaRecorderScreen>
   Widget _prompt() {
     return Container(
       width: double.infinity,
-      color: Colors.black,
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+      color: AppColors.deep,
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
       child: _recording ? _askingPanel() : _readyPanel(),
     );
   }
@@ -480,19 +503,24 @@ class _VideoQaRecorderScreenState extends State<VideoQaRecorderScreen>
         Text(
           '${_questions.length} question${_questions.length == 1 ? '' : 's'}, '
           '${widget.config.secondsPerQuestion}s to answer each',
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.2,
+          ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 4),
         const Text(
           'Recording runs straight through. Answer each question as it appears.',
-          style: TextStyle(color: Colors.white60, fontSize: 12.5),
+          style: TextStyle(color: Colors.white70, fontSize: 13.5, height: 1.4),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
             onPressed: _start,
-            icon: const Icon(Icons.fiber_manual_record, size: 18),
+            icon: const Icon(Icons.fiber_manual_record_rounded, size: 18),
             label: const Text('Start recording'),
             style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
           ),
@@ -508,19 +536,24 @@ class _VideoQaRecorderScreenState extends State<VideoQaRecorderScreen>
       children: [
         Text(
           _speaking ? 'Listen…' : 'Your answer',
-          style: const TextStyle(color: Colors.white54, fontSize: 12),
+          style: const TextStyle(
+            color: Colors.white60,
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         const SizedBox(height: 6),
         Text(
           _questions[_index].text,
           style: const TextStyle(
             color: Colors.white,
-            fontSize: 17,
+            fontSize: 18,
             height: 1.35,
             fontWeight: FontWeight.w600,
+            letterSpacing: -0.3,
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         AnimatedBuilder(
           animation: _countdown,
           builder: (_, __) {
@@ -535,9 +568,9 @@ class _VideoQaRecorderScreenState extends State<VideoQaRecorderScreen>
                     child: LinearProgressIndicator(
                       value: _speaking ? 0 : 1 - _countdown.value,
                       minHeight: 6,
-                      backgroundColor: Colors.white24,
+                      backgroundColor: Colors.white.withValues(alpha: 0.14),
                       valueColor: AlwaysStoppedAnimation(
-                        _speaking ? Colors.white38 : AppColors.accent,
+                        _speaking ? Colors.white38 : AppColors.live,
                       ),
                     ),
                   ),
@@ -548,20 +581,25 @@ class _VideoQaRecorderScreenState extends State<VideoQaRecorderScreen>
                   child: Text(
                     '${left}s',
                     textAlign: TextAlign.right,
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
                   ),
                 ),
               ],
             );
           },
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         Row(
           children: [
             Expanded(
               child: OutlinedButton(
                 onPressed: _finishing ? null : _nextQuestion,
-                style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+                style: _onDarkOutline,
                 child: Text(
                   _index < _questions.length - 1 ? 'Next question' : 'Finish',
                 ),

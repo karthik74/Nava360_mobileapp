@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme.dart';
+import '../../core/pro_ui.dart';
 import '../../core/widgets.dart';
 import 'mail_list_screen.dart' show mailBranchesProvider;
 import 'mail_models.dart';
@@ -72,127 +73,141 @@ class _MailComplaintFormScreenState extends ConsumerState<MailComplaintFormScree
   @override
   Widget build(BuildContext context) {
     final defaultsAsync = ref.watch(_complaintFormDefaultsProvider);
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Raise Complaint'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        body: defaultsAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => Center(
+    final d0 = defaultsAsync.valueOrNull;
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: 'Raise complaint',
+        subtitle: 'Mail record · complaints',
+      ),
+      bottomNavigationBar: d0 == null
+          ? null
+          : ProBottomBar(
+              children: [
+                FilledButton(
+                  onPressed: _saving ? null : () => _save(d0),
+                  child: Text(_saving ? 'Submitting…' : 'Raise complaint'),
+                ),
+              ],
+            ),
+      body: defaultsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
             child: AppErrorPanel(message: '$e', onRetry: () => ref.invalidate(_complaintFormDefaultsProvider)),
           ),
-          data: (d) {
-            if (!_departmentSeeded) {
-              _department = d.department;
-              _departmentSeeded = true;
-            }
-            return ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    border: Border.all(color: AppColors.hairline),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Raising as ${d.raisedByName ?? 'you'}'
-                        '${d.employeeCode != null ? ' (${d.employeeCode})' : ''}'
-                        '${d.phone != null ? ' · ${d.phone}' : ''}',
-                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.ink),
+        ),
+        data: (d) {
+          if (!_departmentSeeded) {
+            _department = d.department;
+            _departmentSeeded = true;
+          }
+          final place = [d.branchLabel, d.areaName, d.divisionName, d.regionName, d.stateName]
+              .whereType<String>()
+              .where((s) => s.isNotEmpty)
+              .join(' › ');
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            children: [
+              GlassCard(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    ProAvatar(name: d.raisedByName ?? 'You', size: 42),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Raising as ${d.raisedByName ?? 'you'}'
+                            '${d.employeeCode != null ? ' (${d.employeeCode})' : ''}'
+                            '${d.phone != null ? ' · ${d.phone}' : ''}',
+                            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w500, color: AppColors.ink),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(place.isEmpty ? 'No branch on your profile' : place, style: AppText.caption),
+                        ],
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        [d.branchLabel, d.areaName, d.divisionName, d.regionName, d.stateName]
-                                .whereType<String>()
-                                .where((s) => s.isNotEmpty)
-                                .join(' › ')
-                                .isEmpty
-                            ? 'No branch on your profile'
-                            : [d.branchLabel, d.areaName, d.divisionName, d.regionName, d.stateName]
-                                .whereType<String>()
-                                .where((s) => s.isNotEmpty)
-                                .join(' › '),
-                        style: const TextStyle(fontSize: 12, color: AppColors.inkSoft),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              GlassCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const ProSectionHeader(title: 'Complaint'),
+                    const SizedBox(height: 12),
+                    if (d.branchId == null) ...[
+                      ProField(
+                        label: 'Branch',
+                        required: true,
+                        child: ref.watch(mailBranchesProvider).when(
+                              data: (branches) => DropdownButtonFormField<int>(
+                                isExpanded: true,
+                                value: _branchId,
+                                hint: const Text('Select a branch'),
+                                items: [
+                                  for (final b in branches)
+                                    DropdownMenuItem(value: b.id, child: Text(b.label, overflow: TextOverflow.ellipsis)),
+                                ],
+                                onChanged: (v) => setState(() => _branchId = v),
+                              ),
+                              loading: () => const LinearProgressIndicator(),
+                              error: (e, _) =>
+                                  Text('$e', style: const TextStyle(color: AppColors.danger, fontSize: 12.5)),
+                            ),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+                    ProField(
+                      label: 'Department',
+                      child: DropdownButtonFormField<String?>(
+                        isExpanded: true,
+                        value: d.departments.contains(_department) ? _department : null,
+                        items: [
+                          DropdownMenuItem(
+                              value: null,
+                              child: Text(d.departments.isEmpty ? 'No departments set up' : 'Select department')),
+                          for (final name in d.departments)
+                            DropdownMenuItem(value: name, child: Text(name, overflow: TextOverflow.ellipsis)),
+                        ],
+                        onChanged: (v) => setState(() => _department = v),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    ProField(
+                      label: 'Subject',
+                      required: true,
+                      child: TextField(controller: _subject, textCapitalization: TextCapitalization.sentences),
+                    ),
+                    const SizedBox(height: 14),
+                    ProField(
+                      label: 'Details',
+                      child: TextField(controller: _content, minLines: 3, maxLines: 6),
+                    ),
+                    if (d.phone == null) ...[
+                      const SizedBox(height: 14),
+                      ProField(
+                        label: 'Phone',
+                        child: TextField(controller: _phone, keyboardType: TextInputType.phone),
                       ),
                     ],
-                  ),
-                ),
-                if (d.branchId == null) ...[
-                  const SizedBox(height: 10),
-                  _label('Branch *'),
-                  ref.watch(mailBranchesProvider).when(
-                        data: (branches) => DropdownButtonFormField<int>(
-                          isExpanded: true,
-                          value: _branchId,
-                          items: [
-                            for (final b in branches)
-                              DropdownMenuItem(value: b.id, child: Text(b.label, overflow: TextOverflow.ellipsis)),
-                          ],
-                          onChanged: (v) => setState(() => _branchId = v),
-                        ),
-                        loading: () => const LinearProgressIndicator(),
-                        error: (e, _) => Text('$e', style: const TextStyle(color: AppColors.danger, fontSize: 12)),
-                      ),
-                ],
-                const SizedBox(height: 10),
-                _label('Department'),
-                DropdownButtonFormField<String?>(
-                  isExpanded: true,
-                  value: d.departments.contains(_department) ? _department : null,
-                  items: [
-                    DropdownMenuItem(
-                        value: null,
-                        child: Text(d.departments.isEmpty ? 'No departments set up' : 'Select department')),
-                    for (final name in d.departments)
-                      DropdownMenuItem(value: name, child: Text(name, overflow: TextOverflow.ellipsis)),
                   ],
-                  onChanged: (v) => setState(() => _department = v),
                 ),
-                const SizedBox(height: 10),
-                _label('Subject *'),
-                TextField(controller: _subject, textCapitalization: TextCapitalization.sentences),
-                const SizedBox(height: 10),
-                _label('Details'),
-                TextField(controller: _content, minLines: 3, maxLines: 6),
-                if (d.phone == null) ...[
-                  const SizedBox(height: 10),
-                  _label('Phone'),
-                  TextField(controller: _phone, keyboardType: TextInputType.phone),
-                ],
-                if (_error != null) ...[
-                  const SizedBox(height: 14),
-                  AppErrorPanel(message: _error!),
-                ],
-                const SizedBox(height: 20),
-                SizedBox(
-                  height: 50,
-                  child: FilledButton(
-                    onPressed: _saving ? null : () => _save(d),
-                    child: Text(_saving ? 'Submitting…' : 'Raise complaint'),
-                  ),
-                ),
-                const SizedBox(height: 24),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 14),
+                ProNote(_error!, tone: ProNoteTone.bad),
               ],
-            );
-          },
-        ),
+            ],
+          );
+        },
       ),
     );
   }
-
-  Widget _label(String t) => Padding(
-        padding: const EdgeInsets.only(bottom: 4, top: 4),
-        child: Text(t,
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
-      );
 }

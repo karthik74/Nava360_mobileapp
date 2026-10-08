@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/env.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'training_test_screen.dart';
@@ -20,151 +20,114 @@ final myTrainingsProvider =
   return ref.watch(trainingsRepositoryProvider).getMyTrainings();
 });
 
+const _progressColor = Color(0xFF4CC3DB);
+const _enrolledColor = Color(0xFFF2B347);
+
+/// 0 = enrolled, 1 = in progress, 2 = completed (same rules as the card).
+int _bucket(TrainingEnrollment t) {
+  final s = t.status.toUpperCase();
+  if (s == 'COMPLETED') return 2;
+  if (s == 'IN_PROGRESS' || s == 'ACTIVE') return 1;
+  return 0;
+}
+
+String _pct(int n, int total) =>
+    total == 0 ? '0% of courses' : '${(n / total * 100).round()}% of courses';
+
 class TrainingsScreen extends ConsumerWidget {
   const TrainingsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final trainings = ref.watch(myTrainingsProvider);
-    final mq = MediaQuery.of(context);
+    final list = trainings.valueOrNull;
 
     int completedCount = 0;
-    trainings.whenData((list) {
-      for (final t in list) {
-        if (t.status == 'COMPLETED') completedCount++;
+    int progressCount = 0;
+    int enrolledCount = 0;
+    for (final t in list ?? const <TrainingEnrollment>[]) {
+      switch (_bucket(t)) {
+        case 2:
+          completedCount++;
+          break;
+        case 1:
+          progressCount++;
+          break;
+        default:
+          enrolledCount++;
       }
-    });
+    }
+    final total = list?.length ?? 0;
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: PreferredSize(
-          preferredSize:
-              Size.fromHeight(mq.padding.top + AppChrome.appBarHeight),
-          child: ClipRect(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: GlassBlur.chrome,
-                sigmaY: GlassBlur.chrome,
+    final body = <Widget>[
+      const ProSectionHeader(
+        title: 'Training modules',
+        subtitle: 'Assigned certifications and professional learning',
+      ),
+      ...trainings.when<List<Widget>>(
+        data: (list) {
+          if (list.isEmpty) {
+            return const [
+              ProEmpty(
+                icon: Icons.school_outlined,
+                title: 'No trainings yet',
+                message: 'No training modules assigned yet.',
               ),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.62),
-                  border: Border(
-                    bottom: BorderSide(color: Colors.white.withOpacity(0.5)),
-                  ),
-                ),
-                child: SafeArea(
-                  bottom: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
-                    child: Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.arrow_back_rounded, size: 20),
-                          onPressed: () => Navigator.pop(context),
-                          color: AppColors.inkSoft,
-                        ),
-                        const SizedBox(width: 4),
-                        const Expanded(
-                          child: Text(
-                            'My Trainings',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.ink,
-                              letterSpacing: -0.2,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            ];
+          }
+          final sorted = [...list]
+            ..sort((a, b) => (b.trainingStartDate ?? '').compareTo(a.trainingStartDate ?? ''));
+          return [for (final t in sorted) _TrainingCard(enrollment: t)];
+        },
+        loading: () => const [AppLoadingBlock(height: 160), AppLoadingBlock(height: 160)],
+        error: (e, _) => [
+          AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(myTrainingsProvider),
           ),
+        ],
+      ),
+    ];
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Trainings')),
+      body: ProPage(
+        onRefresh: () async => ref.invalidate(myTrainingsProvider),
+        hero: ProHero(
+          title: 'My trainings',
+          subtitle: list == null
+              ? 'Assigned certifications and professional learning'
+              : '$total assigned ${total == 1 ? 'course' : 'courses'} · $completedCount completed',
+          children: [
+            ProHeroStats(stats: [
+              ProStat(
+                label: 'Completed',
+                value: list == null ? '—' : '$completedCount',
+                sub: list == null ? null : _pct(completedCount, total),
+                dot: AppColors.live,
+              ),
+              ProStat(
+                label: 'In progress',
+                value: list == null ? '—' : '$progressCount',
+                sub: list == null ? null : _pct(progressCount, total),
+                dot: _progressColor,
+              ),
+              ProStat(
+                label: 'Enrolled',
+                value: list == null ? '—' : '$enrolledCount',
+                sub: list == null ? null : _pct(enrolledCount, total),
+                dot: _enrolledColor,
+              ),
+            ]),
+            if (total > 0)
+              ProStackBar(parts: [
+                MapEntry(completedCount.toDouble(), AppColors.live),
+                MapEntry(progressCount.toDouble(), _progressColor),
+                MapEntry(enrolledCount.toDouble(), _enrolledColor),
+              ]),
+          ],
         ),
-        body: RefreshIndicator(
-          color: AppColors.primary,
-          backgroundColor: Colors.white.withOpacity(0.92),
-          onRefresh: () async => ref.invalidate(myTrainingsProvider),
-          child: ListView(
-            physics: const BouncingScrollPhysics(
-              parent: AlwaysScrollableScrollPhysics(),
-            ),
-            padding: EdgeInsets.fromLTRB(
-              16,
-              12,
-              16,
-              mq.padding.bottom + 20,
-            ),
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: StatTile(
-                      label: 'Assigned courses',
-                      value: trainings.when(
-                        data: (list) => list.length.toString(),
-                        loading: () => '—',
-                        error: (_, __) => '0',
-                      ),
-                      icon: Icons.school_rounded,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: StatTile(
-                      label: 'Completed',
-                      value: trainings.when(
-                        data: (_) => completedCount.toString(),
-                        loading: () => '—',
-                        error: (_, __) => '0',
-                      ),
-                      icon: Icons.verified_user_rounded,
-                      color: AppColors.success,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              const AppSectionHeader(
-                title: 'Training Modules',
-                subtitle: 'Assigned certifications and professional learning',
-                onDark: false,
-              ),
-              const SizedBox(height: 12),
-              trainings.when(
-                data: (list) {
-                  if (list.isEmpty) {
-                    return const AppEmptyState(
-                      icon: Icons.school_outlined,
-                      message: 'No training modules assigned yet.',
-                    );
-                  }
-                  final sorted = [...list]
-                    ..sort((a, b) => (b.trainingStartDate ?? '').compareTo(a.trainingStartDate ?? ''));
-                  return Column(
-                    children: [
-                      for (final t in sorted)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _TrainingCard(enrollment: t),
-                        ),
-                    ],
-                  );
-                },
-                loading: () => const AppLoadingBlock(height: 160),
-                error: (e, _) => AppErrorPanel(
-                  message: e.toString(),
-                  onRetry: () => ref.invalidate(myTrainingsProvider),
-                ),
-              ),
-            ],
-          ),
-        ),
+        children: body,
       ),
     );
   }
@@ -184,60 +147,60 @@ class _TrainingCard extends ConsumerWidget {
     }
   }
 
+  static String _human(String raw) {
+    final s = raw.replaceAll('_', ' ').toLowerCase();
+    return s.isEmpty ? raw : s[0].toUpperCase() + s.substring(1);
+  }
+
   void _openMaterials(BuildContext context, WidgetRef ref) {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
       builder: (_) => FutureBuilder<List<TrainingMaterial>>(
         future: ref.read(trainingsRepositoryProvider).getMaterials(enrollment.trainingId),
         builder: (ctx, snap) {
           if (snap.connectionState != ConnectionState.done) {
-            return const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
+            return _Sheet(
+              title: 'Materials',
+              subtitle: enrollment.trainingTitle,
+              child: const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              ),
             );
           }
           final mats = snap.data ?? const [];
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Materials',
-                    style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink)),
-                const SizedBox(height: 12),
-                if (mats.isEmpty)
-                  const Text('No materials shared yet.',
-                      style: TextStyle(color: AppColors.muted))
-                else
-                  ...mats.map((m) => ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(
-                          m.kind == 'LINK' ? Icons.link_rounded : Icons.description_rounded,
-                          color: AppColors.primary,
+          return _Sheet(
+            title: 'Materials',
+            subtitle: enrollment.trainingTitle,
+            child: mats.isEmpty
+                ? const _SheetEmpty('No materials shared yet.')
+                : ProListGroup(
+                    children: [
+                      for (final m in mats)
+                        ProListRow(
+                          leading: ProIconWell(
+                            icon: m.kind == 'LINK'
+                                ? Icons.link_rounded
+                                : Icons.description_rounded,
+                            color: AppColors.primary,
+                          ),
+                          title: m.title,
+                          subtitle: m.description != null && m.description!.isNotEmpty
+                              ? m.description!
+                              : m.fileName,
+                          chevron: false,
+                          trailing: const Icon(Icons.open_in_new_rounded,
+                              size: 18, color: AppColors.faint),
+                          onTap: () {
+                            final base = Env.apiBaseUrl.endsWith('/')
+                                ? Env.apiBaseUrl.substring(0, Env.apiBaseUrl.length - 1)
+                                : Env.apiBaseUrl;
+                            final url = m.kind == 'LINK' ? m.url : '$base${m.url}';
+                            launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                          },
                         ),
-                        title: Text(m.title,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600, color: AppColors.ink)),
-                        subtitle: m.description != null && m.description!.isNotEmpty
-                            ? Text(m.description!)
-                            : (m.fileName != null ? Text(m.fileName!) : null),
-                        trailing: const Icon(Icons.open_in_new_rounded, size: 18),
-                        onTap: () {
-                          final base = Env.apiBaseUrl.endsWith('/')
-                              ? Env.apiBaseUrl.substring(0, Env.apiBaseUrl.length - 1)
-                              : Env.apiBaseUrl;
-                          final url = m.kind == 'LINK' ? m.url : '$base${m.url}';
-                          launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-                        },
-                      )),
-              ],
-            ),
+                    ],
+                  ),
           );
         },
       ),
@@ -247,22 +210,26 @@ class _TrainingCard extends ConsumerWidget {
   void _openTests(BuildContext context, WidgetRef ref) {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
       builder: (sheetCtx) => FutureBuilder<TrainingTestStatus>(
         future: ref.read(trainingsRepositoryProvider).getTestStatus(enrollment.trainingId),
         builder: (ctx, snap) {
           if (snap.connectionState != ConnectionState.done) {
-            return const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
+            return _Sheet(
+              title: 'Tests & feedback',
+              subtitle: enrollment.trainingTitle,
+              child: const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              ),
             );
           }
           final s = snap.data;
           if (s == null) {
-            return const Padding(padding: EdgeInsets.all(24), child: Text('Unavailable.'));
+            return _Sheet(
+              title: 'Tests & feedback',
+              subtitle: enrollment.trainingTitle,
+              child: const _SheetEmpty('Unavailable.'),
+            );
           }
 
           void open(String section, String label) {
@@ -276,43 +243,45 @@ class _TrainingCard extends ConsumerWidget {
             ));
           }
 
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+          final rows = <Widget>[
+            if (s.preQuestionCount > 0)
+              _testRow('Pre test',
+                  questions: s.preQuestionCount,
+                  done: s.preAttempts > 0 && !s.allowRetake,
+                  doneLabel: s.preBestPercentage != null ? '${s.preBestPercentage}%' : '✓',
+                  onTap: () => open('PRE_TEST', 'Pre Test')),
+            if (s.postQuestionCount > 0)
+              _testRow('Post test',
+                  questions: s.postQuestionCount,
+                  done: s.postAttempts > 0 && !s.allowRetake,
+                  doneLabel: s.postBestPercentage != null ? '${s.postBestPercentage}%' : '✓',
+                  onTap: () => open('POST_TEST', 'Post Test')),
+            if (s.feedbackQuestionCount > 0)
+              _testRow('Feedback',
+                  questions: s.feedbackQuestionCount,
+                  done: s.feedbackSubmitted,
+                  doneLabel: '✓',
+                  onTap: () => open('FEEDBACK', 'Feedback')),
+          ];
+
+          return _Sheet(
+            title: 'Tests & feedback',
+            subtitle: enrollment.trainingTitle,
             child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Tests & Feedback',
-                    style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.ink)),
                 if (s.improvement != null) ...[
-                  const SizedBox(height: 6),
-                  Text(
+                  ProNote(
                     'Pre ${s.preBestPercentage}% → Post ${s.postBestPercentage}% (${s.improvement! >= 0 ? '+' : ''}${s.improvement}%)',
-                    style: const TextStyle(color: AppColors.inkSoft, fontWeight: FontWeight.w600),
+                    tone: ProNoteTone.ok,
+                    icon: Icons.trending_up_rounded,
                   ),
+                  const SizedBox(height: 12),
                 ],
-                const SizedBox(height: 12),
-                if (s.preQuestionCount > 0)
-                  _testTile('Pre Test',
-                      done: s.preAttempts > 0 && !s.allowRetake,
-                      doneLabel: s.preBestPercentage != null ? '${s.preBestPercentage}%' : '✓',
-                      onTap: () => open('PRE_TEST', 'Pre Test')),
-                if (s.postQuestionCount > 0)
-                  _testTile('Post Test',
-                      done: s.postAttempts > 0 && !s.allowRetake,
-                      doneLabel: s.postBestPercentage != null ? '${s.postBestPercentage}%' : '✓',
-                      onTap: () => open('POST_TEST', 'Post Test')),
-                if (s.feedbackQuestionCount > 0)
-                  _testTile('Feedback',
-                      done: s.feedbackSubmitted,
-                      doneLabel: '✓',
-                      onTap: () => open('FEEDBACK', 'Feedback')),
-                if (s.preQuestionCount == 0 &&
-                    s.postQuestionCount == 0 &&
-                    s.feedbackQuestionCount == 0)
-                  const Text('No tests or feedback for this training.',
-                      style: TextStyle(color: AppColors.muted)),
+                if (rows.isEmpty)
+                  const _SheetEmpty('No tests or feedback for this training.')
+                else
+                  ProListGroup(children: rows),
               ],
             ),
           );
@@ -321,17 +290,20 @@ class _TrainingCard extends ConsumerWidget {
     );
   }
 
-  Widget _testTile(String label,
-      {required bool done, required String doneLabel, required VoidCallback onTap}) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(done ? Icons.check_circle_rounded : Icons.quiz_rounded,
-          color: done ? AppColors.success : AppColors.primary),
-      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-      trailing: done
-          ? Text(doneLabel,
-              style: const TextStyle(color: AppColors.success, fontWeight: FontWeight.w700))
-          : const Icon(Icons.chevron_right_rounded),
+  Widget _testRow(String label,
+      {required int questions,
+      required bool done,
+      required String doneLabel,
+      required VoidCallback onTap}) {
+    return ProListRow(
+      leading: ProIconWell(
+        icon: done ? Icons.check_circle_rounded : Icons.quiz_rounded,
+        color: done ? AppColors.success : AppColors.primary,
+      ),
+      title: label,
+      subtitle: '$questions ${questions == 1 ? 'question' : 'questions'}',
+      value: done ? doneLabel : null,
+      valueColor: AppColors.success,
       onTap: done ? null : onTap,
     );
   }
@@ -392,193 +364,353 @@ class _TrainingCard extends ConsumerWidget {
     final isDone = status == 'COMPLETED';
     final isInProgress = status == 'IN_PROGRESS' || status == 'ACTIVE';
 
-    final statusLabel = isDone
-        ? 'COMPLETED'
+    final pill = isDone
+        ? ProPill.ok('Completed')
         : isInProgress
-            ? 'IN PROGRESS'
-            : 'ENROLLED';
+            ? ProPill.info('In progress')
+            : ProPill.warn('Enrolled');
 
-    final statusColor = isDone
-        ? AppColors.success
-        : isInProgress
-            ? AppColors.primary
-            : AppColors.warning;
+    final mode = enrollment.trainingMode;
+    final isOnline = mode == 'ONLINE';
+    final hasMeet = isOnline && (enrollment.trainingMeetLink?.isNotEmpty ?? false);
+    final hasVenue = !isOnline && (enrollment.trainingVenue?.isNotEmpty ?? false);
+
+    final smallButton = OutlinedButton.styleFrom(
+      minimumSize: const Size(0, 42),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      textStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+    );
 
     return GlassCard(
       padding: const EdgeInsets.all(16),
-      shadow: AppShadows.soft,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              ProIconWell(icon: Icons.school_rounded, color: AppColors.primary, size: 40),
+              const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  enrollment.trainingTitle,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      enrollment.trainingTitle,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        height: 1.35,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.2,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        const Icon(Icons.calendar_today_rounded,
+                            size: 13, color: AppColors.muted),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            '${_formatDate(enrollment.trainingStartDate)} - ${_formatDate(enrollment.trainingEndDate)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.caption.copyWith(
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),
-              StatusPill(label: statusLabel, color: statusColor),
+              pill,
             ],
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              const Icon(Icons.calendar_today_rounded, size: 14, color: AppColors.inkSoft),
-              const SizedBox(width: 6),
-              Text(
-                '${_formatDate(enrollment.trainingStartDate)} - ${_formatDate(enrollment.trainingEndDate)}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.inkSoft,
-                ),
-              ),
-              const Spacer(),
-              if (enrollment.trainingMode != null) ...[
-                const Icon(Icons.computer_rounded, size: 14, color: AppColors.inkSoft),
-                const SizedBox(width: 6),
-                Text(
-                  enrollment.trainingMode!,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.inkSoft,
-                  ),
-                ),
-              ],
-            ],
-          ),
-          if (enrollment.trainingMode == 'ONLINE' &&
-              (enrollment.trainingMeetLink?.isNotEmpty ?? false)) ...[
+          if (mode != null || hasVenue) ...[
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: () => launchUrl(
-                  Uri.parse(enrollment.trainingMeetLink!),
-                  mode: LaunchMode.externalApplication,
-                ),
-                icon: const Icon(Icons.videocam_rounded, size: 18),
-                label: const Text('Join Google Meet'),
-              ),
-            ),
-          ] else if (enrollment.trainingMode != 'ONLINE' &&
-              (enrollment.trainingVenue?.isNotEmpty ?? false)) ...[
-            const SizedBox(height: 10),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.location_on_rounded,
-                    size: 14, color: AppColors.inkSoft),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    enrollment.trainingVenue!,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.inkSoft,
+                if (mode != null)
+                  _ModeChip(
+                    icon: isOnline ? Icons.computer_rounded : Icons.groups_rounded,
+                    label: _human(mode),
+                  ),
+                if (mode != null && hasVenue) const SizedBox(width: 10),
+                if (hasVenue)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.only(top: 1),
+                            child: Icon(Icons.location_on_outlined,
+                                size: 14, color: AppColors.muted),
+                          ),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: Text(
+                              enrollment.trainingVenue!,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                height: 1.38,
+                                color: Color(0xFF43585D),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
               ],
+            ),
+          ],
+          if (hasMeet) ...[
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: () => launchUrl(
+                Uri.parse(enrollment.trainingMeetLink!),
+                mode: LaunchMode.externalApplication,
+              ),
+              icon: const Icon(Icons.videocam_rounded, size: 18),
+              label: const Text('Join Google Meet'),
             ),
           ],
           if (isDone && enrollment.score > 0) ...[
             const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppColors.success.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(AppRadii.sm),
-                border: Border.all(color: AppColors.success.withOpacity(0.18)),
+            ProNote(
+              'Score attained: ${enrollment.score}%',
+              tone: ProNoteTone.ok,
+              icon: Icons.emoji_events_rounded,
+            ),
+          ],
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _openMaterials(context, ref),
+                  style: smallButton,
+                  icon: const Icon(Icons.folder_open_rounded, size: 16),
+                  label: const Text('Materials', maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
               ),
-              child: Row(
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _openTests(context, ref),
+                  style: smallButton,
+                  icon: const Icon(Icons.quiz_rounded, size: 16),
+                  label: const Text('Tests', maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+              ),
+              if (!isDone) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => _markAttendance(context, ref),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 42),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      textStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                    ),
+                    icon: const Icon(Icons.camera_alt_rounded, size: 16),
+                    label: const Text('Attend', maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (enrollment.feedback != null && enrollment.feedback!.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.only(top: 12),
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: AppColors.hairlineSoft)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.emoji_events_rounded, color: AppColors.success, size: 16),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Score attained: ${enrollment.score}%',
-                    style: const TextStyle(
+                  const Text(
+                    'Feedback from trainer',
+                    style: TextStyle(
                       fontSize: 12.5,
-                      color: AppColors.success,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.muted,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.only(left: 10),
+                    decoration: const BoxDecoration(
+                      border: Border(left: BorderSide(color: Color(0xFFD4DEE0), width: 2)),
+                    ),
+                    child: Text(
+                      '“${enrollment.feedback!}”',
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        height: 1.45,
+                        color: Color(0xFF43585D),
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
           ],
-          const SizedBox(height: 10),
-          Row(
+        ],
+      ),
+    );
+  }
+}
+
+/// Small neutral chip for the training mode (online / classroom).
+class _ModeChip extends StatelessWidget {
+  const _ModeChip({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 26,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: AppColors.neutralTint,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: const Color(0xFF43585D)),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF43585D),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// White bottom-sheet frame: handle, title + subtitle, close button.
+class _Sheet extends StatelessWidget {
+  const _Sheet({required this.title, this.subtitle, required this.child});
+  final String title;
+  final String? subtitle;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              TextButton.icon(
-                onPressed: () => _openMaterials(context, ref),
-                icon: const Icon(Icons.folder_open_rounded, size: 18),
-                label: const Text('Materials'),
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  foregroundColor: AppColors.primary,
-                  minimumSize: const Size(0, 0),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-              const SizedBox(width: 16),
-              TextButton.icon(
-                onPressed: () => _openTests(context, ref),
-                icon: const Icon(Icons.quiz_rounded, size: 18),
-                label: const Text('Tests'),
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  foregroundColor: AppColors.primary,
-                  minimumSize: const Size(0, 0),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-              const SizedBox(width: 16),
-              if (!isDone)
-                TextButton.icon(
-                  onPressed: () => _markAttendance(context, ref),
-                  icon: const Icon(Icons.camera_alt_rounded, size: 18),
-                  label: const Text('Attend'),
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    foregroundColor: AppColors.success,
-                    minimumSize: const Size(0, 0),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFC6D3D6),
+                    borderRadius: BorderRadius.circular(5),
                   ),
                 ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 19,
+                            height: 1.3,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.35,
+                            color: AppColors.ink,
+                          ),
+                        ),
+                        if (subtitle != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              subtitle!,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppText.caption,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Material(
+                    color: const Color(0xFFEEF3F4),
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => Navigator.of(context).pop(),
+                      child: const SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: Icon(Icons.close_rounded, size: 18, color: AppColors.ink),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Flexible(child: SingleChildScrollView(child: child)),
             ],
           ),
-          if (enrollment.feedback != null && enrollment.feedback!.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            const Divider(),
-            const SizedBox(height: 6),
-            const Text(
-              'Feedback from Trainer:',
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.bold,
-                color: AppColors.muted,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              enrollment.feedback!,
-              style: const TextStyle(
-                fontSize: 12,
-                fontStyle: FontStyle.italic,
-                color: AppColors.muted,
-                height: 1.35,
-              ),
-            ),
-          ],
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetEmpty extends StatelessWidget {
+  const _SheetEmpty(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 22),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 14, color: AppColors.muted),
       ),
     );
   }

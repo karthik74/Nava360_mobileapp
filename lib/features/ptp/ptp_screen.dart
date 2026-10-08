@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../tasks/task_detail_screen.dart';
@@ -105,57 +106,55 @@ class _PtpScreenState extends ConsumerState<PtpScreen> {
     final list = ref.watch(ptpListProvider(_filter));
     final scope = summary?.scope ?? PtpScope.fo;
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-          title: const Text('PTP Follow-ups'),
-          actions: [
-            IconButton(
-              tooltip: 'Refresh',
-              icon: const Icon(Icons.refresh_rounded),
-              onPressed: _refresh,
-            ),
-          ],
-        ),
-        body: RefreshIndicator(
-          color: AppColors.primary,
-          onRefresh: _refresh,
-          child: CustomScrollView(
-            controller: _scroll,
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                sliver: SliverToBoxAdapter(
-                  child: _SummaryHeader(
-                    summary: summary,
-                    loading: summaryAsync.isLoading && summary == null,
-                    onTapDueToday: () => _select(PtpFilter.dueToday),
-                    onTapBroken: () => _select(PtpFilter.broken),
-                  ),
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: _FilterChips(
-                  selected: _filter,
-                  summary: summary,
-                  onSelected: _select,
-                ),
-              ),
-              ..._listSlivers(list, scope),
-            ],
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('PTP follow-ups'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _refresh,
           ),
+        ],
+      ),
+      body: RefreshIndicator(
+        color: AppColors.primary,
+        backgroundColor: Colors.white,
+        onRefresh: _refresh,
+        child: CustomScrollView(
+          controller: _scroll,
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: _SummaryHero(
+                summary: summary,
+                loading: summaryAsync.isLoading && summary == null,
+                selected: _filter,
+                onSelect: _select,
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.only(top: 16),
+              sliver: SliverToBoxAdapter(
+                child: ProChipBar(
+                  labels: [for (final f in PtpFilter.values) f.label],
+                  counts: summary == null
+                      ? null
+                      : [for (final f in PtpFilter.values) summary.countFor(f)],
+                  selected: PtpFilter.values.indexOf(_filter),
+                  onSelected: (i) => _select(PtpFilter.values[i]),
+                ),
+              ),
+            ),
+            ..._listSlivers(list, scope, summary),
+          ],
         ),
       ),
     );
   }
 
-  List<Widget> _listSlivers(PtpListState list, PtpScope scope) {
-    const pad = EdgeInsets.fromLTRB(16, 8, 16, 0);
+  List<Widget> _listSlivers(PtpListState list, PtpScope scope, PtpSummary? summary) {
+    const pad = EdgeInsets.fromLTRB(16, 14, 16, 0);
     if (list.loading && list.items.isEmpty) {
       return const [
         SliverPadding(
@@ -178,27 +177,30 @@ class _PtpScreenState extends ConsumerState<PtpScreen> {
       ];
     }
     if (list.items.isEmpty) {
+      final lines = _filter.emptyMessage.split('\n');
       return [
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           sliver: SliverToBoxAdapter(
-            child: AppEmptyState(
+            child: ProEmpty(
               icon: _filter == PtpFilter.kept
                   ? Icons.verified_rounded
                   : Icons.event_available_rounded,
-              message: _filter.emptyMessage,
+              title: lines.first,
+              message: lines.length > 1 ? lines.skip(1).join('\n') : null,
             ),
           ),
         ),
       ];
     }
+    final count = summary?.countFor(_filter);
     return [
       // A refresh that failed with rows already on screen keeps the old rows
       // (better than a blank list) — but say so, or a card still reading
       // 'Due today' after the visit was marked done looks current.
       if (list.error != null)
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
           sliver: SliverToBoxAdapter(
             child: Center(
               child: TextButton.icon(
@@ -210,7 +212,16 @@ class _PtpScreenState extends ConsumerState<PtpScreen> {
           ),
         ),
       SliverPadding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        sliver: SliverToBoxAdapter(
+          child: ProSectionHeader(
+            title: count == null ? _filter.label : '${_filter.label} · $count',
+            small: true,
+          ),
+        ),
+      ),
+      SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         sliver: SliverList.separated(
           itemCount: list.items.length,
           separatorBuilder: (_, __) => const SizedBox(height: 10),
@@ -226,7 +237,7 @@ class _PtpScreenState extends ConsumerState<PtpScreen> {
         ),
       ),
       SliverPadding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
         sliver: SliverToBoxAdapter(child: _footer(list)),
       ),
     ];
@@ -254,7 +265,7 @@ class _PtpScreenState extends ConsumerState<PtpScreen> {
     if (!list.last) {
       // Short first pages never scroll, so the listener alone would not fire.
       return Center(
-        child: TextButton(
+        child: OutlinedButton(
           onPressed: () => ref.read(ptpListProvider(_filter).notifier).loadMore(),
           child: const Text('Load more'),
         ),
@@ -263,7 +274,7 @@ class _PtpScreenState extends ConsumerState<PtpScreen> {
     return Center(
       child: Text(
         '${list.items.length} ${list.items.length == 1 ? 'customer' : 'customers'}',
-        style: const TextStyle(fontSize: 12, color: AppColors.muted),
+        style: AppText.caption,
       ),
     );
   }
@@ -271,172 +282,144 @@ class _PtpScreenState extends ConsumerState<PtpScreen> {
 
 // ── Header ──────────────────────────────────────────────────────────────────
 
-class _SummaryHeader extends StatelessWidget {
-  const _SummaryHeader({
+/// Deep hero: scope, today's count + EMI (tap = "Due today" filter) and the
+/// other buckets as filter tiles.
+class _SummaryHero extends StatelessWidget {
+  const _SummaryHero({
     required this.summary,
     required this.loading,
-    required this.onTapDueToday,
-    required this.onTapBroken,
+    required this.selected,
+    required this.onSelect,
   });
 
   final PtpSummary? summary;
   final bool loading;
-  final VoidCallback onTapDueToday;
-  final VoidCallback onTapBroken;
+  final PtpFilter selected;
+  final ValueChanged<PtpFilter> onSelect;
 
   @override
   Widget build(BuildContext context) {
     final s = summary;
     if (s == null) {
-      return loading ? const AppLoadingBlock(height: 112) : const SizedBox.shrink();
+      return ProHero(
+        title: 'Promise-to-pay',
+        subtitle: loading ? 'Loading your follow-ups…' : 'Pull down to refresh',
+      );
     }
-    const onHero = TextStyle(color: Colors.white);
-    return GlassCard(
-      gradient: AppColors.heroGradient,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      shadow: AppShadows.lifted,
+    ProStat stat(String label, int value, PtpFilter f, Color dot) => ProStat(
+          label: label,
+          value: '$value',
+          dot: dot,
+          selected: selected == f,
+          onTap: () => onSelect(f),
+        );
+    return ProHero(
+      titleWidget: _TapTitle(
+        kicker: s.scope.label,
+        title: '${s.dueToday} due today',
+        subtitle: s.dueTodayAmount > 0
+            ? 'EMI ${ptpRupees(s.dueTodayAmount)}'
+            : null,
+        onTap: () => onSelect(PtpFilter.dueToday),
+      ),
+      children: [
+        ProHeroStats(stats: [
+          stat('Tomorrow', s.dueTomorrow, PtpFilter.dueTomorrow, const Color(0xFF9DB9F0)),
+          stat('Broken', s.broken, PtpFilter.broken, const Color(0xFFE5484D)),
+          stat('Upcoming', s.upcoming, PtpFilter.upcoming, const Color(0xFF5FC3D6)),
+          stat('Kept (30d)', s.kept, PtpFilter.kept, AppColors.live),
+        ]),
+      ],
+    );
+  }
+}
+
+/// Hero title block (same type as [ProHero]'s) that is tappable.
+class _TapTitle extends StatelessWidget {
+  const _TapTitle({
+    required this.kicker,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+  final String kicker;
+  final String title;
+  final String? subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            s.scope.label.toUpperCase(),
-            style: onHero.copyWith(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.8,
-              color: Colors.white.withValues(alpha: 0.8),
+            kicker,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: Colors.white70,
             ),
           ),
-          const SizedBox(height: 6),
-          InkWell(
-            onTap: onTapDueToday,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '${s.dueToday}',
-                  style: onHero.copyWith(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w800,
-                    height: 1,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    s.dueTodayAmount > 0
-                        ? 'due today · EMI ${ptpRupees(s.dueTodayAmount)}'
-                        : 'due today',
-                    style: onHero.copyWith(fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
           Row(
             children: [
-              _HeroStat(label: 'Tomorrow', value: s.dueTomorrow),
-              _HeroStat(label: 'Broken', value: s.broken, onTap: onTapBroken),
-              _HeroStat(label: 'Upcoming', value: s.upcoming),
-              _HeroStat(label: 'Kept (30d)', value: s.kept),
+              Flexible(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    height: 1.2,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.65,
+                    color: Colors.white,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.chevron_right_rounded, color: Colors.white54, size: 22),
             ],
           ),
+          if (subtitle != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                subtitle!,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  height: 1.35,
+                  color: Colors.white70,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
-class _HeroStat extends StatelessWidget {
-  const _HeroStat({required this.label, required this.value, this.onTap});
-  final String label;
-  final int value;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '$value',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 17,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.8),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FilterChips extends StatelessWidget {
-  const _FilterChips({
-    required this.selected,
-    required this.summary,
-    required this.onSelected,
-  });
-
-  final PtpFilter selected;
-  final PtpSummary? summary;
-  final ValueChanged<PtpFilter> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 52,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-        itemCount: PtpFilter.values.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (_, i) {
-          final f = PtpFilter.values[i];
-          final on = f == selected;
-          final count = summary?.countFor(f);
-          return ChoiceChip(
-            selected: on,
-            showCheckmark: false,
-            onSelected: (_) => onSelected(f),
-            label: Text(count == null ? f.label : '${f.label} · $count'),
-            labelStyle: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: on
-                  ? Colors.white
-                  : (f == PtpFilter.broken && (count ?? 0) > 0
-                      ? AppColors.danger
-                      : AppColors.inkSoft),
-            ),
-            selectedColor: f == PtpFilter.broken ? AppColors.danger : AppColors.primary,
-            backgroundColor: AppColors.surface,
-            side: BorderSide(color: on ? Colors.transparent : AppColors.hairline),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadii.pill),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
 // ── Card ────────────────────────────────────────────────────────────────────
+
+Color _tint(Color c) {
+  if (c == AppColors.success) return AppColors.successTint;
+  if (c == AppColors.warning) return AppColors.warningTint;
+  if (c == AppColors.danger) return AppColors.dangerTint;
+  if (c == AppColors.info || c == AppColors.accent) return AppColors.infoTint;
+  if (c == AppColors.muted) return AppColors.neutralTint;
+  return c.withValues(alpha: 0.12);
+}
+
+Color _ink(Color c) {
+  if (c == AppColors.warning) return const Color(0xFF9A5B00);
+  if (c == AppColors.muted) return const Color(0xFF43585D);
+  return c;
+}
 
 class _PtpCard extends StatelessWidget {
   const _PtpCard({
@@ -462,7 +445,6 @@ class _PtpCard extends StatelessWidget {
 
     return GlassCard(
       padding: EdgeInsets.zero,
-      shadow: AppShadows.soft,
       border: p.status == 'BROKEN'
           ? Border.all(color: AppColors.danger.withValues(alpha: 0.35))
           : null,
@@ -472,15 +454,18 @@ class _PtpCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppRadii.lg),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+            padding: const EdgeInsets.fromLTRB(14, 13, 10, 13),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                ProAvatar(name: p.customerName, size: 40),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
                             child: Text(
@@ -489,73 +474,70 @@ class _PtpCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 fontSize: 15,
-                                fontWeight: FontWeight.w700,
+                                height: 1.33,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.15,
                                 color: AppColors.ink,
                               ),
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          StatusPill(label: badge.label, color: badge.color),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          if (amount != null)
+                          if (amount != null) ...[
+                            const SizedBox(width: 8),
                             Text(
                               'EMI ${ptpRupees(amount)}',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                          if (promised != null)
-                            Text(
-                              ptpPromisedLabel(promised),
                               style: const TextStyle(
-                                fontSize: 13,
+                                fontSize: 14.5,
                                 fontWeight: FontWeight.w600,
-                                color: AppColors.inkSoft,
+                                color: AppColors.ink,
+                                fontFeatures: [FontFeature.tabularFigures()],
                               ),
                             ),
-                          if (p.rescheduleCount > 0)
-                            Text(
-                              'Re-dated ${p.rescheduleCount}×',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.warning,
-                              ),
-                            ),
+                          ],
                         ],
                       ),
+                      if (branch != null || officer != null || p.reference != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Wrap(
+                            spacing: 10,
+                            runSpacing: 2,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              if (branch != null)
+                                _Meta(icon: Icons.storefront_rounded, text: branch),
+                              if (officer != null)
+                                _Meta(icon: Icons.badge_rounded, text: officer),
+                              if (p.reference != null)
+                                _Meta(icon: Icons.tag_rounded, text: p.reference!),
+                            ],
+                          ),
+                        ),
                       const SizedBox(height: 8),
                       Wrap(
-                        spacing: 8,
+                        spacing: 6,
                         runSpacing: 6,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          if (p.module != null) _ModuleChip(p.module!),
-                          if (branch != null)
-                            _Meta(icon: Icons.storefront_rounded, text: branch),
-                          if (officer != null)
-                            _Meta(icon: Icons.badge_rounded, text: officer),
-                          if (p.reference != null)
-                            _Meta(icon: Icons.tag_rounded, text: p.reference!),
+                          ProPill(badge.label,
+                              color: _ink(badge.color),
+                              background: _tint(badge.color),
+                              dot: true),
+                          if (promised != null)
+                            ProPill.neutral(ptpPromisedLabel(promised)),
+                          if (p.rescheduleCount > 0)
+                            ProPill.warn('Re-dated ${p.rescheduleCount}×'),
+                          if (p.module != null) ProPill.info(p.module!.toUpperCase()),
                         ],
                       ),
                       if (p.callNote != null) ...[
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 8),
                         Text(
                           p.callNote!,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontSize: 12,
+                            fontSize: 12.5,
+                            height: 1.4,
                             color: AppColors.muted,
                             fontStyle: FontStyle.italic,
                           ),
@@ -564,44 +546,24 @@ class _PtpCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (onCall != null)
+                if (onCall != null) ...[
+                  const SizedBox(width: 6),
                   IconButton(
                     tooltip: 'Call ${p.customerName}',
                     onPressed: onCall,
-                    icon: const Icon(Icons.call_rounded),
+                    icon: const Icon(Icons.call_rounded, size: 20),
                     color: AppColors.success,
                     style: IconButton.styleFrom(
-                      backgroundColor: AppColors.success.withValues(alpha: 0.12),
+                      backgroundColor: AppColors.successTint,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                   ),
+                ],
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ModuleChip extends StatelessWidget {
-  const _ModuleChip(this.module);
-  final String module;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: AppColors.accent.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-      ),
-      child: Text(
-        module.toUpperCase(),
-        style: const TextStyle(
-          fontSize: 10.5,
-          fontWeight: FontWeight.w800,
-          color: AppColors.accent,
-          letterSpacing: 0.3,
         ),
       ),
     );
@@ -618,15 +580,15 @@ class _Meta extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 13, color: AppColors.muted),
+        Icon(icon, size: 13, color: AppColors.faint),
         const SizedBox(width: 3),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 180),
+          constraints: const BoxConstraints(maxWidth: 170),
           child: Text(
             text,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12, color: AppColors.inkSoft),
+            style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
           ),
         ),
       ],

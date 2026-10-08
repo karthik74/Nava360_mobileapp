@@ -1,6 +1,8 @@
 // Shared MIS chart colours + compact chart widgets (fl_chart). Ports the web
 // palette (src/mis/gwm/components/charts/palette.ts) so a bucket's colour on the
-// donut matches its dot in the tables.
+// donut matches its dot in the tables — restyled to the Pro palette: the brand
+// colour for the headline series, a soft tint of it for the comparison series,
+// hairline grid lines and small muted axis text.
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -21,6 +23,9 @@ class MisPalette {
   static const lime = Color(0xFF84CC16);
 
   /// demand / target / period A vs collection / achieved / period B.
+  ///
+  /// These stay `const` (call sites use them in const lists); the chart widgets
+  /// map them onto the runtime brand palette through [resolve] when painting.
   static const seriesDemand = primary;
   static const seriesCollection = teal;
 
@@ -28,31 +33,48 @@ class MisPalette {
     primary, teal, warning, purple, info, pink, lime, danger,
   ];
 
-  /// DPD bucket / POS-status colour (regular = healthy teal, npa = red).
+  /// Soft tint of the brand colour — the comparison (secondary) series.
+  static Color get soft => Color.lerp(AppColors.primary, Colors.white, 0.7)!;
+
+  static Color _tint(double t) =>
+      Color.lerp(AppColors.primary, Colors.white, t)!;
+
+  /// Maps the legacy series constants onto the Pro chart palette at paint time:
+  /// [seriesCollection] (the headline series) becomes the brand colour and
+  /// [seriesDemand] (its comparison) a soft tint of it. Any other colour passes
+  /// through unchanged.
+  static Color resolve(Color c) {
+    if (c == seriesCollection) return AppColors.primary;
+    if (c == seriesDemand) return soft;
+    return c;
+  }
+
+  /// DPD bucket / POS-status colour: healthy buckets in brand tints, then
+  /// amber → orange → red as the delinquency deepens.
   static Color risk(String name) {
     switch (name) {
       case 'regular':
-        return teal;
+        return _tint(0.22);
       case 'on_date':
-        return info;
+        return const Color(0xFF43585D);
       case '1_30':
-        return lime;
+        return _tint(0.55);
       case '31_60':
-        return warning;
+        return const Color(0xFFF2B347);
       case '61_90':
-        return purple;
+        return const Color(0xFFE8793A);
       case 'pnpa':
-        return pink;
+        return const Color(0xFFE5484D);
       case 'npa':
-        return danger;
+        return const Color(0xFFA3211B);
       case 'sma0':
-        return lime;
+        return _tint(0.55);
       case 'sma1':
-        return warning;
+        return const Color(0xFFF2B347);
       case 'total':
-        return primary;
+        return AppColors.primary;
       default:
-        return const Color(0xFF94A3B8);
+        return AppColors.faint;
     }
   }
 
@@ -60,15 +82,44 @@ class MisPalette {
   static Color product(int id) {
     switch (id) {
       case 1:
-        return const Color(0xFF6366F1);
+        return AppColors.primary;
       case 2:
-        return const Color(0xFF10B981);
+        return _tint(0.45);
       case 3:
-        return const Color(0xFFF59E0B);
+        return const Color(0xFF43585D);
       default:
-        return const Color(0xFF64748B);
+        return AppColors.faint;
     }
   }
+}
+
+/// Axis tick / category text: Geist 11, muted.
+const TextStyle _axisStyle = TextStyle(
+  fontSize: 11,
+  color: AppColors.muted,
+  fontFeatures: [FontFeature.tabularFigures()],
+);
+
+/// Hairline horizontal grid line.
+FlLine _gridLine(double _) =>
+    const FlLine(color: AppColors.hairlineSoft, strokeWidth: 1);
+
+/// Printed value colour for a series: the series colour itself when it reads
+/// on white, else muted (the soft comparison tint is too pale for text).
+Color _labelInk(Color c) =>
+    c.computeLuminance() > 0.45 ? AppColors.muted : c;
+
+class _NoData extends StatelessWidget {
+  const _NoData({this.height});
+  final double? height;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        height: height,
+        child: const Center(
+          child: Text('No data', style: AppText.caption),
+        ),
+      );
 }
 
 class MisSlice {
@@ -89,46 +140,40 @@ class MisDonutChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final slices = data.where((s) => s.value > 0).toList();
-    if (slices.isEmpty) {
-      return const SizedBox(
-        height: 60,
-        child: Center(
-          child: Text('No data', style: TextStyle(color: AppColors.muted)),
-        ),
-      );
-    }
+    if (slices.isEmpty) return const _NoData(height: 60);
     final total = slices.fold<double>(0, (a, b) => a + b.value);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         SizedBox(
-          width: 130,
-          height: 130,
+          width: 124,
+          height: 124,
           child: PieChart(
             PieChartData(
               sectionsSpace: 2,
-              centerSpaceRadius: 38,
+              centerSpaceRadius: 40,
+              startDegreeOffset: -90,
               sections: [
                 for (final s in slices)
                   PieChartSectionData(
                     value: s.value,
                     color: s.color,
-                    radius: 22,
+                    radius: 18,
                     showTitle: false,
                   ),
               ],
             ),
           ),
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 18),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               for (final s in slices)
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  padding: const EdgeInsets.symmetric(vertical: 4),
                   child: Row(
                     children: [
                       Container(
@@ -143,28 +188,35 @@ class MisDonutChart extends StatelessWidget {
                       Expanded(
                         child: Text(
                           s.name,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.inkSoft),
+                              fontSize: 13, color: AppColors.inkSoft),
                         ),
                       ),
                       const SizedBox(width: 6),
                       Text(
                         _fmt(s.value),
                         style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.ink),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.ink,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        total > 0
-                            ? '${(s.value / total * 100).toStringAsFixed(0)}%'
-                            : '—',
-                        style: const TextStyle(
-                            fontSize: 11, color: AppColors.muted),
+                      SizedBox(
+                        width: 40,
+                        child: Text(
+                          total > 0
+                              ? '${(s.value / total * 100).toStringAsFixed(0)}%'
+                              : '—',
+                          textAlign: TextAlign.right,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.muted,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -296,7 +348,7 @@ class MisValueLabels extends StatelessWidget {
       overflow: TextOverflow.visible,
       style: TextStyle(
         fontSize: fontSize,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w600,
         color: l.color,
         fontFeatures: const [FontFeature.tabularFigures()],
       ),
@@ -307,6 +359,43 @@ class MisValueLabels extends StatelessWidget {
       top: top,
       width: 120,
       child: Align(alignment: Alignment.bottomCenter, child: text),
+    );
+  }
+}
+
+/// Small square swatch + name legend under a multi-series chart.
+class _Legend extends StatelessWidget {
+  const _Legend({required this.names, required this.colors});
+  final List<String> names;
+  final List<Color> colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 14,
+      runSpacing: 6,
+      children: [
+        for (var s = 0; s < names.length; s++)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: colors[s % colors.length],
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(names[s],
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.muted)),
+            ],
+          ),
+      ],
     );
   }
 }
@@ -339,25 +428,20 @@ class MisGroupedBarChart extends StatelessWidget {
   /// exact original behaviour.
   final String Function(double)? valueFormatter;
 
-  static const double _leftPad = 42;
+  static const double _leftPad = 48;
   static const double _bottomPad = 30;
 
   @override
   Widget build(BuildContext context) {
-    if (groups.isEmpty) {
-      return SizedBox(
-        height: height,
-        child: const Center(
-          child: Text('No data', style: TextStyle(color: AppColors.muted)),
-        ),
-      );
-    }
+    if (groups.isEmpty) return _NoData(height: height);
     var maxV = 0.0;
     for (final g in groups) {
       for (final v in g.values) {
         if (v > maxV) maxV = v;
       }
     }
+    // The legacy series constants map onto the brand palette here.
+    final colors = [for (final c in seriesColors) MisPalette.resolve(c)];
     // Headroom above the tallest bar so its printed value has somewhere to sit.
     final top = maxV <= 0 ? 1.0 : maxV * 1.28;
     final step = (groups.length / 6).ceil();
@@ -421,11 +505,11 @@ class MisGroupedBarChart extends StatelessWidget {
                                   s++)
                                 BarChartRodData(
                                   toY: groups[i].values[s],
-                                  color:
-                                      seriesColors[s % seriesColors.length],
+                                  color: colors[s % colors.length],
                                   width: barW,
                                   borderRadius: const BorderRadius.vertical(
-                                      top: Radius.circular(3)),
+                                      top: Radius.circular(4),
+                                      bottom: Radius.circular(1)),
                                 ),
                             ],
                           ),
@@ -435,10 +519,14 @@ class MisGroupedBarChart extends StatelessWidget {
                           sideTitles: SideTitles(
                             showTitles: true,
                             reservedSize: _leftPad,
-                            getTitlesWidget: (v, _) => Text(
-                              axisFmt(v),
-                              style: const TextStyle(
-                                  fontSize: 9, color: AppColors.muted),
+                            getTitlesWidget: (v, _) => Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: Text(
+                                axisFmt(v),
+                                maxLines: 1,
+                                textAlign: TextAlign.right,
+                                style: _axisStyle,
+                              ),
                             ),
                           ),
                         ),
@@ -455,13 +543,13 @@ class MisGroupedBarChart extends StatelessWidget {
                                 return const SizedBox.shrink();
                               }
                               return Padding(
-                                padding: const EdgeInsets.only(top: 6),
+                                padding: const EdgeInsets.only(top: 8),
                                 child: Text(
                                   groups[i].label.length > 8
                                       ? '${groups[i].label.substring(0, 8)}…'
                                       : groups[i].label,
-                                  style: const TextStyle(
-                                      fontSize: 8.5, color: AppColors.muted),
+                                  maxLines: 1,
+                                  style: _axisStyle,
                                 ),
                               );
                             },
@@ -474,8 +562,7 @@ class MisGroupedBarChart extends StatelessWidget {
                         show: true,
                         drawVerticalLine: false,
                         horizontalInterval: top / 4,
-                        getDrawingHorizontalLine: (_) => const FlLine(
-                            color: AppColors.hairline, strokeWidth: 0.6),
+                        getDrawingHorizontalLine: _gridLine,
                       ),
                       borderData: FlBorderData(show: false),
                       // Values are printed on the chart — nothing to reveal.
@@ -488,6 +575,7 @@ class MisGroupedBarChart extends StatelessWidget {
                     leftPad: _leftPad,
                     bottomPad: _bottomPad,
                     slotWidth: slot,
+                    fontSize: 10,
                     labels: [
                       for (var i = 0; i < groups.length; i++)
                         for (var s = 0; s < groups[i].values.length; s++)
@@ -511,7 +599,7 @@ class MisGroupedBarChart extends StatelessWidget {
                                 plotW,
                             yFrac: groups[i].values[s] / top,
                             text: fmt(groups[i].values[s]),
-                            color: seriesColors[s % seriesColors.length],
+                            color: _labelInk(colors[s % colors.length]),
                           ),
                     ],
                   ),
@@ -520,32 +608,8 @@ class MisGroupedBarChart extends StatelessWidget {
             );
           }),
         ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 14,
-          children: [
-            for (var s = 0; s < seriesNames.length; s++)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(
-                      color: seriesColors[s % seriesColors.length],
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(seriesNames[s],
-                      style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.inkSoft)),
-                ],
-              ),
-          ],
-        ),
+        const SizedBox(height: 10),
+        _Legend(names: seriesNames, colors: colors),
       ],
     );
   }
@@ -570,19 +634,16 @@ class MisBarChart extends StatelessWidget {
   /// this no longer gates anything.
   final bool showValues;
 
-  static const double _leftPad = 38;
-  static const double _bottomPad = 26;
+  static const double _leftPad = 46;
+  static const double _bottomPad = 28;
 
   @override
   Widget build(BuildContext context) {
-    if (bars.isEmpty) {
-      return SizedBox(
-        height: height,
-        child: const Center(
-          child: Text('No data', style: TextStyle(color: AppColors.muted)),
-        ),
-      );
-    }
+    if (bars.isEmpty) return _NoData(height: height);
+    // A single series is the headline series: the default (legacy amber) and
+    // the series constants all paint in the brand colour.
+    final barColor =
+        color == MisPalette.warning ? AppColors.primary : MisPalette.resolve(color);
     final maxV = bars.map((b) => b.value).fold<double>(0, (a, b) => b > a ? b : a);
     // Headroom above the tallest bar so its printed value has somewhere to sit.
     final top = maxV <= 0 ? 1.0 : maxV * 1.28;
@@ -594,6 +655,11 @@ class MisBarChart extends StatelessWidget {
       child: LayoutBuilder(builder: (context, c) {
         final plotW = (c.maxWidth - _leftPad).clamp(1.0, double.infinity);
         final slot = plotW / bars.length;
+        final barW = bars.length > 12 ? 6.0 : 12.0;
+        // fl_chart's BarChartAlignment.spaceEvenly geometry (equal gaps
+        // before/between/after fixed-width bars), so each printed value sits
+        // exactly over its bar.
+        final eachSpace = (plotW - bars.length * barW) / (bars.length + 1);
         return Stack(
           children: [
             Positioned.fill(
@@ -608,10 +674,11 @@ class MisBarChart extends StatelessWidget {
                         barRods: [
                           BarChartRodData(
                             toY: bars[i].value,
-                            color: color,
-                            width: bars.length > 12 ? 6 : 12,
+                            color: barColor,
+                            width: barW,
                             borderRadius: const BorderRadius.vertical(
-                                top: Radius.circular(3)),
+                                top: Radius.circular(4),
+                                bottom: Radius.circular(1)),
                           ),
                         ],
                       ),
@@ -621,12 +688,16 @@ class MisBarChart extends StatelessWidget {
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: _leftPad,
-                        getTitlesWidget: (v, _) => Text(
-                          v.abs() >= 1000
-                              ? misNum(v.round())
-                              : v.toStringAsFixed(0),
-                          style: const TextStyle(
-                              fontSize: 9, color: AppColors.muted),
+                        getTitlesWidget: (v, _) => Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Text(
+                            v.abs() >= 1000
+                                ? misNum(v.round())
+                                : v.toStringAsFixed(0),
+                            maxLines: 1,
+                            textAlign: TextAlign.right,
+                            style: _axisStyle,
+                          ),
                         ),
                       ),
                     ),
@@ -643,10 +714,9 @@ class MisBarChart extends StatelessWidget {
                             return const SizedBox.shrink();
                           }
                           return Padding(
-                            padding: const EdgeInsets.only(top: 6),
+                            padding: const EdgeInsets.only(top: 8),
                             child: Text(bars[i].label,
-                                style: const TextStyle(
-                                    fontSize: 9, color: AppColors.muted)),
+                                maxLines: 1, style: _axisStyle),
                           );
                         },
                       ),
@@ -658,8 +728,7 @@ class MisBarChart extends StatelessWidget {
                     show: true,
                     drawVerticalLine: false,
                     horizontalInterval: top / 4,
-                    getDrawingHorizontalLine: (_) => const FlLine(
-                        color: AppColors.hairline, strokeWidth: 0.6),
+                    getDrawingHorizontalLine: _gridLine,
                   ),
                   borderData: FlBorderData(show: false),
                   // Values are printed on the chart, so there is nothing left
@@ -673,10 +742,11 @@ class MisBarChart extends StatelessWidget {
                 leftPad: _leftPad,
                 bottomPad: _bottomPad,
                 slotWidth: slot,
+                fontSize: 10,
                 labels: [
                   for (var i = 0; i < bars.length; i++)
                     MisPlotLabel(
-                      xFrac: (i + 0.5) / bars.length,
+                      xFrac: ((i + 1) * eachSpace + (i + 0.5) * barW) / plotW,
                       yFrac: bars[i].value / top,
                       text: fmt(bars[i].value),
                       color: AppColors.ink,

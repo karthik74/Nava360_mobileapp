@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/download_saver.dart';
+import '../../core/pro_ui.dart';
 import '../../core/report_download.dart';
 import '../../core/theme.dart';
 import 'rent_models.dart';
@@ -52,8 +53,13 @@ final _dDate = DateFormat('d MMM yyyy');
 String _d(DateTime? d) => d == null ? '—' : _dDate.format(d);
 
 class RentReportsTab extends ConsumerWidget {
-  const RentReportsTab({super.key, required this.bottomPadding});
+  const RentReportsTab({super.key, required this.bottomPadding, this.nav});
+
+  /// Extra space below the content (the system inset is added on top).
   final double bottomPadding;
+
+  /// Section switcher shown right under the hero.
+  final Widget? nav;
 
   static const _reports = <(String, String, String)>[
     ('payable', 'Monthly Rent Payable', 'Branch-wise rent for a month, with TDS + GST breakdown (Excel).'),
@@ -225,48 +231,68 @@ class RentReportsTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return ListView(
-      physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-      padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
-      children: [
-        for (var i = 0; i < _reports.length; i++)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              onTap: () => _open(context, ref, _reports[i].$1, _reports[i].$2),
-              child: Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(AppRadii.md),
-                  border: Border.all(color: AppColors.hairline),
-                ),
-                child: Row(
-                  children: [
-                    SizedBox(
-                        width: 30,
-                        child: Text((i + 1).toString().padLeft(2, '0'),
-                            style: const TextStyle(fontSize: 12, color: AppColors.muted))),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(_reports[i].$2, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
-                          const SizedBox(height: 2),
-                          Text(_reports[i].$3, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-                        ],
-                      ),
-                    ),
-                    Icon(_reports[i].$1 == 'payable' ? Icons.download_rounded : Icons.chevron_right_rounded,
-                        color: AppColors.muted),
-                  ],
-                ),
-              ),
-            ),
+    return ProPage(
+      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPadding),
+      hero: ProHero(
+        title: 'Reports',
+        subtitle: 'Rent, GST and TDS summaries · ${_reports.length} reports',
+        children: const [
+          ProLiveLine(
+            text: 'Tap a report to view it here, or download the monthly payable as Excel.',
+            color: Color(0xFF9FCBD5),
           ),
+        ],
+      ),
+      children: [
+        if (nav != null) nav!,
+        ProSectionHeader(title: 'All reports · ${_reports.length}', small: true),
+        ProListGroup(
+          children: [
+            for (var i = 0; i < _reports.length; i++)
+              ProListRow(
+                onTap: () => _open(context, ref, _reports[i].$1, _reports[i].$2),
+                leading: ProIconWell(
+                  icon: _iconFor(_reports[i].$1),
+                  color: _reports[i].$1 == 'payable' ? AppColors.success : AppColors.primary,
+                ),
+                title: _reports[i].$2,
+                subtitle: _reports[i].$3,
+                chevron: _reports[i].$1 != 'payable',
+                trailing: _reports[i].$1 == 'payable'
+                    ? const Icon(Icons.download_rounded, size: 20, color: AppColors.muted)
+                    : null,
+              ),
+          ],
+        ),
       ],
     );
+  }
+
+  static IconData _iconFor(String id) {
+    switch (id) {
+      case 'payable':
+        return Icons.table_view_rounded;
+      case 'holding':
+        return Icons.pause_circle_outline_rounded;
+      case 'renewal':
+        return Icons.autorenew_rounded;
+      case 'incremental':
+        return Icons.trending_up_rounded;
+      case 'notice':
+        return Icons.campaign_rounded;
+      case 'new':
+        return Icons.add_business_rounded;
+      case 'vintage':
+        return Icons.history_rounded;
+      case 'expiry':
+        return Icons.event_busy_rounded;
+      case 'deposit':
+        return Icons.savings_outlined;
+      case 'advance':
+        return Icons.account_balance_wallet_outlined;
+      default:
+        return Icons.description_outlined;
+    }
   }
 }
 
@@ -295,91 +321,99 @@ class _ReportSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 8, 4),
-          child: Row(
-            children: [
-              Expanded(child: Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
-              TextButton.icon(
-                onPressed: data.rows.isEmpty ? null : () => _export(context),
-                icon: const Icon(Icons.download_rounded, size: 18),
-                label: const Text('CSV'),
-              ),
-              IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close_rounded)),
-            ],
-          ),
-        ),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-            children: [
-              Text(data.lede, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final k in data.kpis)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(AppRadii.md),
-                        border: Border.all(color: AppColors.hairline),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(k.$1, style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
-                          Text(k.$2, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (data.rows.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 30),
-                  child: Center(child: Text('No records.', style: TextStyle(color: AppColors.muted))),
-                ),
-              for (final r in data.rows)
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.bg,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Container(
+            color: AppColors.surface,
+            child: Column(
+              children: [
+                const SizedBox(height: 10),
                 Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.all(12),
+                  width: 40,
+                  height: 5,
                   decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    border: Border.all(color: AppColors.hairline),
+                    color: const Color(0xFFC6D3D6),
+                    borderRadius: BorderRadius.circular(3),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 10, 8, 10),
+                  child: Row(
                     children: [
-                      Text(r.first, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 4),
-                      for (var i = 1; i < r.length; i++)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(
-                                  width: 120,
-                                  child: Text(data.headers[i], style: const TextStyle(fontSize: 11.5, color: AppColors.muted))),
-                              Expanded(child: Text(r[i], style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
-                            ],
-                          ),
-                        ),
+                      Expanded(
+                        child: Text(title,
+                            style: const TextStyle(
+                                fontSize: 19,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: -0.3,
+                                color: AppColors.ink)),
+                      ),
+                      TextButton.icon(
+                        onPressed: data.rows.isEmpty ? null : () => _export(context),
+                        icon: const Icon(Icons.download_rounded, size: 18),
+                        label: const Text('CSV'),
+                      ),
+                      IconButton(
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
                     ],
                   ),
                 ),
-            ],
+                const Divider(height: 1, color: AppColors.hairline),
+              ],
+            ),
           ),
-        ),
-      ],
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
+              children: [
+                Text(data.lede, style: AppText.caption),
+                const SizedBox(height: 12),
+                for (var i = 0; i < data.kpis.length; i += 3) ...[
+                  ProKpiStrip(cells: [
+                    for (final k in data.kpis.skip(i).take(3)) ProKpi(value: k.$2, label: k.$1),
+                  ]),
+                  const SizedBox(height: 10),
+                ],
+                const SizedBox(height: 4),
+                if (data.rows.isEmpty)
+                  const ProEmpty(icon: Icons.inbox_outlined, title: 'No records.')
+                else ...[
+                  ProSectionHeader(title: 'Records · ${data.rows.length}', small: true),
+                  const SizedBox(height: 8),
+                  for (final r in data.rows)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: GlassCard(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(r.first,
+                                style: const TextStyle(
+                                    fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.ink)),
+                            const SizedBox(height: 2),
+                            ProKeyValue(rows: [
+                              for (var i = 1; i < r.length; i++) MapEntry(data.headers[i], r[i]),
+                            ]),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

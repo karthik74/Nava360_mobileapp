@@ -16,9 +16,16 @@ import '../../core/theme.dart';
 /// Which column the collection table is ordered by.
 enum MisCompareSort { day, prevDate, curDate }
 
-const Color _prevTint = Color(0xFF7C3AED); // violet — previous month
-const Color _curTint = Color(0xFF059669); // emerald — current month
-const Color _ftodTint = Color(0xFFFB923C);
+/// Previous month — a quiet slate; the current month carries the brand colour.
+const Color _prevTint = Color(0xFF43585D);
+Color get _curTint => AppColors.primary;
+
+/// FTOD (the collection gap) — amber ink.
+const Color _ftodTint = Color(0xFF9A5B00);
+
+/// Header band fill + the underline that marks each month's column group.
+const Color _headBg = Color(0xFFF6F8F8);
+const Color _prevRule = Color(0xFFB9C7CA);
 
 /// One paired row of the collection table: a weekday-occurrence label plus each
 /// month's date and cumulative regular demand / collection.
@@ -78,50 +85,81 @@ class MisCompareDisbRow {
 
 // ── Shared grid chrome ───────────────────────────────────────────────────────
 
-const double _rowH = 38;
-const double _bandH = 24;
+const double _rowH = 44;
+const double _bandH = 34;
 
-Widget _bandCell(String text, double width, Color color, {double? height}) {
+/// A month's spanning header: grey band, the month name in its colour and a
+/// 2px underline in that colour ([rule]). Without [rule] it is a plain grey
+/// sub-header cell with a small muted label.
+Widget _bandCell(
+  String text,
+  double width, {
+  Color? ink,
+  Color? rule,
+  double? height,
+  bool divider = false,
+}) {
   return Container(
     width: width,
     height: height ?? _bandH,
-    color: color,
     alignment: Alignment.center,
-    padding: const EdgeInsets.symmetric(horizontal: 3),
+    padding: const EdgeInsets.symmetric(horizontal: 6),
+    decoration: BoxDecoration(
+      color: _headBg,
+      border: Border(
+        left: divider
+            ? const BorderSide(color: AppColors.hairlineSoft)
+            : BorderSide.none,
+        bottom: rule == null
+            ? BorderSide.none
+            : BorderSide(color: rule, width: 2),
+      ),
+    ),
     child: Text(
       text,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       textAlign: TextAlign.center,
-      style: const TextStyle(
-        fontSize: 9.5,
-        fontWeight: FontWeight.w800,
-        color: Colors.white,
+      style: TextStyle(
+        fontSize: rule == null ? 11.5 : 12,
+        fontWeight: FontWeight.w600,
+        color: ink ?? AppColors.muted,
       ),
     ),
   );
 }
 
+/// Hairline divider between rows.
+const BoxDecoration _rowLine = BoxDecoration(
+  color: AppColors.surface,
+  border: Border(top: BorderSide(color: AppColors.hairlineSoft)),
+);
+
 Widget _valueCell(
   String text,
   double width, {
   Color color = AppColors.ink,
-  FontWeight weight = FontWeight.w500,
+  FontWeight weight = FontWeight.w400,
   bool dim = false,
   Alignment align = Alignment.centerRight,
+  bool divider = false,
 }) {
   return Container(
     width: width,
     alignment: align,
-    padding: const EdgeInsets.symmetric(horizontal: 6),
+    padding: const EdgeInsets.symmetric(horizontal: 8),
+    decoration: divider
+        ? const BoxDecoration(
+            border: Border(left: BorderSide(color: AppColors.hairlineSoft)))
+        : null,
     child: Opacity(
-      opacity: dim ? 0.35 : 1,
+      opacity: dim ? 0.4 : 1,
       child: Text(
         text,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          fontSize: 11,
+          fontSize: 12.5,
           fontWeight: weight,
           color: color,
           fontFeatures: const [FontFeature.tabularFigures()],
@@ -130,6 +168,9 @@ Widget _valueCell(
     ),
   );
 }
+
+/// The colour of a "-" (nothing to show) cell.
+const Color _none = AppColors.faint;
 
 Color _collPctColor(double demand, double collection) {
   if (demand == 0) return AppColors.muted;
@@ -171,9 +212,9 @@ class _MisCompareCollectionTableState extends State<MisCompareCollectionTable> {
   MisCompareSort _sort = MisCompareSort.curDate;
   bool _asc = true;
 
-  static const double _dayW = 84;
-  static const double _dateW = 74;
-  static const double _numW = 66;
+  static const double _dayW = 88;
+  static const double _dateW = 82;
+  static const double _numW = 78;
 
   List<MisCompareCollRow> get _sorted {
     final rows = [...widget.rows];
@@ -204,31 +245,35 @@ class _MisCompareCollectionTableState extends State<MisCompareCollectionTable> {
 
     return GlassCard(
       padding: EdgeInsets.zero,
-      shadow: AppShadows.soft,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppRadii.lg),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
+            // Pinned Day column, divided from the scrolling months.
+            Container(
               width: _dayW,
+              decoration: const BoxDecoration(
+                border: Border(right: BorderSide(color: AppColors.hairline)),
+              ),
               child: Column(
                 children: [
                   _sortHeader('Day', MisCompareSort.day, _dayW, headerH),
                   for (var i = 0; i < rows.length; i++)
                     Container(
                       height: _rowH,
-                      color: i.isOdd ? AppColors.surfaceAlt : AppColors.surface,
+                      decoration: _rowLine,
                       alignment: Alignment.centerLeft,
-                      padding: const EdgeInsets.symmetric(horizontal: 9),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: Text(
                         rows[i].label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
                           color: AppColors.ink,
+                          fontFeatures: [FontFeature.tabularFigures()],
                         ),
                       ),
                     ),
@@ -243,31 +288,29 @@ class _MisCompareCollectionTableState extends State<MisCompareCollectionTable> {
                   children: [
                     Row(
                       children: [
-                        _bandCell(widget.prevMonth,
-                            _dateW + _numW * 4, _prevTint),
-                        _bandCell(
-                            widget.curMonth, _dateW + _numW * 4, _curTint),
+                        _bandCell(widget.prevMonth, _dateW + _numW * 4,
+                            ink: AppColors.inkSoft, rule: _prevRule),
+                        _bandCell(widget.curMonth, _dateW + _numW * 4,
+                            ink: _curTint, rule: _curTint, divider: true),
                       ],
                     ),
                     Row(
                       children: [
                         _sortHeader('Date', MisCompareSort.prevDate, _dateW,
-                            _bandH,
-                            color: _prevTint),
+                            _bandH),
                         for (final h in const ['RD', 'RC', 'FTOD', 'Coll%'])
-                          _bandCell(h, _numW, _prevTint),
+                          _bandCell(h, _numW),
                         _sortHeader(
                             'Date', MisCompareSort.curDate, _dateW, _bandH,
-                            color: _curTint),
+                            divider: true),
                         for (final h in const ['RD', 'RC', 'FTOD', 'Coll%'])
-                          _bandCell(h, _numW, _curTint),
+                          _bandCell(h, _numW),
                       ],
                     ),
                     for (var i = 0; i < rows.length; i++)
                       Container(
                         height: _rowH,
-                        color:
-                            i.isOdd ? AppColors.surfaceAlt : AppColors.surface,
+                        decoration: _rowLine,
                         child: Row(
                           children: [
                             _valueCell(rows[i].prevDateLabel, _dateW,
@@ -279,7 +322,8 @@ class _MisCompareCollectionTableState extends State<MisCompareCollectionTable> {
                             _valueCell(rows[i].curDateLabel, _dateW,
                                 color: _curTint,
                                 weight: FontWeight.w600,
-                                align: Alignment.center),
+                                align: Alignment.center,
+                                divider: true),
                             ..._sideCells(rows[i].cur),
                           ],
                         ),
@@ -299,20 +343,20 @@ class _MisCompareCollectionTableState extends State<MisCompareCollectionTable> {
       {bool dim = false}) {
     if (d == null) {
       return [
-        for (var i = 0; i < 4; i++)
-          _valueCell('-', _numW, color: AppColors.hairline),
+        for (var i = 0; i < 4; i++) _valueCell('-', _numW, color: _none),
       ];
     }
     final ftod = d.demand - d.collection;
     return [
-      _valueCell(widget.numberFormat(d.demand), _numW, dim: dim),
+      _valueCell(widget.numberFormat(d.demand), _numW,
+          color: AppColors.inkSoft, dim: dim),
       _valueCell(widget.numberFormat(d.collection), _numW,
-          color: _curTint, dim: dim),
+          color: AppColors.ink, weight: FontWeight.w500, dim: dim),
       _valueCell(widget.numberFormat(ftod), _numW,
           color: _ftodTint, weight: FontWeight.w600, dim: dim),
       _valueCell(_pct(d.demand, d.collection), _numW,
           color: _collPctColor(d.demand, d.collection),
-          weight: FontWeight.w800,
+          weight: FontWeight.w600,
           dim: dim),
     ];
   }
@@ -322,46 +366,51 @@ class _MisCompareCollectionTableState extends State<MisCompareCollectionTable> {
     MisCompareSort col,
     double width,
     double height, {
-    Color? color,
+    bool divider = false,
   }) {
-    // AppColors.primary is swapped at runtime per deployment brand, so it can't
-    // be a const default — resolve it here instead.
-    color ??= AppColors.primary;
     final active = _sort == col;
-    return InkWell(
-      onTap: () => _toggle(col),
-      child: Container(
-        width: width,
-        height: height,
-        color: color,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 3),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.white,
+    final ink = active ? AppColors.ink : AppColors.muted;
+    return Material(
+      color: _headBg,
+      child: InkWell(
+        onTap: () => _toggle(col),
+        child: Container(
+          width: width,
+          height: height,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          decoration: divider
+              ? const BoxDecoration(
+                  border:
+                      Border(left: BorderSide(color: AppColors.hairlineSoft)))
+              : null,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: ink,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 2),
-            Icon(
-              active
-                  ? (_asc
-                      ? Icons.arrow_drop_up_rounded
-                      : Icons.arrow_drop_down_rounded)
-                  : Icons.unfold_more_rounded,
-              size: active ? 15 : 11,
-              color: Colors.white.withValues(alpha: active ? 1 : 0.45),
-            ),
-          ],
+              const SizedBox(width: 2),
+              Icon(
+                active
+                    ? (_asc
+                        ? Icons.arrow_drop_up_rounded
+                        : Icons.arrow_drop_down_rounded)
+                    : Icons.unfold_more_rounded,
+                size: active ? 18 : 13,
+                color: active ? AppColors.ink : AppColors.faint,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -394,16 +443,15 @@ class MisCompareDisbursementTable extends StatelessWidget {
   final String Function(num) numberFormat;
   final String Function(num) croreFormat;
 
-  static const double _dateW = 78;
-  static const double _numW = 76;
-  static const double _diffW = 66;
+  static const double _dateW = 84;
+  static const double _numW = 84;
+  static const double _diffW = 76;
 
   @override
   Widget build(BuildContext context) {
     const headerH = _bandH * 2;
     return GlassCard(
       padding: EdgeInsets.zero,
-      shadow: AppShadows.soft,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppRadii.lg),
         child: SingleChildScrollView(
@@ -413,23 +461,24 @@ class MisCompareDisbursementTable extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  _bandCell(prevMonth, _dateW + _numW * 2, _prevTint),
-                  _bandCell(curMonth, _dateW + _numW * 2, _curTint),
-                  _bandCell('Diff %', _diffW, AppColors.primary,
-                      height: headerH),
+                  _bandCell(prevMonth, _dateW + _numW * 2,
+                      ink: AppColors.inkSoft, rule: _prevRule),
+                  _bandCell(curMonth, _dateW + _numW * 2,
+                      ink: _curTint, rule: _curTint, divider: true),
+                  _bandCell('Diff %', _diffW, height: headerH, divider: true),
                 ],
               ),
               Row(
                 children: [
                   for (final h in const ['Date', 'Accounts', 'Amount'])
-                    _bandCell(h, h == 'Date' ? _dateW : _numW, _prevTint),
+                    _bandCell(h, h == 'Date' ? _dateW : _numW),
                   for (final h in const ['Date', 'Accounts', 'Amount'])
-                    _bandCell(h, h == 'Date' ? _dateW : _numW, _curTint),
+                    _bandCell(h, h == 'Date' ? _dateW : _numW,
+                        divider: h == 'Date'),
                   const SizedBox(width: _diffW),
                 ],
               ),
-              for (var i = 0; i < rows.length; i++)
-                _row(rows[i], i.isOdd ? AppColors.surfaceAlt : AppColors.surface),
+              for (var i = 0; i < rows.length; i++) _row(rows[i]),
               if (rows.isNotEmpty) _totalRow(),
             ],
           ),
@@ -438,10 +487,10 @@ class MisCompareDisbursementTable extends StatelessWidget {
     );
   }
 
-  Widget _row(MisCompareDisbRow r, Color background) {
+  Widget _row(MisCompareDisbRow r) {
     return Container(
       height: _rowH,
-      color: background,
+      decoration: _rowLine,
       child: Row(
         children: [
           _valueCell(r.prevDateLabel, _dateW,
@@ -452,34 +501,35 @@ class MisCompareDisbursementTable extends StatelessWidget {
           _valueCell(
             r.prevAccounts == null ? '-' : numberFormat(r.prevAccounts!),
             _numW,
-            color: r.prevAccounts == null ? AppColors.hairline : AppColors.ink,
+            color: r.prevAccounts == null ? _none : AppColors.inkSoft,
           ),
           _valueCell(
             r.prevAmount == null ? '-' : croreFormat(r.prevAmount!),
             _numW,
-            color: r.prevAmount == null ? AppColors.hairline : _prevTint,
+            color: r.prevAmount == null ? _none : _prevTint,
             weight: FontWeight.w600,
           ),
           _valueCell(r.curDateLabel, _dateW,
               color: _curTint,
               weight: FontWeight.w600,
               dim: r.curAccounts == null,
-              align: Alignment.center),
+              align: Alignment.center,
+              divider: true),
           _valueCell(
             r.curAccounts == null ? '-' : numberFormat(r.curAccounts!),
             _numW,
-            color: r.curAccounts == null ? AppColors.hairline : AppColors.ink,
+            color: r.curAccounts == null ? _none : AppColors.inkSoft,
           ),
           _valueCell(
             r.curAmount == null ? '-' : croreFormat(r.curAmount!),
             _numW,
-            color: r.curAmount == null ? AppColors.hairline : _curTint,
+            color: r.curAmount == null ? _none : _curTint,
             weight: FontWeight.w600,
           ),
           // Past the current month's last loaded day there is nothing to
           // compare against, so the cell is blanked rather than showing -100%.
           r.beyondCurrent
-              ? _valueCell('—', _diffW, color: AppColors.hairline)
+              ? _valueCell('—', _diffW, color: _none, divider: true)
               : _diffCell(r.prevAmount, r.curAmount),
         ],
       ),
@@ -490,24 +540,25 @@ class MisCompareDisbursementTable extends StatelessWidget {
     return Container(
       height: _rowH,
       decoration: const BoxDecoration(
-        color: AppColors.surfaceAlt,
-        border: Border(
-            top: BorderSide(color: AppColors.hairline, width: 1.4)),
+        color: _headBg,
+        border: Border(top: BorderSide(color: AppColors.hairline)),
       ),
       child: Row(
         children: [
           _valueCell('Total', _dateW,
-              weight: FontWeight.w800, align: Alignment.center),
+              weight: FontWeight.w600, align: Alignment.center),
           _valueCell(numberFormat(totalPrevAccounts), _numW,
-              weight: FontWeight.w700),
+              weight: FontWeight.w600),
           _valueCell(croreFormat(totalPrevAmount), _numW,
-              color: _prevTint, weight: FontWeight.w800),
+              color: _prevTint, weight: FontWeight.w600),
           _valueCell('Total', _dateW,
-              weight: FontWeight.w800, align: Alignment.center),
+              weight: FontWeight.w600,
+              align: Alignment.center,
+              divider: true),
           _valueCell(numberFormat(totalCurAccounts), _numW,
-              weight: FontWeight.w700),
+              weight: FontWeight.w600),
           _valueCell(croreFormat(totalCurAmount), _numW,
-              color: _curTint, weight: FontWeight.w800),
+              color: _curTint, weight: FontWeight.w600),
           _diffCell(
             totalPrevAmount == 0 ? null : totalPrevAmount,
             totalCurAmount == 0 ? null : totalCurAmount,
@@ -520,7 +571,7 @@ class MisCompareDisbursementTable extends StatelessWidget {
 
   Widget _diffCell(double? prev, double? cur, {bool bold = false}) {
     if (prev == null || cur == null || prev == 0) {
-      return _valueCell('-', _diffW, color: AppColors.hairline);
+      return _valueCell('-', _diffW, color: _none, divider: true);
     }
     final diff = (cur - prev) / prev * 100;
     final up = diff >= 0;
@@ -528,7 +579,8 @@ class MisCompareDisbursementTable extends StatelessWidget {
       '${up ? '+' : ''}${diff.toStringAsFixed(1)}%',
       _diffW,
       color: up ? AppColors.success : AppColors.danger,
-      weight: bold ? FontWeight.w800 : FontWeight.w700,
+      weight: bold ? FontWeight.w600 : FontWeight.w500,
+      divider: true,
     );
   }
 }

@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/pro_ui.dart';
+import '../../core/theme.dart';
 import 'insights_models.dart';
 import 'insights_repository.dart';
 import 'opening_insights_trigger.dart';
@@ -34,24 +36,18 @@ const double _kCardLen = .6; // card rise
 const double _kCountDelay = .1, _kCountLen = .55; // count-up after rise starts
 const Duration _kAffirmHold = Duration(milliseconds: 1100); // feedback beat
 
-// ── Palette ─────────────────────────────────────────────────────────────────
-const _cBg0 = Color(0xFFFFFDF7);
-const _cBg1 = Color(0xFFF5F3E9);
-const _cBg2 = Color(0xFFE9EAD7);
-const _cTeaser = Color(0xFF5B6F34);
-const _cLabel = Color(0xFF63723B);
-const _cValue = Color(0xFF253018);
-const _cMeta = Color(0xFF78816E);
-const _cCard = Color(0xFFFFFEFA);
-const _cCardBorder = Color(0xFFD8DDC8);
-const _cCardShadow = Color(0x1C4A5938);
-const _cOrbit = Color(0xFFECF0DD);
-const _cOrbitBorder = Color(0xFFDCE3C6);
-const _cCta = Color(0xFF667C31);
-const _cCtaPressed = Color(0xFF526D2B);
-const _cCtaShadow = Color(0x40485D2E);
-const _cFeedback = Color(0xFF627A36);
-const _cCharShadow = Color(0x40525943);
+// ── Palette (Pro deep surface; brand colours come from AppColors) ──────────
+const _cTeaser = Color(0xB8FFFFFF); // white 72 %
+const _cLabel = Color(0xDBFFFFFF); // white 86 %
+const _cValue = Colors.white;
+const _cMeta = Color(0xB8FFFFFF);
+const _cCard = Color(0x14FFFFFF); // white 8 %
+const _cCardBorder = Color(0x1FFFFFFF); // white 12 %
+const _cOrbitBorder = Color(0x4DFFFFFF); // white 30 %
+const _cFeedback = Color(0xFFB5E07A); // soft lime
+const _cCharShadow = Color(0x59000000);
+const _cDue = Color(0xFF7FB0FF);
+const _cPending = Color(0xFFF2B347);
 
 /// Phone aspect the layout was designed on (9 : 19.5). All geometry below is
 /// in `u` = 1 % of that stage's width (the prototype's `cqw`).
@@ -290,10 +286,10 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.dark.copyWith(
+      value: SystemUiOverlayStyle.light.copyWith(
         statusBarColor: Colors.transparent,
-        systemNavigationBarColor: _cBg2,
-        systemNavigationBarIconBrightness: Brightness.dark,
+        systemNavigationBarColor: AppColors.deep,
+        systemNavigationBarIconBrightness: Brightness.light,
       ),
       child: PopScope(
         canPop: false,
@@ -301,7 +297,7 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
           if (!didPop) _onBack();
         },
         child: Scaffold(
-          backgroundColor: _cBg2,
+          backgroundColor: AppColors.deep,
           body: FadeTransition(
             opacity: ReverseAnimation(_outro),
             child: LayoutBuilder(builder: (context, box) {
@@ -309,10 +305,28 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
               // Fit the 9:19.5 stage inside the screen, centred.
               final u = math.min(w / 100, h / (100 * _kStageAspect));
               final stageW = 100 * u, stageH = 100 * _kStageAspect * u;
-              return DecoratedBox(
-                decoration: BoxDecoration(gradient: _background(w, h)),
+              return ProDeepSurface(
+                padding: EdgeInsets.zero,
                 child: Stack(
                   children: [
+                    // Soft brand glow behind the guide.
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: RadialGradient(
+                              center: const Alignment(0, -0.4),
+                              radius: 0.75,
+                              colors: [
+                                AppColors.primary.withValues(alpha: 0.42),
+                                AppColors.primary.withValues(alpha: 0),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: w, height: h),
                     Positioned(
                       left: (w - stageW) / 2,
                       top: (h - stageH) / 2,
@@ -330,21 +344,6 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
           ),
         ),
       ),
-    );
-  }
-
-  /// `radial-gradient(circle at 52% 40%, #fffdf7 0%, #f5f3e9 55%, #e9ead7)`
-  /// — a circle reaching the farthest corner.
-  static Gradient _background(double w, double h) {
-    const cx = .52, cy = .40;
-    final far = math.sqrt(math.pow(math.max(cx, 1 - cx) * w, 2) +
-        math.pow(math.max(cy, 1 - cy) * h, 2));
-    final shortest = math.max(1.0, math.min(w, h));
-    return RadialGradient(
-      center: const Alignment(cx * 2 - 1, cy * 2 - 1),
-      radius: far / shortest,
-      colors: const [_cBg0, _cBg1, _cBg2],
-      stops: const [0, .55, 1],
     );
   }
 
@@ -373,10 +372,22 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
             opacity: arrival * .5,
             child: Transform.scale(
               scale: 1.18 - .18 * zoom,
-              child: const DecoratedBox(
+              child: DecoratedBox(
                 decoration: ShapeDecoration(
-                  color: _cOrbit,
-                  shape: OvalBorder(side: BorderSide(color: _cOrbitBorder)),
+                  gradient: RadialGradient(
+                    center: const Alignment(0, -0.28),
+                    radius: 0.62,
+                    colors: [
+                      Color.lerp(AppColors.primary, Colors.white, 0.3)!
+                          .withValues(alpha: 0.75),
+                      AppColors.primary.withValues(alpha: 0.42),
+                      AppColors.primary.withValues(alpha: 0.08),
+                      AppColors.primary.withValues(alpha: 0),
+                    ],
+                    stops: const [0, .46, .72, 1],
+                  ),
+                  shape: const OvalBorder(
+                      side: BorderSide(color: _cOrbitBorder)),
                 ),
               ),
             ),
@@ -472,8 +483,8 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
                 fontSize: size,
                 height: 1.05,
                 leadingDistribution: TextLeadingDistribution.even,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -.02 * size,
+                fontWeight: FontWeight.w600,
+                letterSpacing: .02 * size,
               ),
             ),
           ),
@@ -489,8 +500,8 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
       (_disbursement(d, ftd), _disbursement(d, mtd)),
       (_ftod(ftd), _ftod(mtd)),
       (
-        _CardSpec('PTP', ftd?.ptp, 'promises due'),
-        _CardSpec('PTP', mtd?.ptp, 'promises due'),
+        _CardSpec('PTP', ftd?.ptp, 'promises due', _cPending),
+        _CardSpec('PTP', mtd?.ptp, 'promises due', _cPending),
       ),
     ];
     return Column(
@@ -509,19 +520,23 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
     );
   }
 
+  /// Category dot for the disbursement cards (brand tint, as in the design).
+  static final _cDisbursement =
+      Color.lerp(AppColors.primary, Colors.white, 0.35)!;
+
   /// "—" with "not available" once data is in and the feed has no figure
   /// (e.g. yesterday's disbursement); plain "accounts" otherwise.
   static _CardSpec _disbursement(OpeningInsights? d, InsightsColumn? c) {
     final v = c?.disbursement;
     return _CardSpec('Disbursement', v,
-        d != null && v == null ? 'not available' : 'accounts');
+        d != null && v == null ? 'not available' : 'accounts', _cDisbursement);
   }
 
   /// Accounts still unpaid, with how many fell due behind them.
   static _CardSpec _ftod(InsightsColumn? c) {
     final due = c?.ftodDue;
     return _CardSpec('FTOD', c?.ftod,
-        due == null ? 'accounts' : 'of ${insightsCount(due)} due');
+        due == null ? 'accounts' : 'of ${insightsCount(due)} due', _cDue);
   }
 
   /// Count-up progress (0–1) for a card entering at [at].
@@ -550,31 +565,45 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
             padding: EdgeInsets.all(2.6 * u),
             decoration: BoxDecoration(
               color: _cCard,
-              borderRadius: BorderRadius.circular(4 * u),
+              borderRadius: BorderRadius.circular(3.6 * u),
               border: Border.all(color: _cCardBorder),
-              boxShadow: [
-                BoxShadow(
-                  color: _cCardShadow,
-                  offset: Offset(0, 1 * u),
-                  blurRadius: 2.5 * u,
-                ),
-              ],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  c.label.toUpperCase(),
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.visible,
-                  style: TextStyle(
-                    color: _cLabel,
-                    fontSize: labelSize,
-                    height: 1.1,
-                    leadingDistribution: TextLeadingDistribution.even,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: .03 * labelSize,
+                SizedBox(
+                  width: double.infinity,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 1.8 * u,
+                          height: 1.8 * u,
+                          decoration: BoxDecoration(
+                            color: c.dot,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        SizedBox(width: 1.2 * u),
+                        Text(
+                          c.label.toUpperCase(),
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.visible,
+                          style: TextStyle(
+                            color: _cLabel,
+                            fontSize: labelSize,
+                            height: 1.1,
+                            leadingDistribution: TextLeadingDistribution.even,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: .03 * labelSize,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 SizedBox(height: 1.1 * u),
@@ -592,8 +621,8 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
                         fontSize: valueSize,
                         height: 1,
                         leadingDistribution: TextLeadingDistribution.even,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -.055 * valueSize,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -.03 * valueSize,
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
@@ -609,7 +638,7 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
                     fontSize: metaSize,
                     height: 1.2,
                     leadingDistribution: TextLeadingDistribution.even,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
@@ -647,26 +676,43 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
                 ),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: down ? _cCtaPressed : _cCta,
-                  borderRadius: BorderRadius.circular(4 * u),
+                  color: down
+                      ? Color.lerp(AppColors.primary, AppColors.deep, 0.35)
+                      : AppColors.primary,
+                  borderRadius: BorderRadius.circular(3.6 * u),
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.14)),
                   boxShadow: [
                     BoxShadow(
-                      color: _cCtaShadow,
-                      offset: Offset(0, 2 * u),
+                      color: AppColors.primary.withValues(alpha: 0.45),
+                      offset: Offset(0, 2.5 * u),
                       blurRadius: 5 * u,
+                      spreadRadius: -2 * u,
                     ),
                   ],
                 ),
-                child: Text(
-                  "i'll improve and work hard today",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: size,
-                    height: 1.2,
-                    leadingDistribution: TextLeadingDistribution.even,
-                    fontWeight: FontWeight.w800,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_affirmed) ...[
+                      Icon(Icons.check_rounded,
+                          color: Colors.white, size: 4.6 * u),
+                      SizedBox(width: 1.8 * u),
+                    ],
+                    Flexible(
+                      child: Text(
+                        "i'll improve and work hard today",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: size,
+                          height: 1.2,
+                          leadingDistribution: TextLeadingDistribution.even,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -688,7 +734,7 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
                 style: TextStyle(
                   color: _cFeedback,
                   fontSize: 2.7 * u,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
@@ -700,12 +746,15 @@ class _OpeningInsightsScreenState extends ConsumerState<OpeningInsightsScreen>
 }
 
 class _CardSpec {
-  const _CardSpec(this.label, this.value, this.meta);
+  const _CardSpec(this.label, this.value, this.meta, this.dot);
   final String label;
 
   /// Null → "—" (no data yet, load failed, or not available).
   final int? value;
   final String meta;
+
+  /// Small category dot before the label.
+  final Color dot;
 }
 
 /// The animated guide with a soft shadow at her feet (stands in for the

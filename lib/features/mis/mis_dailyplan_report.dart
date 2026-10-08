@@ -12,6 +12,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:flutter/services.dart';
+
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_export.dart';
@@ -281,88 +284,91 @@ class _MisDailyPlanReportState extends ConsumerState<MisDailyPlanReport> {
     final offset = _offsetFromToday(_date);
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         GlassCard(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Row(
                 children: [
-                  Icon(Icons.assessment_rounded,
-                      size: 18, color: AppColors.primary),
-                  const SizedBox(width: 8),
+                  ProIconWell(
+                      icon: Icons.assessment_rounded,
+                      color: AppColors.primary),
+                  const SizedBox(width: 12),
                   const Expanded(
-                    child: Text(
-                      'Custom Report Builder',
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.ink,
-                      ),
+                    child: ProSectionHeader(
+                      title: 'Custom report builder',
+                      subtitle: 'Select date & level to generate reports',
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 2),
-              const Text(
-                'Select date & level to generate reports',
-                style: TextStyle(fontSize: 11.5, color: AppColors.muted),
-              ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
 
               const _FieldLabel('1. Select date'),
               const SizedBox(height: 6),
               Row(
                 children: [
-                  IconButton(
-                    onPressed: () =>
-                        setState(() => _date = _shiftIso(_date, -1)),
-                    icon: const Icon(Icons.chevron_left_rounded),
+                  _StepButton(
+                    icon: Icons.chevron_left_rounded,
                     tooltip: 'Previous day',
+                    onTap: () =>
+                        setState(() => _date = _shiftIso(_date, -1)),
                   ),
+                  const SizedBox(width: 8),
                   Expanded(
-                    child: GestureDetector(
-                      onTap: _pickDate,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 11),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(AppRadii.md),
-                          border: Border.all(color: AppColors.hairline),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.event_rounded,
-                                size: 17, color: AppColors.primary),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                misPrettyDate(_date),
-                                style: const TextStyle(
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.ink,
+                    child: Material(
+                      color: AppColors.surface,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadii.md),
+                        side: const BorderSide(color: Color(0xFFDBE3E5)),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: _pickDate,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 12),
+                          child: Row(
+                            children: [
+                              Icon(Icons.event_rounded,
+                                  size: 18, color: AppColors.primary),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  misPrettyDate(_date),
+                                  style: const TextStyle(
+                                    fontSize: 14.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.ink,
+                                    fontFeatures: [
+                                      FontFeature.tabularFigures()
+                                    ],
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
+                              const Icon(Icons.keyboard_arrow_down_rounded,
+                                  color: AppColors.muted),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  IconButton(
-                    onPressed: () =>
-                        setState(() => _date = _shiftIso(_date, 1)),
-                    icon: const Icon(Icons.chevron_right_rounded),
+                  const SizedBox(width: 8),
+                  _StepButton(
+                    icon: Icons.chevron_right_rounded,
                     tooltip: 'Next day',
+                    onTap: () =>
+                        setState(() => _date = _shiftIso(_date, 1)),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Wrap(
                 spacing: 8,
+                runSpacing: 8,
                 children: [
                   for (final p in const [
                     (-1, 'Yesterday'),
@@ -378,60 +384,51 @@ class _MisDailyPlanReportState extends ConsumerState<MisDailyPlanReport> {
                 ],
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 18),
               const _FieldLabel('2. Report level'),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
                   for (final lv in levels)
                     _Pill(
-                      label: '${_levelLabels[lv]} Level',
+                      label: '${_levelLabels[lv]} level',
                       active: _level == lv,
                       onTap: () => setState(() => _level = lv),
                     ),
                 ],
               ),
 
-              const SizedBox(height: 16),
+              const SizedBox(height: 18),
               if (misCanSeePending(widget.role)) ...[
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _openPending,
-                    icon: const Icon(Icons.phone_rounded, size: 18),
-                    label: const Text('Branches Pending'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.warning,
-                      side: const BorderSide(color: AppColors.warning),
-                    ),
+                OutlinedButton.icon(
+                  onPressed: _openPending,
+                  icon: const Icon(Icons.phone_rounded, size: 18),
+                  label: const Text('Branches pending'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF9A5B00),
+                    side: const BorderSide(color: Color(0xFFF2D19B)),
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
               ],
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => setState(() => _mode = 'plan'),
-                  icon: const Icon(Icons.assignment_rounded, size: 18),
-                  label: const Text('Generate Plan Report'),
-                ),
+              OutlinedButton.icon(
+                onPressed: () => setState(() => _mode = 'plan'),
+                icon: const Icon(Icons.assignment_rounded, size: 18),
+                label: const Text('Generate plan report'),
               ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: () => setState(() => _mode = 'both'),
-                  icon: const Icon(Icons.description_rounded, size: 18),
-                  label: const Text('Plan & Achievement'),
-                ),
+              const SizedBox(height: 10),
+              FilledButton.icon(
+                onPressed: () => setState(() => _mode = 'both'),
+                icon: const Icon(Icons.description_rounded, size: 18),
+                label: const Text('Plan & achievement'),
               ),
             ],
           ),
         ),
         if (_mode != null) ...[
-          const SizedBox(height: 18),
+          const SizedBox(height: 22),
           MisDailyPlanReportTable(
             level: _level,
             date: _date,
@@ -470,7 +467,7 @@ class _MisDailyPlanReportState extends ConsumerState<MisDailyPlanReport> {
       backgroundColor: AppColors.surface,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (_) => _PendingBranchesSheet(date: _date),
     );
@@ -482,14 +479,42 @@ class _FieldLabel extends StatelessWidget {
   final String text;
 
   @override
-  Widget build(BuildContext context) => Text(
-        text,
-        style: const TextStyle(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w800,
-          color: AppColors.muted,
+  Widget build(BuildContext context) => Text(text, style: AppText.label);
+}
+
+/// 42px hairline square for previous / next day.
+class _StepButton extends StatelessWidget {
+  const _StepButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Color(0xFFDBE3E5)),
         ),
-      );
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: 44,
+            height: 46,
+            child: Icon(icon, size: 22, color: AppColors.ink),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _Pill extends StatelessWidget {
@@ -501,21 +526,27 @@ class _Pill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        height: 36,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
         decoration: BoxDecoration(
-          color: active ? AppColors.primary : AppColors.surfaceAlt,
+          color: active ? AppColors.ink : AppColors.surface,
           borderRadius: BorderRadius.circular(AppRadii.pill),
           border: Border.all(
-              color: active ? AppColors.primary : AppColors.hairline),
+              color: active ? AppColors.ink : const Color(0xFFDBE3E5)),
         ),
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            color: active ? Colors.white : AppColors.muted,
+            fontSize: 13.5,
+            fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+            color: active ? Colors.white : AppColors.inkSoft,
           ),
         ),
       ),
@@ -551,17 +582,17 @@ class _PendingBranchesSheetState extends ConsumerState<_PendingBranchesSheet> {
         maxChildSize: 0.95,
         builder: (ctx, controller) => Column(
           children: [
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Container(
               width: 40,
-              height: 4,
+              height: 5,
               decoration: BoxDecoration(
-                color: AppColors.hairline,
-                borderRadius: BorderRadius.circular(2),
+                color: const Color(0xFFC6D3D6),
+                borderRadius: BorderRadius.circular(3),
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
+              padding: const EdgeInsets.fromLTRB(20, 14, 12, 8),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -570,17 +601,17 @@ class _PendingBranchesSheetState extends ConsumerState<_PendingBranchesSheet> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Branches Pending',
+                          'Branches pending',
                           style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
+                            fontSize: 19,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.4,
                             color: AppColors.ink,
                           ),
                         ),
                         Text(
                           '${misPrettyDate(widget.date)} · $label',
-                          style: const TextStyle(
-                              fontSize: 12, color: AppColors.muted),
+                          style: AppText.caption,
                         ),
                       ],
                     ),
@@ -594,7 +625,7 @@ class _PendingBranchesSheetState extends ConsumerState<_PendingBranchesSheet> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18),
+              padding: const EdgeInsets.fromLTRB(20, 0, 12, 0),
               child: Row(
                 children: [
                   MisSegmented<String>(
@@ -636,19 +667,25 @@ class _PendingBranchesSheetState extends ConsumerState<_PendingBranchesSheet> {
                 ),
                 data: (branches) => branches.isEmpty
                     ? const Padding(
-                        padding: EdgeInsets.all(18),
-                        child: AppEmptyState(
-                          icon: Icons.celebration_rounded,
-                          message:
-                              'All branches have uploaded for this date.',
+                        padding: EdgeInsets.all(20),
+                        child: Align(
+                          alignment: Alignment.topCenter,
+                          child: ProEmpty(
+                            icon: Icons.celebration_rounded,
+                            title: 'All caught up',
+                            message:
+                                'All branches have uploaded for this date.',
+                          ),
                         ),
                       )
                     : ListView.separated(
                         controller: controller,
-                        padding: const EdgeInsets.fromLTRB(18, 4, 18, 20),
+                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
                         itemCount: branches.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 18, color: AppColors.hairline),
+                        separatorBuilder: (_, __) => const Divider(
+                            height: 1,
+                            indent: 46,
+                            color: AppColors.hairlineSoft),
                         itemBuilder: (_, i) => _row(branches[i], i),
                       ),
               ),
@@ -660,44 +697,65 @@ class _PendingBranchesSheetState extends ConsumerState<_PendingBranchesSheet> {
   }
 
   Widget _row(PendingBranch b, int i) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${i + 1}. ${b.branchName}',
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.ink,
-                ),
-              ),
-              if (b.crumb.isNotEmpty)
-                Text(b.crumb,
-                    style: const TextStyle(
-                        fontSize: 11, color: AppColors.muted)),
-              const SizedBox(height: 2),
-              Text(b.bmName ?? '—',
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 11),
+      child: Row(
+        children: [
+          const ProIconWell(
+            icon: Icons.storefront_outlined,
+            color: Color(0xFF9A5B00),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${i + 1}. ${b.branchName}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                      fontSize: 12, color: AppColors.inkSoft)),
-            ],
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.ink,
+                  ),
+                ),
+                if (b.crumb.isNotEmpty)
+                  Text(b.crumb,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.caption),
+                Text(b.bmName ?? '—',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.inkSoft)),
+              ],
+            ),
           ),
-        ),
-        if (b.bmPhone != null && b.bmPhone!.isNotEmpty)
-          TextButton.icon(
-            onPressed: () async {
-              final uri = Uri.parse('tel:${b.bmPhone}');
-              if (await canLaunchUrl(uri)) await launchUrl(uri);
-            },
-            icon: const Icon(Icons.call_rounded, size: 15),
-            label: Text(b.bmPhone!,
-                style: const TextStyle(fontSize: 12)),
-            style: TextButton.styleFrom(foregroundColor: AppColors.success),
-          ),
-      ],
+          if (b.bmPhone != null && b.bmPhone!.isNotEmpty)
+            TextButton.icon(
+              onPressed: () async {
+                final uri = Uri.parse('tel:${b.bmPhone}');
+                if (await canLaunchUrl(uri)) await launchUrl(uri);
+              },
+              icon: const Icon(Icons.call_rounded, size: 15),
+              label: Text(b.bmPhone!,
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      fontFeatures: [FontFeature.tabularFigures()])),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.success,
+                backgroundColor: AppColors.successTint,
+                minimumSize: const Size(0, 34),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                shape: const StadiumBorder(),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -798,84 +856,44 @@ class MisDailyPlanReportTable extends ConsumerWidget {
     }
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '$heading · $colLabel Level · ${misPrettyDate(date)}',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.inkSoft,
-                ),
-              ),
-            ),
-            IconButton(
-              tooltip: 'Download report',
-              onPressed:
-                  planRows.isEmpty ? null : () => _exportReport(context, ref),
-              icon: const Icon(Icons.download_rounded),
-            ),
-          ],
+        ProSectionHeader(
+          title: heading,
+          subtitle: '$colLabel level · ${misPrettyDate(date)}',
+          trailing: IconButton(
+            tooltip: 'Download report',
+            onPressed:
+                planRows.isEmpty ? null : () => _exportReport(context, ref),
+            icon: const Icon(Icons.download_rounded),
+            color: AppColors.primary,
+          ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         if (planRows.isEmpty)
-          GlassCard(
-            child: Column(
-              children: [
-                const Icon(Icons.assessment_outlined,
-                    size: 40, color: AppColors.muted),
-                const SizedBox(height: 10),
-                const Text(
-                  'No plans for this date',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'No branch has entered a daily plan for '
-                  '${misPrettyDate(date)}. Ask branch managers to submit their '
-                  'targets, or pick another date.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
-                ),
-              ],
-            ),
+          ProEmpty(
+            icon: Icons.assessment_outlined,
+            title: 'No plans for this date',
+            message: 'No branch has entered a daily plan for '
+                '${misPrettyDate(date)}. Ask branch managers to submit their '
+                'targets, or pick another date.',
           )
         else ...[
           if (_both && achRows.isEmpty) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-              decoration: BoxDecoration(
-                color: AppColors.warning.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                border:
-                    Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.warning_amber_rounded,
-                      size: 16, color: AppColors.warning),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'No achievements submitted for '
-                      '${misPrettyDate(date)} yet.',
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.inkSoft),
-                    ),
-                  ),
-                ],
-              ),
+            ProNote(
+              'No achievements submitted for ${misPrettyDate(date)} yet.',
+              tone: ProNoteTone.warn,
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
           ],
           _grid(colLabel, planRows, achByName, grandPlan, grandAch),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(2, 8, 2, 0),
+            child: Text(
+              'Swipe the table sideways for every column. Amounts are in crores.',
+              style: TextStyle(fontSize: 12, color: AppColors.muted),
+            ),
+          ),
         ],
       ],
     );
@@ -888,8 +906,8 @@ class MisDailyPlanReportTable extends ConsumerWidget {
   static const double _nameW = 118;
   static const double _cellW = 74;
   static const double _pctW = 62;
-  static const double _bandH = 24;
-  static const double _rowH = 38;
+  static const double _bandH = 26;
+  static const double _rowH = 42;
 
   double get _headerH => _bandH * (_both ? 3 : 2);
 
@@ -902,35 +920,41 @@ class MisDailyPlanReportTable extends ConsumerWidget {
   ) {
     return GlassCard(
       padding: EdgeInsets.zero,
-      shadow: AppShadows.soft,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppRadii.lg),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
+            Container(
               width: _nameW,
+              decoration: const BoxDecoration(
+                border: Border(right: BorderSide(color: AppColors.hairline)),
+              ),
               child: Column(
                 children: [
                   Container(
                     height: _headerH,
-                    color: AppColors.primary,
-                    padding: const EdgeInsets.symmetric(horizontal: 9),
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      colLabel,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: Colors.white,
+                    decoration: const BoxDecoration(
+                      color: AppColors.surfaceAlt,
+                      border: Border(
+                          bottom: BorderSide(color: AppColors.hairline)),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    alignment: Alignment.bottomLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        colLabel,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.muted,
+                        ),
                       ),
                     ),
                   ),
                   for (var i = 0; i < rows.length; i++)
-                    _nameCell(rows[i].name,
-                        background: i.isOdd
-                            ? AppColors.surfaceAlt
-                            : AppColors.surface),
+                    _nameCell(rows[i].name, background: AppColors.surface),
                   _nameCell('Grand Total',
                       background: AppColors.surfaceAlt,
                       bold: true,
@@ -949,7 +973,7 @@ class MisDailyPlanReportTable extends ConsumerWidget {
                       _dataBand(
                         rows[i],
                         _both ? achByName[rows[i].name] : null,
-                        i.isOdd ? AppColors.surfaceAlt : AppColors.surface,
+                        AppColors.surface,
                       ),
                     _dataBand(grandPlan, _both ? grandAch : null,
                         AppColors.surfaceAlt,
@@ -975,19 +999,18 @@ class MisDailyPlanReportTable extends ConsumerWidget {
       decoration: BoxDecoration(
         color: background,
         border: topBorder
-            ? const Border(
-                top: BorderSide(color: AppColors.hairline, width: 1.4))
-            : null,
+            ? const Border(top: BorderSide(color: AppColors.hairline))
+            : const Border(bottom: BorderSide(color: AppColors.hairlineSoft)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       alignment: Alignment.centerLeft,
       child: Text(
         text,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
-          fontSize: 11,
-          fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+          fontSize: 12,
+          fontWeight: bold ? FontWeight.w600 : FontWeight.w500,
           color: AppColors.ink,
         ),
       ),
@@ -996,38 +1019,60 @@ class MisDailyPlanReportTable extends ConsumerWidget {
 
   List<Widget> _headerBands() {
     final sideW = _metrics.length * _cellW;
+    final plan = AppColors.primary;
+    const ach = MisAchColor.achievement;
     return [
       if (_both)
         Row(
           children: [
-            _band('PLAN', sideW, AppColors.primary),
-            _band('ACHIEVEMENT', sideW, MisAchColor.achievement),
-            _band('', _pctW, AppColors.primary),
+            _band('Plan', sideW,
+                background: plan.withValues(alpha: 0.08),
+                color: plan,
+                size: 11.5),
+            _band('Achievement', sideW,
+                background: ach.withValues(alpha: 0.09),
+                color: ach,
+                size: 11.5),
+            _band('', _pctW),
           ],
         ),
       Row(
         children: [
           for (var s = 0; s < (_both ? 2 : 1); s++)
             for (final g in _groups)
-              _band(g.$1, g.$2 * _cellW, AppColors.primaryDark),
-          _band('', _pctW, AppColors.primaryDark),
+              _band(g.$1, g.$2 * _cellW, color: AppColors.inkSoft),
+          _band('', _pctW),
         ],
       ),
       Row(
         children: [
           for (var s = 0; s < (_both ? 2 : 1); s++)
-            for (final c in _metrics) _band(c.header, _cellW, AppColors.primary),
-          _band('Ach %', _pctW, AppColors.primary),
+            for (final c in _metrics) _band(c.header, _cellW),
+          _band('Ach %', _pctW, last: true),
         ],
       ),
     ];
   }
 
-  Widget _band(String text, double width, Color color, {double? height}) {
+  Widget _band(
+    String text,
+    double width, {
+    Color background = AppColors.surfaceAlt,
+    Color color = AppColors.muted,
+    double size = 10.5,
+    bool last = false,
+  }) {
     return Container(
       width: width,
-      height: height ?? _bandH,
-      color: color,
+      height: _bandH,
+      decoration: BoxDecoration(
+        color: background,
+        border: Border(
+          bottom: BorderSide(
+              color: last ? AppColors.hairline : AppColors.hairlineSoft),
+          right: const BorderSide(color: AppColors.hairlineSoft),
+        ),
+      ),
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 3),
       child: Text(
@@ -1035,10 +1080,10 @@ class MisDailyPlanReportTable extends ConsumerWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         textAlign: TextAlign.center,
-        style: const TextStyle(
-          fontSize: 9.5,
-          fontWeight: FontWeight.w800,
-          color: Colors.white,
+        style: TextStyle(
+          fontSize: size,
+          fontWeight: FontWeight.w600,
+          color: color,
         ),
       ),
     );
@@ -1057,9 +1102,8 @@ class MisDailyPlanReportTable extends ConsumerWidget {
       decoration: BoxDecoration(
         color: background,
         border: topBorder
-            ? const Border(
-                top: BorderSide(color: AppColors.hairline, width: 1.4))
-            : null,
+            ? const Border(top: BorderSide(color: AppColors.hairline))
+            : const Border(bottom: BorderSide(color: AppColors.hairlineSoft)),
       ),
       child: Row(
         children: [
@@ -1080,9 +1124,10 @@ class MisDailyPlanReportTable extends ConsumerWidget {
                 child: Text(
                   pct == null ? '—' : '$pct%',
                   style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
                     color: _pctColor(pct),
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
               ),
@@ -1105,9 +1150,9 @@ class MisDailyPlanReportTable extends ConsumerWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: bold ? FontWeight.w800 : FontWeight.w500,
-              color: AppColors.inkSoft,
+              fontSize: 11.5,
+              fontWeight: bold ? FontWeight.w600 : FontWeight.w500,
+              color: bold ? AppColors.ink : AppColors.inkSoft,
               fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
@@ -1151,6 +1196,6 @@ class MisDailyPlanReportTable extends ConsumerWidget {
 /// side so the two halves of the wide table stay tellable apart while scrolling.
 class MisAchColor {
   MisAchColor._();
-  static const achievement = Color(0xFF0F766E); // teal-700
+  static const achievement = Color(0xFF1D7A3E); // success green
 }
 

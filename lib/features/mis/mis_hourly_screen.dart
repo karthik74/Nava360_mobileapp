@@ -7,6 +7,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_charts.dart';
@@ -107,10 +108,12 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
   Widget build(BuildContext context) {
     final datesAsync = ref.watch(misHourlyDatesProvider);
     return Scaffold(
-      backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('Hourly')),
+      appBar: AppBar(title: const Text('MIS')),
       body: datesAsync.when(
-        loading: () => const AppLoadingBlock(height: 240),
+        loading: () => const Padding(
+          padding: EdgeInsets.all(16),
+          child: AppLoadingBlock(height: 240),
+        ),
         error: (e, _) => Padding(
           padding: const EdgeInsets.all(16),
           child: AppErrorPanel(
@@ -122,8 +125,9 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
           if (dates.isEmpty) {
             return const Padding(
               padding: EdgeInsets.all(16),
-              child: AppEmptyState(
+              child: ProEmpty(
                 icon: Icons.schedule_rounded,
+                title: 'No hourly snapshot',
                 message: 'No hourly snapshot is currently loaded.',
               ),
             );
@@ -146,6 +150,7 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
       hour: _hour,
     );
     final summaryAsync = ref.watch(misHourlySummaryProvider(q));
+    final summary = summaryAsync.valueOrNull;
     // Live-snapshot freshness for the header. Metadata only — it never gates
     // the screen, so a missing/failed snapshot simply hides the badge.
     final snapshot = ref.watch(misHourlySnapshotProvider(activeDate)).valueOrNull;
@@ -155,112 +160,110 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
     final hourList = hoursMeta?.hours ?? const <HourlyHourInfo>[];
     final liveHour = hoursMeta?.liveHour;
 
-    return RefreshIndicator(
-      color: AppColors.primary,
+    return ProPage(
       onRefresh: () async {
         ref.invalidate(misHourlySnapshotProvider(activeDate));
         ref.invalidate(misHourlyHoursProvider(activeDate));
         ref.invalidate(misHourlySummaryProvider(q));
         ref.invalidate(misHourlyListProvider(q));
       },
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(
-            16, 12, 16, MediaQuery.of(context).padding.bottom + 24),
+      hero: ProHero(
+        titleWidget: MisDeepTitle(
+          title: 'Hourly',
+          subtitle: 'Live hourly snapshot by DPD bucket — account counts '
+              '(no rupee amounts).',
+          crumbs: _crumbs(),
+        ),
+        overlap: MisLiftedField(
+          child: MisDatePicker(
+            value: activeDate,
+            available: dates,
+            // A replayed hour belongs to its date — reset on change.
+            onChanged: (v) => setState(() {
+              _date = v;
+              _hour = null;
+            }),
+          ),
+        ),
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: MisDatePicker(
-                  value: activeDate,
-                  available: dates,
-                  // A replayed hour belongs to its date — reset on change.
-                  onChanged: (v) => setState(() {
-                    _date = v;
-                    _hour = null;
-                  }),
-                ),
-              ),
-              const SizedBox(width: 10),
-              MisViewToggle(
-                  table: _table, onChanged: (t) => setState(() => _table = t)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Live hourly snapshot by DPD bucket — account counts (no rupee amounts).',
-            style: TextStyle(fontSize: 12, color: AppColors.muted),
-          ),
-          if (_hour != null) ...[
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: MisSnapshotClock(
-                key: ValueKey('replay-$_hour'),
-                periodHour: int.tryParse(_hour!) ?? 0,
-                live: false,
-              ),
+          if (_hour != null)
+            MisSnapshotClock(
+              key: ValueKey('replay-$_hour'),
+              periodHour: int.tryParse(_hour!) ?? 0,
+              live: false,
+            )
+          else if (snapshot != null && !snapshot.isEmpty)
+            MisSnapshotClock(
+              // Re-key on the hour so the odometer replays whenever a fresh
+              // snapshot lands. No asOf: the card reads just LIVE + the hour
+              // + "Hourly snapshot" — the capture timestamp confused readers
+              // (server clock lag made "as of 6:57 AM" look stale at noon).
+              key: ValueKey('${snapshot.periodDate}-${snapshot.periodHour}'),
+              periodHour: snapshot.hour!,
             ),
-          ] else if (snapshot != null && !snapshot.isEmpty) ...[
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: MisSnapshotClock(
-                // Re-key on the hour so the odometer replays whenever a fresh
-                // snapshot lands. No asOf: the card reads just LIVE + the hour
-                // + "Hourly snapshot" — the capture timestamp confused readers
-                // (server clock lag made "as of 6:57 AM" look stale at noon).
-                key: ValueKey('${snapshot.periodDate}-${snapshot.periodHour}'),
-                periodHour: snapshot.hour!,
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: MisSegmented<String>(
-              options: _products,
-              value: _product,
-              onChanged: (v) => setState(() => _product = v),
-            ),
+          MisDeepSegmented<String>(
+            options: _products,
+            value: _product,
+            onChanged: (v) => setState(() => _product = v),
           ),
-          const SizedBox(height: 12),
-          MisBreadcrumb(crumbs: _crumbs()),
-          if (hourList.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _hourSwitcher(hourList, liveHour),
-          ],
-          const SizedBox(height: 14),
-          summaryAsync.when(
-            loading: () => const AppLoadingBlock(height: 180),
-            error: (e, _) => AppErrorPanel(
-              message: e.toString(),
-              onRetry: () => ref.invalidate(misHourlySummaryProvider(q)),
-            ),
-            data: (s) => s.dpd.isEmpty
-                ? const MisInlineEmpty('No hourly data for this date.')
-                : _summary(s),
+          if (hourList.isNotEmpty) _hourSwitcher(hourList, liveHour),
+          // Headline = the regular bucket only, with the floored FTOD stat —
+          // matching the web Hourly exactly. The title drops the "Regular"
+          // prefix (web commit 1429002); the bucket table below already names
+          // the row "Regular as FTOD".
+          MisRegularHeroStats(
+            summary: (summary != null && summary.dpd.isNotEmpty)
+                ? summary
+                : null,
+            metric: MisMetric.count,
+            titleLabel: '',
           ),
-          // Intra-day build-up for the current scope. Reads the same drill
-          // provider the grid below uses (same family key ⇒ no extra request),
-          // and renders nothing until the feed carries per-hour columns.
-          ref.watch(misHourlyListProvider(q)).maybeWhen(
-                data: (rows) {
-                  final agg =
-                      misAggregateHourSeries([for (final r in rows) r.raw]);
-                  if (agg.isEmpty) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 18),
-                    child: _intraday(agg),
-                  );
-                },
-                orElse: () => const SizedBox.shrink(),
-              ),
-          const SizedBox(height: 18),
-          MisSectionTitle('By ${_levelHeader[_level]!.toLowerCase()}'),
-          _grid(q),
         ],
       ),
+      children: [
+        summaryAsync.when(
+          loading: () => const AppLoadingBlock(height: 180),
+          error: (e, _) => AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(misHourlySummaryProvider(q)),
+          ),
+          data: (s) => s.dpd.isEmpty
+              ? const ProEmpty(
+                  icon: Icons.schedule_rounded,
+                  title: 'No hourly data for this date.',
+                )
+              : _summary(s),
+        ),
+        // Intra-day build-up for the current scope. Reads the same drill
+        // provider the grid below uses (same family key ⇒ no extra request),
+        // and renders nothing until the feed carries per-hour columns.
+        ref.watch(misHourlyListProvider(q)).maybeWhen(
+              data: (rows) {
+                final agg =
+                    misAggregateHourSeries([for (final r in rows) r.raw]);
+                if (agg.isEmpty) return const SizedBox.shrink();
+                return Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: _intraday(agg),
+                );
+              },
+              orElse: () => const SizedBox.shrink(),
+            ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 8),
+            ProSectionHeader(
+              title: 'By ${_levelHeader[_level]!.toLowerCase()}',
+              subtitle: _canDrill ? 'Tap a row to drill down.' : null,
+              trailing: MisViewToggle(
+                  table: _table, onChanged: (t) => setState(() => _table = t)),
+            ),
+            const SizedBox(height: 10),
+            _grid(q),
+          ],
+        ),
+      ],
     );
   }
 
@@ -272,35 +275,24 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
               MisPalette.risk(b.bucketName)),
     ];
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Headline = the regular bucket only, with the floored FTOD stat —
-        // matching the web Hourly exactly. The title drops the "Regular"
-        // prefix (web commit 1429002); the bucket table below already names
-        // the row "Regular as FTOD".
-        MisRegularCollectionCard(
-          summary: s,
-          metric: MisMetric.count,
-          titleLabel: '',
-        ),
         if (donut.any((x) => x.value > 0)) ...[
-          const SizedBox(height: 14),
           GlassCard(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Collection by DPD bucket',
-                    style: TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.ink)),
+                const ProSectionHeader(
+                  title: 'Collection by DPD bucket',
+                  subtitle: 'Accounts',
+                ),
                 const SizedBox(height: 12),
                 MisDonutChart(data: donut),
               ],
             ),
           ),
+          const SizedBox(height: 22),
         ],
-        const SizedBox(height: 16),
         // The exact Collection-screen DPD matrix (same table, same colours),
         // with the regular row named "Regular as FTOD" as everywhere on Hourly.
         MisBucketMatrix(
@@ -318,29 +310,24 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
   /// pinning the hour, so an older backend that ignores ?hour= still works.
   Widget _hourSwitcher(List<HourlyHourInfo> hours, String? liveHour) {
     final activeHour = _hour ?? liveHour;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        const Padding(
-          padding: EdgeInsets.only(top: 8),
-          child: Text(
-            'HOUR',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.5,
-              color: AppColors.muted,
-            ),
-          ),
+        MisDeepLabel(
+          'Hour',
+          trailing: _hour != null ? 'Tap the live hour to go back' : null,
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Wrap(
-            spacing: 6,
-            runSpacing: 6,
+        const SizedBox(height: 8),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          clipBehavior: Clip.none,
+          child: Row(
             children: [
-              for (final h in hours)
-                _hourChip(h.hour, activeHour == h.hour, liveHour),
+              for (var i = 0; i < hours.length; i++) ...[
+                if (i > 0) const SizedBox(width: 6),
+                _hourChip(hours[i].hour, activeHour == hours[i].hour, liveHour),
+              ],
             ],
           ),
         ),
@@ -349,26 +336,11 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
   }
 
   Widget _hourChip(String hour, bool active, String? liveHour) {
-    return GestureDetector(
-      onTap: () =>
-          setState(() => _hour = (hour == liveHour) ? null : hour),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: active ? AppColors.primary : AppColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(AppRadii.pill),
-          border:
-              Border.all(color: active ? AppColors.primary : AppColors.hairline),
-        ),
-        child: Text(
-          misHourLabel(int.tryParse(hour) ?? 0),
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            color: active ? Colors.white : AppColors.muted,
-          ),
-        ),
-      ),
+    return MisDeepChip(
+      label: misHourLabel(int.tryParse(hour) ?? 0),
+      selected: active,
+      live: hour == liveHour,
+      onTap: () => setState(() => _hour = (hour == liveHour) ? null : hour),
     );
   }
 
@@ -381,7 +353,12 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
         onRetry: () => ref.invalidate(misHourlyListProvider(q)),
       ),
       data: (rows) {
-        if (rows.isEmpty) return const MisInlineEmpty('No data at this level.');
+        if (rows.isEmpty) {
+          return const ProEmpty(
+            icon: Icons.table_rows_outlined,
+            title: 'No data at this level.',
+          );
+        }
         // Rank by collection % descending.
         final sorted = [...rows]..sort((a, b) {
             final pa = a.demandCount > 0 ? a.collectionCount / a.demandCount : 0;
@@ -460,63 +437,33 @@ class _MisHourlyScreenState extends ConsumerState<MisHourlyScreen> {
     final collectedToday =
         aggregate.fold<double>(0, (s, p) => s + p.value);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            const MisSectionTitle('Intra-day collection'),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Padding(
-                padding: EdgeInsets.only(bottom: 10),
-                child: Text(
-                  'accounts collected by hour',
-                  style: TextStyle(fontSize: 11, color: AppColors.muted),
-                ),
-              ),
-            ),
-          ],
+        const ProSectionHeader(
+          title: 'Intra-day collection',
+          subtitle: 'Accounts collected by hour',
         ),
-        LayoutBuilder(builder: (context, c) {
-          const gap = 10.0;
-          final w = (c.maxWidth - gap * 2) / 3;
-          return Wrap(
-            spacing: gap,
-            runSpacing: gap,
-            children: [
-              SizedBox(
-                width: w,
-                child: MisHourKpi(
-                  label: 'Collected today',
-                  value: misNum(collectedToday),
-                  sub: 'accounts',
-                ),
-              ),
-              if (peak != null)
-                SizedBox(
-                  width: w,
-                  child: MisHourKpi(
-                    label: 'Peak hour',
-                    value: peak.label,
-                    sub: '${misNum(peak.value)} accounts',
-                  ),
-                ),
-              SizedBox(
-                width: w,
-                child: MisHourKpi(
-                  label: 'Active hours',
-                  value: '${aggregate.length}',
-                  sub: 'with collection',
-                ),
-              ),
-            ],
-          );
-        }),
+        const SizedBox(height: 10),
+        ProKpiStrip(cells: [
+          ProKpi(
+            value: misNum(collectedToday),
+            label: 'Collected today · accounts',
+          ),
+          if (peak != null)
+            ProKpi(
+              value: peak.label,
+              label: 'Peak hour · ${misNum(peak.value)} accounts',
+            ),
+          ProKpi(
+            value: '${aggregate.length}',
+            label: 'Active hours with collection',
+          ),
+        ]),
         const SizedBox(height: 12),
         GlassCard(
           child: MisBarChart(
             bars: [for (final p in aggregate) MisBar(p.label, p.value)],
-            color: MisPalette.seriesCollection,
+            color: AppColors.primary,
             showValues: true,
             height: 210,
           ),

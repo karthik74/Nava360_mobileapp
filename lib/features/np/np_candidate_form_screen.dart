@@ -18,6 +18,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/branding.dart';
 import '../../core/env.dart';
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -104,6 +105,7 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
       c.dispose();
     }
     _aadhaar.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -481,345 +483,416 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
 
   // ── render ──
 
+  /// Wizard position — purely presentational: every field stays in state
+  /// and [_validate] / [_save] still check the whole form at once.
+  int _step = 0;
+  final _scroll = ScrollController();
+
+  void _goTo(int i) {
+    FocusScope.of(context).unfocus();
+    setState(() => _step = i);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) _scroll.jumpTo(0);
+    });
+  }
+
+  Future<void> _saveAndReveal() async {
+    await _save();
+    if (mounted && _error != null && _scroll.hasClients) {
+      _scroll.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOutCubic);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final config = ref.watch(npConfigProvider).asData?.value ?? NpConfig.empty;
     final branding = ref.watch(brandingProvider);
     final showSpouse = _maritalStatus != null && _maritalStatus != 'UNMARRIED';
 
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Text(_isEdit ? 'Edit candidate' : 'New candidate'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                children: [
-                  const Text(
-                    "Capture the Prathinidhi's details. Saving creates a draft — submit it for identification from the candidate page.",
-                    style: TextStyle(fontSize: 12.5, color: AppColors.inkSoft, height: 1.4),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_error != null) ...[AppErrorPanel(message: _error!), const SizedBox(height: 12)],
-
-                  if (config.aadhaarKycEnabled) _aadhaarSection(),
-
-                  _section('Step 1', 'Identity', 'Who the candidate is.', [
-                    const NpFieldLabel('Full name', required: true),
-                    TextField(controller: _f('fullName'), textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()]),
-                    const NpFieldLabel('Gender', required: true),
-                    _dropdown(_gender, kNpGenders, (v) => setState(() => _gender = v)),
-                    const NpFieldLabel('Date of birth', required: true),
-                    _dateField(_dob, () => _pickDate(spouse: false)),
-                    const NpFieldLabel("Father's name", required: true),
-                    TextField(controller: _f('father'), textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()]),
-                    const _Hint('Sent to the credit bureau as a relation.'),
-                    const NpFieldLabel('Marital status', required: true),
-                    _dropdown(_maritalStatus, kNpMaritalStatuses, (v) => setState(() => _maritalStatus = v)),
-                    if (showSpouse) ...[
-                      NpFieldLabel('Spouse name', required: _spouseRequired),
-                      TextField(controller: _f('spouseName'), textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()]),
-                      NpFieldLabel('Spouse date of birth', required: _spouseRequired),
-                      _dateField(_spouseDob, () => _pickDate(spouse: true)),
-                      const NpFieldLabel('Spouse mobile'),
-                      _digits('spouseMobile', 10),
-                      const NpFieldLabel('Spouse occupation'),
-                      TextField(controller: _f('spouseOcc'), textCapitalization: TextCapitalization.words),
-                      NpFieldLabel("Spouse's father's name", required: _spouseRequired),
-                      TextField(controller: _f('spouseFather'), textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()]),
-                      const _Hint("Sent to the credit bureau as the spouse's relation."),
-                      NpFieldLabel('Spouse Aadhaar number', required: _spouseRequired && _spouseAadhaarOnFile == null),
-                      _aadhaarField('spouseAadhaarFull', _spouseAadhaarOnFile),
-                      _Hint(_spouseAadhaarOnFile != null
-                          ? 'On file: $_spouseAadhaarOnFile — leave blank to keep it.'
-                          : 'All 12 digits — sent to the credit bureau.'),
-                      const NpFieldLabel('Spouse PAN'),
-                      TextField(
-                        controller: _f('spousePan'),
-                        textCapitalization: TextCapitalization.characters,
-                        inputFormatters: [const UpperCaseTextFormatter(), LengthLimitingTextInputFormatter(10)],
-                      ),
-                      const _Hint('Optional — sent to the credit bureau with the Aadhaar.'),
-                      const NpFieldLabel('Spouse driving licence'),
-                      TextField(controller: _f('spouseDl'), textCapitalization: TextCapitalization.characters, inputFormatters: const [UpperCaseTextFormatter()]),
-                    ],
-                    const NpFieldLabel('Photo'),
-                    Row(children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Container(
-                          width: 64,
-                          height: 64,
-                          color: AppColors.surfaceAlt,
-                          child: _photoUrl == null
-                              ? const Icon(Icons.person_rounded, color: AppColors.muted, size: 30)
-                              : Image.network(_photoUrl!, fit: BoxFit.cover),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _uploading ? null : _pickPhoto,
-                          icon: const Icon(Icons.add_a_photo_rounded, size: 18),
-                          label: Text(_uploading ? 'Uploading…' : (_photoUrl == null ? 'Add photo' : 'Replace photo')),
-                        ),
-                      ),
-                    ]),
-                  ]),
-
-                  _section('Step 2', 'Contact', 'How the branch reaches the candidate.', [
-                    const NpFieldLabel('Mobile number', required: true),
-                    _digits('mobile', 10),
-                    const _Hint('10 digits — this number receives the activation OTP.'),
-                    const NpFieldLabel('Alternate mobile'),
-                    _digits('altMobile', 10),
-                    const NpFieldLabel('Email'),
-                    TextField(controller: _f('email'), keyboardType: TextInputType.emailAddress),
-                  ]),
-
-                  _section('Step 3', 'Address',
-                      'Permanent address as per Aadhaar (used for the CB check and the BGV visit), and where the candidate can be reached.', [
-                    const Text('Permanent address', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink)),
-                    const NpFieldLabel('Address line', required: true),
-                    TextField(controller: _f('addr'), textCapitalization: TextCapitalization.words, onChanged: (_) => _commSame ? _copyPermanentToComm() : null),
-                    const NpFieldLabel('Village / town', required: true),
-                    TextField(controller: _f('village'), textCapitalization: TextCapitalization.words, onChanged: (_) => _commSame ? _copyPermanentToComm() : null),
-                    const NpFieldLabel('District', required: true),
-                    TextField(controller: _f('district'), textCapitalization: TextCapitalization.words, onChanged: (_) => _commSame ? _copyPermanentToComm() : null),
-                    const NpFieldLabel('State', required: true),
-                    TextField(controller: _f('state'), textCapitalization: TextCapitalization.words, onChanged: (_) => _commSame ? _copyPermanentToComm() : null),
-                    const NpFieldLabel('Pincode', required: true),
-                    _digits('pin', 6, onChanged: (_) => _commSame ? _copyPermanentToComm() : null),
-                    const SizedBox(height: 14),
-                    Row(children: [
-                      const Expanded(child: Text('Communication address', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.ink))),
-                      const Text('Same', style: TextStyle(fontSize: 12, color: AppColors.inkSoft)),
-                      Switch(
-                        value: _commSame,
-                        onChanged: (v) => setState(() {
-                          _commSame = v;
-                          if (v) _copyPermanentToComm();
-                        }),
-                      ),
-                    ]),
-                    const NpFieldLabel('Address line'),
-                    TextField(controller: _f('cAddr'), enabled: !_commSame, textCapitalization: TextCapitalization.words),
-                    const NpFieldLabel('Village / town'),
-                    TextField(controller: _f('cVillage'), enabled: !_commSame, textCapitalization: TextCapitalization.words),
-                    const NpFieldLabel('District'),
-                    TextField(controller: _f('cDistrict'), enabled: !_commSame, textCapitalization: TextCapitalization.words),
-                    const NpFieldLabel('State'),
-                    TextField(controller: _f('cState'), enabled: !_commSame, textCapitalization: TextCapitalization.words),
-                    const NpFieldLabel('Pincode'),
-                    _digits('cPin', 6, enabled: !_commSame),
-                  ]),
-
-                  _section('Step 4', 'Background', 'Education, work history and the tools the role needs.', [
-                    const NpFieldLabel('Education'),
-                    TextField(controller: _f('education'), textCapitalization: TextCapitalization.words),
-                    const NpFieldLabel('Current occupation'),
-                    TextField(controller: _f('occupation'), textCapitalization: TextCapitalization.words),
-                    const NpFieldLabel('Experience (years)'),
-                    _digits('exp', 2),
-                    const SizedBox(height: 6),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      title: const Text('Owns a two-wheeler', style: TextStyle(fontSize: 13.5)),
-                      value: _twoWheeler,
-                      onChanged: (v) => setState(() => _twoWheeler = v),
-                    ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      title: const Text('Owns a smartphone', style: TextStyle(fontSize: 13.5)),
-                      value: _smartphone,
-                      onChanged: (v) => setState(() => _smartphone = v),
-                    ),
-                  ]),
-
-                  _section('Step 5', 'Identity documents', 'Reference numbers only — the scans are uploaded at the KYC step.', [
-                    NpFieldLabel('Aadhaar number', required: _aadhaarOnFile == null),
-                    _aadhaarField('aadhaarFull', _aadhaarOnFile),
-                    _Hint(_aadhaarOnFile != null
-                        ? 'On file: $_aadhaarOnFile — leave blank to keep it.'
-                        : 'All 12 digits — stored encrypted and sent to the credit bureau.'),
-                    const NpFieldLabel('PAN number'),
-                    TextField(
-                      controller: _f('pan'),
-                      textCapitalization: TextCapitalization.characters,
-                      inputFormatters: [const UpperCaseTextFormatter(), LengthLimitingTextInputFormatter(10)],
-                      decoration: const InputDecoration(hintText: 'ABCDE1234F'),
-                    ),
-                    const NpFieldLabel('Driving licence number'),
-                    TextField(controller: _f('dl'), textCapitalization: TextCapitalization.characters, inputFormatters: const [UpperCaseTextFormatter()]),
-                  ]),
-
-                  _section('Step 6', 'Bank account', 'Optional at this stage; needed before the agreement.', [
-                    const NpFieldLabel('Bank name'),
-                    TextField(controller: _f('bankName'), textCapitalization: TextCapitalization.words),
-                    const NpFieldLabel('Account number'),
-                    TextField(
-                      controller: _f('account'),
-                      keyboardType: TextInputType.number,
-                      onChanged: (_) => setState(() => _bankStatus = null),
-                    ),
-                    const NpFieldLabel('IFSC'),
-                    TextField(
-                      controller: _f('ifsc'),
-                      textCapitalization: TextCapitalization.characters,
-                      inputFormatters: [const UpperCaseTextFormatter(), LengthLimitingTextInputFormatter(11)],
-                      onChanged: (_) => setState(() => _bankStatus = null),
-                    ),
-                    const NpFieldLabel('Name as per bank'),
-                    TextField(controller: _f('holder'), textCapitalization: TextCapitalization.words),
-                    const _Hint('Filled by bank verification; editable if the bank record differs.'),
-                    if (config.bankVerifyEnabled) ...[
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        onPressed: _bankBusy ? null : _verifyBank,
-                        icon: const Icon(Icons.account_balance_rounded, size: 18),
-                        label: Text(_bankBusy ? 'Verifying…' : 'Verify bank account'),
-                      ),
-                      if (_bankStatus != null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Text(_bankStatus!,
-                              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: _bankOk == true ? AppColors.success : AppColors.danger)),
-                        ),
-                    ],
-                  ]),
-
-                  _section('Step 7', 'Posting',
-                      'The ${branding.term('branch').toLowerCase()} this Prathinidhi will work out of — it decides who can see and approve this file.', [
-                    NpFieldLabel(branding.term('branch'), required: true),
-                    ref.watch(_npBranchesProvider).when(
-                          data: (branches) {
-                            final ids = branches.map((b) => b.id).toSet();
-                            final value = ids.contains(_branchId) ? _branchId : null;
-                            return DropdownButtonFormField<int>(
-                              value: value,
-                              isExpanded: true,
-                              hint: const Text('Select'),
-                              items: [
-                                for (final b in branches)
-                                  DropdownMenuItem(
-                                    value: b.id,
-                                    child: Text(b.hierarchy.isEmpty ? b.label : '${b.label} · ${b.hierarchy}', overflow: TextOverflow.ellipsis),
-                                  ),
-                              ],
-                              onChanged: (v) => setState(() => _branchId = v),
-                            );
-                          },
-                          loading: () => const LinearProgressIndicator(minHeight: 2),
-                          error: (e, _) => AppErrorPanel(message: 'Could not load branches: $e', onRetry: () => ref.invalidate(_npBranchesProvider)),
-                        ),
-                  ]),
-
-                  _section('Step 8', 'Eligibility', 'Tick every criterion the candidate meets.', [
-                    if (config.eligibilityCriteria.isEmpty)
-                      const Text('No eligibility criteria are configured. Set them in Settings → NP Onboarding.',
-                          style: TextStyle(fontSize: 12.5, color: AppColors.muted))
-                    else
-                      for (final c in config.eligibilityCriteria)
-                        CheckboxListTile(
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          controlAffinity: ListTileControlAffinity.leading,
-                          title: Text(c, style: const TextStyle(fontSize: 13.5)),
-                          value: _eligibility[c] ?? false,
-                          onChanged: (v) => setState(() => _eligibility[c] = v ?? false),
-                        ),
-                    const NpFieldLabel('Eligibility notes'),
-                    TextField(controller: _f('eligNotes'), minLines: 2, maxLines: 4, textCapitalization: TextCapitalization.sentences),
-                  ]),
-
-                  _section('Step 9', 'Remarks', 'Anything the next reviewer should know.', [
-                    TextField(controller: _f('remarks'), minLines: 3, maxLines: 6, textCapitalization: TextCapitalization.sentences),
-                  ]),
-
-                  if (_error != null) ...[AppErrorPanel(message: _error!), const SizedBox(height: 12)],
-                  SizedBox(
-                    height: 50,
-                    child: FilledButton(
-                      onPressed: (_saving || _uploading) ? null : _save,
-                      child: Text(_saving ? 'Saving…' : (_isEdit ? 'Save changes' : 'Create candidate')),
-                    ),
-                  ),
-                ],
+    final steps = <_FormStep>[
+      _FormStep('Identity', 'Identity', 'Who the candidate is.', [
+        _field('Full name', required: true,
+            TextField(controller: _f('fullName'), textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()])),
+        _field('Gender', required: true, _dropdown(_gender, kNpGenders, (v) => setState(() => _gender = v))),
+        _field('Date of birth', required: true, _dateField(_dob, () => _pickDate(spouse: false))),
+        _field("Father's name",
+            required: true,
+            hint: 'Sent to the credit bureau as a relation.',
+            TextField(controller: _f('father'), textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()])),
+        _field('Marital status', required: true, _dropdown(_maritalStatus, kNpMaritalStatuses, (v) => setState(() => _maritalStatus = v))),
+        if (showSpouse) ...[
+          _subhead('Spouse'),
+          _field('Spouse name',
+              required: _spouseRequired,
+              TextField(controller: _f('spouseName'), textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()])),
+          _field('Spouse date of birth', required: _spouseRequired, _dateField(_spouseDob, () => _pickDate(spouse: true))),
+          _field('Spouse mobile', _digits('spouseMobile', 10)),
+          _field('Spouse occupation', TextField(controller: _f('spouseOcc'), textCapitalization: TextCapitalization.words)),
+          _field("Spouse's father's name",
+              required: _spouseRequired,
+              hint: "Sent to the credit bureau as the spouse's relation.",
+              TextField(controller: _f('spouseFather'), textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()])),
+          _field('Spouse Aadhaar number',
+              required: _spouseRequired && _spouseAadhaarOnFile == null,
+              hint: _spouseAadhaarOnFile != null
+                  ? 'On file: $_spouseAadhaarOnFile — leave blank to keep it.'
+                  : 'All 12 digits — sent to the credit bureau.',
+              _aadhaarField('spouseAadhaarFull', _spouseAadhaarOnFile)),
+          _field('Spouse PAN',
+              hint: 'Optional — sent to the credit bureau with the Aadhaar.',
+              TextField(
+                controller: _f('spousePan'),
+                textCapitalization: TextCapitalization.characters,
+                inputFormatters: [const UpperCaseTextFormatter(), LengthLimitingTextInputFormatter(10)],
+              )),
+          _field('Spouse driving licence',
+              TextField(controller: _f('spouseDl'), textCapitalization: TextCapitalization.characters, inputFormatters: const [UpperCaseTextFormatter()])),
+        ],
+        _field(
+          'Photo',
+          Row(children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: AppColors.neutralTint,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: AppColors.hairline),
               ),
+              clipBehavior: Clip.antiAlias,
+              child: _photoUrl == null
+                  ? const Icon(Icons.person_outline_rounded, color: AppColors.faint, size: 30)
+                  : Image.network(_photoUrl!, fit: BoxFit.cover),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _uploading ? null : _pickPhoto,
+                icon: const Icon(Icons.add_a_photo_outlined, size: 18),
+                label: Text(_uploading ? 'Uploading…' : (_photoUrl == null ? 'Add photo' : 'Replace photo')),
+              ),
+            ),
+          ]),
+        ),
+      ]),
+      _FormStep('Contact', 'Contact', 'How the branch reaches the candidate.', [
+        _field('Mobile number', required: true, hint: '10 digits — this number receives the activation OTP.', _digits('mobile', 10)),
+        _field('Alternate mobile', _digits('altMobile', 10)),
+        _field('Email', TextField(controller: _f('email'), keyboardType: TextInputType.emailAddress)),
+      ]),
+      _FormStep('Address', 'Address',
+          'Permanent address as per Aadhaar (used for the CB check and the BGV visit), and where the candidate can be reached.', [
+        _subhead('Permanent address'),
+        _field('Address line',
+            required: true,
+            TextField(controller: _f('addr'), textCapitalization: TextCapitalization.words, onChanged: (_) => _commSame ? _copyPermanentToComm() : null)),
+        _field('Village / town',
+            required: true,
+            TextField(controller: _f('village'), textCapitalization: TextCapitalization.words, onChanged: (_) => _commSame ? _copyPermanentToComm() : null)),
+        _field('District',
+            required: true,
+            TextField(controller: _f('district'), textCapitalization: TextCapitalization.words, onChanged: (_) => _commSame ? _copyPermanentToComm() : null)),
+        _field('State',
+            required: true,
+            TextField(controller: _f('state'), textCapitalization: TextCapitalization.words, onChanged: (_) => _commSame ? _copyPermanentToComm() : null)),
+        _field('Pincode', required: true, _digits('pin', 6, onChanged: (_) => _commSame ? _copyPermanentToComm() : null)),
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 6),
+          child: Row(children: [
+            const Expanded(child: Text('Communication address', style: _subheadStyle)),
+            const Text('Same as permanent', style: TextStyle(fontSize: 13, color: AppColors.muted)),
+            const SizedBox(width: 6),
+            Switch(
+              value: _commSame,
+              onChanged: (v) => setState(() {
+                _commSame = v;
+                if (v) _copyPermanentToComm();
+              }),
+            ),
+          ]),
+        ),
+        _field('Address line', TextField(controller: _f('cAddr'), enabled: !_commSame, textCapitalization: TextCapitalization.words)),
+        _field('Village / town', TextField(controller: _f('cVillage'), enabled: !_commSame, textCapitalization: TextCapitalization.words)),
+        _field('District', TextField(controller: _f('cDistrict'), enabled: !_commSame, textCapitalization: TextCapitalization.words)),
+        _field('State', TextField(controller: _f('cState'), enabled: !_commSame, textCapitalization: TextCapitalization.words)),
+        _field('Pincode', _digits('cPin', 6, enabled: !_commSame)),
+      ]),
+      _FormStep('Background', 'Background', 'Education, work history and the tools the role needs.', [
+        _field('Education', TextField(controller: _f('education'), textCapitalization: TextCapitalization.words)),
+        _field('Current occupation', TextField(controller: _f('occupation'), textCapitalization: TextCapitalization.words)),
+        _field('Experience (years)', _digits('exp', 2)),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: const Text('Owns a two-wheeler', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w500)),
+          value: _twoWheeler,
+          onChanged: (v) => setState(() => _twoWheeler = v),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: const Text('Owns a smartphone', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w500)),
+          value: _smartphone,
+          onChanged: (v) => setState(() => _smartphone = v),
+        ),
+      ]),
+      _FormStep('Documents', 'Identity documents', 'Reference numbers only — the scans are uploaded at the KYC step.', [
+        _field('Aadhaar number',
+            required: _aadhaarOnFile == null,
+            hint: _aadhaarOnFile != null
+                ? 'On file: $_aadhaarOnFile — leave blank to keep it.'
+                : 'All 12 digits — stored encrypted and sent to the credit bureau.',
+            _aadhaarField('aadhaarFull', _aadhaarOnFile)),
+        _field('PAN number',
+            TextField(
+              controller: _f('pan'),
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [const UpperCaseTextFormatter(), LengthLimitingTextInputFormatter(10)],
+              decoration: const InputDecoration(hintText: 'ABCDE1234F'),
+            )),
+        _field('Driving licence number',
+            TextField(controller: _f('dl'), textCapitalization: TextCapitalization.characters, inputFormatters: const [UpperCaseTextFormatter()])),
+      ]),
+      _FormStep('Bank', 'Bank account', 'Optional at this stage; needed before the agreement.', [
+        _field('Bank name', TextField(controller: _f('bankName'), textCapitalization: TextCapitalization.words)),
+        _field('Account number',
+            TextField(
+              controller: _f('account'),
+              keyboardType: TextInputType.number,
+              onChanged: (_) => setState(() => _bankStatus = null),
+            )),
+        _field('IFSC',
+            TextField(
+              controller: _f('ifsc'),
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [const UpperCaseTextFormatter(), LengthLimitingTextInputFormatter(11)],
+              onChanged: (_) => setState(() => _bankStatus = null),
+            )),
+        _field('Name as per bank',
+            hint: 'Filled by bank verification; editable if the bank record differs.',
+            TextField(controller: _f('holder'), textCapitalization: TextCapitalization.words)),
+        if (config.bankVerifyEnabled) ...[
+          OutlinedButton.icon(
+            onPressed: _bankBusy ? null : _verifyBank,
+            icon: const Icon(Icons.account_balance_outlined, size: 18),
+            label: Text(_bankBusy ? 'Verifying…' : 'Verify bank account'),
+          ),
+          if (_bankStatus != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: ProNote(_bankStatus!, tone: _bankOk == true ? ProNoteTone.ok : ProNoteTone.bad),
+            ),
+        ],
+      ]),
+      _FormStep('Posting', 'Posting',
+          'The ${branding.term('branch').toLowerCase()} this Prathinidhi will work out of — it decides who can see and approve this file.', [
+        _field(
+          branding.term('branch'),
+          required: true,
+          ref.watch(_npBranchesProvider).when(
+                data: (branches) {
+                  final ids = branches.map((b) => b.id).toSet();
+                  final value = ids.contains(_branchId) ? _branchId : null;
+                  return DropdownButtonFormField<int>(
+                    value: value,
+                    isExpanded: true,
+                    hint: const Text('Select'),
+                    items: [
+                      for (final b in branches)
+                        DropdownMenuItem(
+                          value: b.id,
+                          child: Text(b.hierarchy.isEmpty ? b.label : '${b.label} · ${b.hierarchy}', overflow: TextOverflow.ellipsis),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() => _branchId = v),
+                  );
+                },
+                loading: () => const LinearProgressIndicator(minHeight: 2),
+                error: (e, _) => AppErrorPanel(message: 'Could not load branches: $e', onRetry: () => ref.invalidate(_npBranchesProvider)),
+              ),
+        ),
+      ]),
+      _FormStep('Eligibility', 'Eligibility', 'Tick every criterion the candidate meets.', [
+        if (config.eligibilityCriteria.isEmpty)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 14),
+            child: ProNote('No eligibility criteria are configured. Set them in Settings → NP Onboarding.'),
+          )
+        else
+          for (final c in config.eligibilityCriteria)
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: Text(c, style: const TextStyle(fontSize: 14.5)),
+              value: _eligibility[c] ?? false,
+              onChanged: (v) => setState(() => _eligibility[c] = v ?? false),
+            ),
+        const SizedBox(height: 6),
+        _field('Eligibility notes', TextField(controller: _f('eligNotes'), minLines: 2, maxLines: 4, textCapitalization: TextCapitalization.sentences)),
+      ]),
+      _FormStep('Remarks', 'Remarks', 'Anything the next reviewer should know.', [
+        TextField(controller: _f('remarks'), minLines: 3, maxLines: 6, textCapitalization: TextCapitalization.sentences),
+      ]),
+    ];
+
+    final last = steps.length - 1;
+    final cur = _step.clamp(0, last);
+    final step = steps[cur];
+    final busy = _saving || _uploading;
+
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: _isEdit ? 'Edit candidate' : 'New candidate',
+        subtitle: 'Step ${cur + 1} of ${steps.length} · ${step.title}',
+        actions: [
+          if (_isEdit && !_loading && cur < last)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: TextButton(onPressed: busy ? null : _saveAndReveal, child: Text(_saving ? 'Saving…' : 'Save')),
+            ),
+        ],
       ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              controller: _scroll,
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              children: [
+                ProStepBar(total: steps.length, current: cur),
+                const SizedBox(height: 12),
+                ProChipBar(labels: [for (final s in steps) s.short], selected: cur, onSelected: _goTo, bleed: 0),
+                const SizedBox(height: 14),
+                const ProNote(
+                  "Capture the Prathinidhi's details. Saving creates a draft — submit it for identification from the candidate page.",
+                  tone: ProNoteTone.info,
+                ),
+                const SizedBox(height: 14),
+                if (_error != null) ...[AppErrorPanel(message: _error!), const SizedBox(height: 14)],
+                if (cur == 0 && config.aadhaarKycEnabled) ...[_aadhaarSection(), const SizedBox(height: 14)],
+                _section('Step ${cur + 1}', step.title, step.description, step.children),
+              ],
+            ),
+      bottomNavigationBar: _loading
+          ? null
+          : ProBottomBar(children: [
+              if (cur == 0)
+                OutlinedButton(onPressed: () => Navigator.of(context).maybePop(), child: const Text('Cancel'))
+              else
+                OutlinedButton.icon(
+                  onPressed: () => _goTo(cur - 1),
+                  icon: const Icon(Icons.chevron_left_rounded, size: 20),
+                  label: const Text('Back'),
+                ),
+              if (cur < last)
+                FilledButton(
+                  onPressed: () => _goTo(cur + 1),
+                  child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('Next'),
+                    SizedBox(width: 4),
+                    Icon(Icons.chevron_right_rounded, size: 20),
+                  ]),
+                )
+              else
+                FilledButton(
+                  onPressed: busy ? null : _saveAndReveal,
+                  child: Text(_saving ? 'Saving…' : (_isEdit ? 'Save changes' : 'Create candidate')),
+                ),
+            ]),
     );
   }
 
   Widget _aadhaarSection() {
     final busy = _aadhaarBusy != null;
-    return _section('Quick fill', 'Fetch details from Aadhaar',
-        'Verify through DigiLocker and the identity and address fields are filled from the Aadhaar record. Only the last 4 digits are stored.', [
-      const NpFieldLabel('Aadhaar number'),
-      TextField(
-        controller: _aadhaar,
-        keyboardType: TextInputType.number,
-        inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(12)],
-        decoration: const InputDecoration(hintText: 'XXXX XXXX XXXX'),
-        onChanged: (_) => setState(() {
-          _aadhaarSession = null;
-          _aadhaarVerified = false;
-          _aadhaarStatus = null;
-        }),
-      ),
-      const SizedBox(height: 10),
-      Wrap(spacing: 8, runSpacing: 8, children: [
-        OutlinedButton(
-          onPressed: (busy || _aadhaar.text.length != 12) ? null : _aadhaarLink,
-          child: Text(_aadhaarBusy == 'link' ? 'Generating link…' : (_aadhaarSession == null ? 'Send DigiLocker link' : 'Resend DigiLocker link')),
+    return GlassCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          ProIconWell(icon: Icons.fingerprint_rounded, color: AppColors.primary, size: 40),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Quick fill', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: AppColors.primary)),
+              const Text('Fetch details from Aadhaar', style: AppText.section),
+            ]),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Text(
+          'Verify through DigiLocker and the identity and address fields are filled from the Aadhaar record. Only the last 4 digits are stored.',
+          style: AppText.caption,
         ),
-        if (_aadhaarSession != null) ...[
-          OutlinedButton.icon(
-            onPressed: busy
-                ? null
-                : () {
-                    final uri = Uri.tryParse(_aadhaarSession!.link);
-                    if (uri != null) launchUrl(uri, mode: LaunchMode.externalApplication);
-                  },
-            icon: const Icon(Icons.open_in_new_rounded, size: 16),
-            label: const Text('Open DigiLocker'),
+        const SizedBox(height: 14),
+        _field(
+          'Aadhaar number',
+          TextField(
+            controller: _aadhaar,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(12)],
+            decoration: const InputDecoration(hintText: 'XXXX XXXX XXXX'),
+            onChanged: (_) => setState(() {
+              _aadhaarSession = null;
+              _aadhaarVerified = false;
+              _aadhaarStatus = null;
+            }),
           ),
-          FilledButton(
-            onPressed: busy ? null : _aadhaarFetch,
-            child: Text(_aadhaarBusy == 'fetch' ? 'Fetching…' : 'Fetch details'),
+        ),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          OutlinedButton(
+            onPressed: (busy || _aadhaar.text.length != 12) ? null : _aadhaarLink,
+            child: Text(_aadhaarBusy == 'link' ? 'Generating link…' : (_aadhaarSession == null ? 'Send DigiLocker link' : 'Resend DigiLocker link')),
           ),
-        ],
+          if (_aadhaarSession != null) ...[
+            OutlinedButton.icon(
+              onPressed: busy
+                  ? null
+                  : () {
+                      final uri = Uri.tryParse(_aadhaarSession!.link);
+                      if (uri != null) launchUrl(uri, mode: LaunchMode.externalApplication);
+                    },
+              icon: const Icon(Icons.open_in_new_rounded, size: 16),
+              label: const Text('Open DigiLocker'),
+            ),
+            FilledButton(
+              onPressed: busy ? null : _aadhaarFetch,
+              child: Text(_aadhaarBusy == 'fetch' ? 'Fetching…' : 'Fetch details'),
+            ),
+          ],
+        ]),
+        if (_aadhaarStatus != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: ProNote(_aadhaarStatus!, tone: _aadhaarVerified ? ProNoteTone.ok : ProNoteTone.info),
+          ),
       ]),
-      if (_aadhaarStatus != null)
-        Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: Text(_aadhaarStatus!,
-              style: TextStyle(fontSize: 12.5, height: 1.4, color: _aadhaarVerified ? AppColors.success : AppColors.inkSoft, fontWeight: FontWeight.w500)),
-        ),
-    ]);
+    );
   }
 
-  Widget _section(String eyebrow, String title, String description, List<Widget> children) => Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: GlassCard(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Text(eyebrow.toUpperCase(),
-                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 0.8, color: AppColors.primary)),
-            const SizedBox(height: 2),
-            Text(title, style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800, color: AppColors.ink)),
-            const SizedBox(height: 2),
-            Text(description, style: const TextStyle(fontSize: 12, color: AppColors.muted, height: 1.35)),
-            const Divider(height: 18, color: AppColors.hairline),
-            ...children,
+  Widget _section(String eyebrow, String title, String description, List<Widget> children) => GlassCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Expanded(child: Text(title, style: AppText.title)),
+            ProPill.neutral(eyebrow),
           ]),
-        ),
+          const SizedBox(height: 3),
+          Text(description, style: AppText.caption),
+          const SizedBox(height: 16),
+          ...children,
+        ]),
+      );
+
+  static const _subheadStyle = TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.ink);
+
+  Widget _subhead(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Text(text, style: _subheadStyle),
+      );
+
+  /// Label above, field, optional helper below (Pro form rhythm).
+  Widget _field(String label, Widget child, {bool required = false, String? hint}) => Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: ProField(label: label, required: required, helper: hint, child: child),
       );
 
   Widget _dropdown(String? value, List<String> options, ValueChanged<String?> onChanged) => DropdownButtonFormField<String>(
@@ -837,9 +910,9 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadii.md),
         child: InputDecorator(
-          decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_rounded, size: 18)),
+          decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_outlined, size: 18)),
           child: Text(value == null ? 'Not set' : npFmtDate(value),
-              style: TextStyle(fontSize: 14, color: value == null ? AppColors.muted : AppColors.ink)),
+              style: TextStyle(fontSize: 15, color: value == null ? AppColors.muted : AppColors.ink)),
         ),
       );
 
@@ -861,12 +934,11 @@ class _NpCandidateFormScreenState extends ConsumerState<NpCandidateFormScreen> {
       );
 }
 
-class _Hint extends StatelessWidget {
-  const _Hint(this.text);
-  final String text;
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Text(text, style: const TextStyle(fontSize: 11.5, color: AppColors.muted, height: 1.35)),
-      );
+/// One wizard page of the candidate form.
+class _FormStep {
+  const _FormStep(this.short, this.title, this.description, this.children);
+  final String short;
+  final String title;
+  final String description;
+  final List<Widget> children;
 }

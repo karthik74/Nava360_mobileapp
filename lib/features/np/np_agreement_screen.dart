@@ -19,6 +19,7 @@ import 'package:go_router/go_router.dart';
 import 'package:video_compress/video_compress.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -223,160 +224,175 @@ class _NpAgreementScreenState extends ConsumerState<NpAgreementScreen> {
   Widget build(BuildContext context) {
     final d = _d;
     final allowed = d?.can('SUBMIT_AGREEMENT') ?? false;
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: const Text('Agreement & PDCs'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-        ),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : d == null
-                ? Padding(padding: const EdgeInsets.all(16), child: AppErrorPanel(message: _error ?? 'Not found', onRetry: _load))
-                : !allowed
-                    ? Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: AppEmptyState(icon: Icons.lock_outline_rounded, message: 'The agreement cannot be submitted at this stage (${d.statusLabel}).'),
-                      )
-                    : ListView(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-                        children: [
-                          GlassCard(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                              Text(d.fullName, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.ink)),
-                              Text('${d.candidateCode} · ${d.mobileNumber}', style: const TextStyle(fontSize: 12, color: AppColors.inkSoft)),
-                            ]),
-                          ),
-                          const SizedBox(height: 10),
-                          if (d.status == 'SENT_BACK_FOR_CORRECTION' && d.correctionRemarks != null) ...[
-                            NpBanner(icon: Icons.undo_rounded, color: const Color(0xFFEA580C), title: 'Sent back — resubmit the agreement', body: d.correctionRemarks),
-                            const SizedBox(height: 10),
-                          ],
-                          _card('Signed agreement', [
-                            const NpFieldLabel('Agreement date', required: true),
-                            InkWell(
-                              onTap: () async {
-                                final p = await showDatePicker(context: context, initialDate: _agreementDate, firstDate: DateTime(2020), lastDate: DateTime(2035));
-                                if (p != null) setState(() => _agreementDate = p);
-                              },
-                              borderRadius: BorderRadius.circular(AppRadii.md),
-                              child: InputDecorator(
-                                decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_rounded, size: 18)),
-                                child: Text(npFmtDate(_agreementDate), style: const TextStyle(fontSize: 14, color: AppColors.ink)),
-                              ),
-                            ),
-                            NpFilePickField(
-                              label: 'Signed agreement scan',
-                              fileName: _agreementFile?.name,
-                              onPick: () => _pick((f) => _agreementFile = f),
-                            ),
-                          ]),
-                          _card('Cheque account', [
-                            const Text('Both post-dated cheques are drawn on this account.', style: TextStyle(fontSize: 12, color: AppColors.muted)),
-                            const NpFieldLabel('Bank name'),
-                            TextField(controller: _bankName, textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()]),
-                            const NpFieldLabel('Account number', required: true),
-                            TextField(controller: _account, keyboardType: TextInputType.number),
-                            const NpFieldLabel('IFSC', required: true),
-                            TextField(
-                              controller: _ifsc,
-                              textCapitalization: TextCapitalization.characters,
-                              inputFormatters: [const UpperCaseTextFormatter(), LengthLimitingTextInputFormatter(11)],
-                              decoration: const InputDecoration(hintText: 'SBIN0001234'),
-                            ),
-                          ]),
-                          _pdcCard(1, _pdc1No, _pdc1File, (f) => _pdc1File = f),
-                          _pdcCard(2, _pdc2No, _pdc2File, (f) => _pdc2File = f),
-                          _videoCard(),
-                          _card('Remarks', [
-                            TextField(controller: _remarks, minLines: 2, maxLines: 4, textCapitalization: TextCapitalization.sentences),
-                          ]),
-                          SizedBox(
-                            height: 50,
-                            child: FilledButton.icon(
-                              onPressed: _busy ? null : _submit,
-                              icon: _busy
-                                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                  : const Icon(Icons.send_rounded, size: 18),
-                              label: Text(_busy ? (_status ?? 'Uploading…') : 'Submit agreement & PDCs'),
-                            ),
-                          ),
-                        ],
+    final showForm = !_loading && d != null && allowed;
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(context, title: 'Agreement & PDCs', subtitle: 'Signed agreement, two cheques and a video'),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : d == null
+              ? Padding(padding: const EdgeInsets.all(16), child: AppErrorPanel(message: _error ?? 'Not found', onRetry: _load))
+              : !allowed
+                  ? Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: ProEmpty(
+                        icon: Icons.lock_outline_rounded,
+                        title: 'Not available',
+                        message: 'The agreement cannot be submitted at this stage (${d.statusLabel}).',
                       ),
-      ),
+                    )
+                  : ListView(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                      children: [
+                        NpWhoCard(d: d),
+                        const SizedBox(height: 14),
+                        if (d.status == 'SENT_BACK_FOR_CORRECTION' && d.correctionRemarks != null) ...[
+                          NpBanner(icon: Icons.undo_rounded, color: const Color(0xFFEA580C), title: 'Sent back — resubmit the agreement', body: d.correctionRemarks),
+                          const SizedBox(height: 14),
+                        ],
+                        _card('Signed agreement', [
+                          const NpFieldLabel('Agreement date', required: true),
+                          InkWell(
+                            onTap: () async {
+                              final p = await showDatePicker(context: context, initialDate: _agreementDate, firstDate: DateTime(2020), lastDate: DateTime(2035));
+                              if (p != null) setState(() => _agreementDate = p);
+                            },
+                            borderRadius: BorderRadius.circular(AppRadii.md),
+                            child: InputDecorator(
+                              decoration: const InputDecoration(suffixIcon: Icon(Icons.calendar_today_outlined, size: 18)),
+                              child: Text(npFmtDate(_agreementDate), style: const TextStyle(fontSize: 15, color: AppColors.ink)),
+                            ),
+                          ),
+                          NpFilePickField(
+                            label: 'Signed agreement scan',
+                            fileName: _agreementFile?.name,
+                            onPick: () => _pick((f) => _agreementFile = f),
+                          ),
+                        ]),
+                        _card('Cheque account', help: 'Both post-dated cheques are drawn on this account.', [
+                          const NpFieldLabel('Bank name'),
+                          TextField(controller: _bankName, textCapitalization: TextCapitalization.words, inputFormatters: const [TitleCaseTextFormatter()]),
+                          const NpFieldLabel('Account number', required: true),
+                          TextField(controller: _account, keyboardType: TextInputType.number),
+                          const NpFieldLabel('IFSC', required: true),
+                          TextField(
+                            controller: _ifsc,
+                            textCapitalization: TextCapitalization.characters,
+                            inputFormatters: [const UpperCaseTextFormatter(), LengthLimitingTextInputFormatter(11)],
+                            decoration: const InputDecoration(hintText: 'SBIN0001234'),
+                          ),
+                        ]),
+                        _pdcCard(1, _pdc1No, _pdc1File, (f) => _pdc1File = f),
+                        _pdcCard(2, _pdc2No, _pdc2File, (f) => _pdc2File = f),
+                        _videoCard(),
+                        _card('Remarks', [
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: _remarks,
+                            minLines: 2,
+                            maxLines: 4,
+                            textCapitalization: TextCapitalization.sentences,
+                            decoration: const InputDecoration(hintText: 'Anything OPS should know'),
+                          ),
+                        ]),
+                      ],
+                    ),
+      bottomNavigationBar: !showForm
+          ? null
+          : ProBottomBar(children: [
+              FilledButton.icon(
+                onPressed: _busy ? null : _submit,
+                icon: _busy
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.send_rounded, size: 18),
+                label: Text(_busy ? (_status ?? 'Uploading…') : 'Submit agreement & PDCs'),
+              ),
+            ]),
     );
   }
 
-  Widget _pdcCard(int seq, TextEditingController no, NpPickedFile? file, void Function(NpPickedFile f) setFile) => _card('PDC $seq', [
-        const NpFieldLabel('Cheque number', required: true),
-        TextField(
-          controller: no,
-          keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
-          decoration: const InputDecoration(hintText: '6 digits'),
-        ),
-        NpFilePickField(label: 'Cheque scan', fileName: file?.name, onPick: () => _pick(setFile)),
-      ]);
+  Widget _pdcCard(int seq, TextEditingController no, NpPickedFile? file, void Function(NpPickedFile f) setFile) => _card(
+        'PDC $seq',
+        icon: Icons.payments_outlined,
+        [
+          const NpFieldLabel('Cheque number', required: true),
+          TextField(
+            controller: no,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
+            decoration: const InputDecoration(hintText: '6 digits'),
+          ),
+          NpFilePickField(label: 'Cheque scan', fileName: file?.name, onPick: () => _pick(setFile)),
+        ],
+      );
 
   Widget _videoCard() {
     final take = _video;
     final player = _player;
     String clock(int s) => '${s ~/ 60}:${(s % 60).toString().padLeft(2, '0')}';
-    return _card('Customer verification video', [
-      const Text('Record the customer speaking on camera — their name, and that they have signed the agreement '
+    return _card(
+      'Customer verification video',
+      help: 'Record the customer speaking on camera — their name, and that they have signed the agreement '
           'and handed over the cheques.',
-          style: TextStyle(fontSize: 12, color: AppColors.muted)),
-      const SizedBox(height: 8),
-      if (take != null) ...[
-        ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          child: Container(
-            color: Colors.black,
-            height: 220,
-            alignment: Alignment.center,
-            child: player == null || !player.value.isInitialized
-                ? const Icon(Icons.videocam_rounded, color: Colors.white38, size: 40)
-                : Stack(alignment: Alignment.center, children: [
-                    AspectRatio(aspectRatio: player.value.aspectRatio, child: VideoPlayer(player)),
-                    IconButton(
-                      iconSize: 52,
-                      color: Colors.white,
-                      onPressed: () => player.value.isPlaying ? player.pause() : player.play(),
-                      icon: Icon(player.value.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded),
-                    ),
-                  ]),
+      [
+        const SizedBox(height: 12),
+        if (take != null) ...[
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              color: AppColors.deep,
+              height: 220,
+              alignment: Alignment.center,
+              child: player == null || !player.value.isInitialized
+                  ? const Icon(Icons.videocam_outlined, color: Colors.white38, size: 40)
+                  : Stack(alignment: Alignment.center, children: [
+                      AspectRatio(aspectRatio: player.value.aspectRatio, child: VideoPlayer(player)),
+                      IconButton(
+                        iconSize: 56,
+                        color: Colors.white,
+                        tooltip: player.value.isPlaying ? 'Pause' : 'Play',
+                        onPressed: () => player.value.isPlaying ? player.pause() : player.play(),
+                        icon: Icon(player.value.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded),
+                      ),
+                    ]),
+            ),
           ),
-        ),
-        const SizedBox(height: 6),
-        Row(children: [
-          const Icon(Icons.check_circle_rounded, size: 16, color: AppColors.success),
-          const SizedBox(width: 6),
-          Expanded(child: Text('Recorded · ${clock(take.durationSec)}', style: const TextStyle(fontSize: 12.5, color: AppColors.ink))),
-          TextButton.icon(
+          const SizedBox(height: 8),
+          Row(children: [
+            const Icon(Icons.check_circle_rounded, size: 18, color: AppColors.success),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Recorded · ${clock(take.durationSec)}',
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: AppColors.ink, fontFeatures: [FontFeature.tabularFigures()])),
+            ),
+            TextButton.icon(
+              onPressed: _busy ? null : _record,
+              icon: const Icon(Icons.replay_rounded, size: 16),
+              label: const Text('Re-record'),
+            ),
+          ]),
+        ] else
+          OutlinedButton.icon(
             onPressed: _busy ? null : _record,
-            icon: const Icon(Icons.replay_rounded, size: 16),
-            label: const Text('Re-record'),
+            icon: const Icon(Icons.videocam_outlined, size: 18),
+            label: const Text('Record video'),
           ),
-        ]),
-      ] else
-        OutlinedButton.icon(
-          onPressed: _busy ? null : _record,
-          icon: const Icon(Icons.videocam_rounded, size: 18),
-          label: const Text('Record video'),
-        ),
-    ]);
+      ],
+    );
   }
 
-  Widget _card(String title, List<Widget> children) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
+  Widget _card(String title, List<Widget> children, {String? help, IconData? icon}) => Padding(
+        padding: const EdgeInsets.only(bottom: 14),
         child: GlassCard(
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Text(title, style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: AppColors.ink)),
-            const SizedBox(height: 4),
+            Row(children: [
+              if (icon != null) ...[ProIconWell(icon: icon, color: AppColors.primary, size: 30), const SizedBox(width: 10)],
+              Expanded(child: Text(title, style: AppText.section)),
+            ]),
+            if (help != null) ...[
+              const SizedBox(height: 3),
+              Text(help, style: AppText.caption),
+            ],
             ...children,
           ]),
         ),

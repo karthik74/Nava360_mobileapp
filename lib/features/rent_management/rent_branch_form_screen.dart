@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme.dart';
-import '../../core/widgets.dart';
+import '../../core/pro_ui.dart';
 import 'rent_models.dart';
 import 'rent_repository.dart';
 
@@ -191,175 +191,201 @@ class _RentBranchFormScreenState extends ConsumerState<RentBranchFormScreen> {
   @override
   Widget build(BuildContext context) {
     final df = DateFormat('d MMM yyyy');
-    return GlassBackdrop(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Text(_isEdit ? 'Edit Branch' : 'New Rent Branch'),
-          backgroundColor: AppColors.surface,
-          foregroundColor: AppColors.ink,
-          elevation: 0.5,
-          actions: [
-            if (_isEdit)
-              IconButton(
-                onPressed: _delete,
-                icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
-                tooltip: 'Delete',
-              ),
-          ],
-        ),
-        body: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  _label('Branch name *'),
-                  TextField(controller: _branchName, textCapitalization: TextCapitalization.words),
-                  const SizedBox(height: 10),
-                  _label('Branch code'),
-                  TextField(controller: _branchCode),
-                  const SizedBox(height: 10),
-                  _label('Owner / landlord name'),
-                  TextField(controller: _ownerName, textCapitalization: TextCapitalization.words),
-                  const SizedBox(height: 10),
-                  _label('Start date'),
-                  InkWell(
-                    onTap: _pickStartDate,
-                    borderRadius: BorderRadius.circular(AppRadii.md),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(AppRadii.md),
-                        border: Border.all(color: AppColors.hairline),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.calendar_today_rounded, size: 15, color: AppColors.primary),
-                          const SizedBox(width: 8),
-                          Text(
-                            _startDate == null ? 'Not set' : df.format(_startDate!),
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  _label('Address'),
-                  TextField(controller: _address, minLines: 2, maxLines: 4),
-                  const SizedBox(height: 16),
-                  const AppSectionHeader(title: 'Rent'),
-                  const SizedBox(height: 8),
-                  Row(
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      appBar: proLightAppBar(
+        context,
+        title: _isEdit ? 'Edit branch' : 'New rent branch',
+        subtitle: 'Rent management · landlord record',
+        actions: [
+          if (_isEdit)
+            IconButton(
+              onPressed: _delete,
+              icon: const Icon(Icons.delete_outline_rounded, color: AppColors.danger),
+              tooltip: 'Delete',
+            ),
+          const SizedBox(width: 8),
+        ],
+      ),
+      bottomNavigationBar: _loading
+          ? null
+          : ProBottomBar(
+              children: [
+                FilledButton(
+                  onPressed: _saving ? null : _save,
+                  child: Text(_saving ? 'Saving…' : (_isEdit ? 'Save changes' : 'Create branch')),
+                ),
+              ],
+            ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+              children: [
+                GlassCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _label('Monthly rent'),
-                            TextField(
-                              controller: _rent,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: const InputDecoration(prefixText: '₹ '),
-                            ),
-                          ],
+                      const ProSectionHeader(title: 'Branch'),
+                      const SizedBox(height: 12),
+                      ProField(
+                        label: 'Branch name',
+                        required: true,
+                        child: TextField(controller: _branchName, textCapitalization: TextCapitalization.words),
+                      ),
+                      const SizedBox(height: 14),
+                      ProField(label: 'Branch code', child: TextField(controller: _branchCode)),
+                      const SizedBox(height: 14),
+                      ProField(
+                        label: 'Owner / landlord name',
+                        child: TextField(controller: _ownerName, textCapitalization: TextCapitalization.words),
+                      ),
+                      const SizedBox(height: 14),
+                      ProField(
+                        label: 'Start date',
+                        child: _dateField(
+                          _startDate == null ? 'Not set' : df.format(_startDate!),
+                          _pickStartDate,
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _label('Rent advance'),
-                            TextField(
-                              controller: _rentAdvance,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: const InputDecoration(prefixText: '₹ '),
-                            ),
-                          ],
-                        ),
+                      const SizedBox(height: 14),
+                      ProField(
+                        label: 'Address',
+                        child: TextField(controller: _address, minLines: 2, maxLines: 4),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  _label('GST applicable'),
-                  SizedBox(
-                    width: double.infinity,
-                    child: DropdownButtonFormField<bool?>(
-                      value: _gstApplicable,
-                      items: const [
-                        DropdownMenuItem(value: null, child: Text('Not determined')),
-                        DropdownMenuItem(value: true, child: Text('Yes')),
-                        DropdownMenuItem(value: false, child: Text('No')),
-                      ],
-                      onChanged: (v) => setState(() {
-                        _gstApplicable = v;
-                        if (v != true) _gstRate = null; // no stale custom rate when GST isn't charged
-                      }),
-                    ),
+                ),
+                const SizedBox(height: 14),
+                GlassCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const ProSectionHeader(title: 'Rent'),
+                      const SizedBox(height: 12),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: ProField(
+                              label: 'Monthly rent',
+                              child: TextField(
+                                controller: _rent,
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                style: AppText.number.copyWith(fontSize: 15, color: AppColors.ink),
+                                decoration: const InputDecoration(prefixText: '₹ '),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ProField(
+                              label: 'Rent advance',
+                              child: TextField(
+                                controller: _rentAdvance,
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                style: AppText.number.copyWith(fontSize: 15, color: AppColors.ink),
+                                decoration: const InputDecoration(prefixText: '₹ '),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      ProField(
+                        label: 'GST applicable',
+                        child: DropdownButtonFormField<bool?>(
+                          value: _gstApplicable,
+                          isExpanded: true,
+                          items: const [
+                            DropdownMenuItem(value: null, child: Text('Not determined')),
+                            DropdownMenuItem(value: true, child: Text('Yes')),
+                            DropdownMenuItem(value: false, child: Text('No')),
+                          ],
+                          onChanged: (v) => setState(() {
+                            _gstApplicable = v;
+                            if (v != true) _gstRate = null; // no stale custom rate when GST isn't charged
+                          }),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: ProField(
+                              label: 'GST rate',
+                              child: DropdownButtonFormField<double?>(
+                                value: _gstRate,
+                                isExpanded: true,
+                                items: [
+                                  const DropdownMenuItem(value: null, child: Text('18% (default)')),
+                                  for (final r in _rateOptions.gstRates.where((r) => r != 18))
+                                    DropdownMenuItem(value: r, child: Text('${_fmtRate(r)}%')),
+                                  if (_gstRate != null && _gstRate != 18 && !_rateOptions.gstRates.contains(_gstRate))
+                                    DropdownMenuItem(value: _gstRate, child: Text('${_fmtRate(_gstRate!)}%')),
+                                ],
+                                onChanged: _gstApplicable == true ? (v) => setState(() => _gstRate = v) : null,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ProField(
+                              label: 'TDS rate',
+                              child: DropdownButtonFormField<double?>(
+                                value: _tdsRate,
+                                isExpanded: true,
+                                items: [
+                                  const DropdownMenuItem(value: null, child: Text('10% (default)')),
+                                  for (final r in _rateOptions.tdsRates.where((r) => r != 10))
+                                    DropdownMenuItem(value: r, child: Text(r == 0 ? 'Not applicable' : '${_fmtRate(r)}%')),
+                                  if (_tdsRate != null && _tdsRate != 10 && !_rateOptions.tdsRates.contains(_tdsRate))
+                                    DropdownMenuItem(value: _tdsRate, child: Text('${_fmtRate(_tdsRate!)}%')),
+                                ],
+                                onChanged: (v) => setState(() => _tdsRate = v),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 10),
-                  _label('GST rate'),
-                  SizedBox(
-                    width: double.infinity,
-                    child: DropdownButtonFormField<double?>(
-                      value: _gstRate,
-                      items: [
-                        const DropdownMenuItem(value: null, child: Text('18% (default)')),
-                        for (final r in _rateOptions.gstRates.where((r) => r != 18))
-                          DropdownMenuItem(value: r, child: Text('${_fmtRate(r)}%')),
-                        if (_gstRate != null && _gstRate != 18 && !_rateOptions.gstRates.contains(_gstRate))
-                          DropdownMenuItem(value: _gstRate, child: Text('${_fmtRate(_gstRate!)}%')),
-                      ],
-                      onChanged: _gstApplicable == true ? (v) => setState(() => _gstRate = v) : null,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  _label('TDS rate'),
-                  SizedBox(
-                    width: double.infinity,
-                    child: DropdownButtonFormField<double?>(
-                      value: _tdsRate,
-                      items: [
-                        const DropdownMenuItem(value: null, child: Text('10% (default)')),
-                        for (final r in _rateOptions.tdsRates.where((r) => r != 10))
-                          DropdownMenuItem(value: r, child: Text(r == 0 ? 'Not applicable' : '${_fmtRate(r)}%')),
-                        if (_tdsRate != null && _tdsRate != 10 && !_rateOptions.tdsRates.contains(_tdsRate))
-                          DropdownMenuItem(value: _tdsRate, child: Text('${_fmtRate(_tdsRate!)}%')),
-                      ],
-                      onChanged: (v) => setState(() => _tdsRate = v),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
+                ),
+                const SizedBox(height: 14),
+                GlassCard(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  child: SwitchListTile.adaptive(
                     value: _active,
                     onChanged: (v) => setState(() => _active = v),
-                    title: const Text('Active', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                    title: const Text('Active', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
                   ),
-                  if (_error != null) ...[
-                    const SizedBox(height: 14),
-                    AppErrorPanel(message: _error!),
-                  ],
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    height: 50,
-                    child: FilledButton(
-                      onPressed: _saving ? null : _save,
-                      child: Text(_saving ? 'Saving…' : (_isEdit ? 'Save changes' : 'Create branch')),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 14),
+                  ProNote(_error!, tone: ProNoteTone.bad),
                 ],
-              ),
-      ),
+              ],
+            ),
     );
   }
 
-  Widget _label(String t) => Padding(
-        padding: const EdgeInsets.only(bottom: 4, top: 4),
-        child: Text(t,
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.inkSoft)),
-      );
+  /// Tappable date box in the input style.
+  Widget _dateField(String value, VoidCallback? onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          enabled: onTap != null,
+          prefixIcon: Icon(Icons.calendar_today_rounded, size: 17, color: AppColors.primary),
+          suffixIcon: const Icon(Icons.expand_more_rounded),
+        ),
+        child: Text(
+          value,
+          style: TextStyle(fontSize: 15, color: onTap == null ? AppColors.muted : AppColors.ink),
+        ),
+      ),
+    );
+  }
 }

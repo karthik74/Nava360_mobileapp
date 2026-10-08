@@ -121,11 +121,10 @@ class _StepChip extends StatelessWidget {
           ? step.actionComment!.trim()
           : step.status,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
         decoration: BoxDecoration(
           color: step.color.withOpacity(0.10),
           borderRadius: BorderRadius.circular(AppRadii.pill),
-          border: Border.all(color: step.color.withOpacity(0.35)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -135,8 +134,8 @@ class _StepChip extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
                 color: step.color,
               ),
             ),

@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import 'mis_api_client.dart';
@@ -167,129 +168,133 @@ class _MisClientsScreenState extends ConsumerState<MisClientsScreen> {
   Widget build(BuildContext context) {
     final q = _query4Page;
     final async = ref.watch(misClientsProvider(q));
+    final res = async.valueOrNull;
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
       appBar: AppBar(
-        title: const Text('Customer details'),
+        title: const Text('MIS'),
         actions: [
           IconButton(
             tooltip: 'Export CSV',
             onPressed: _exporting ? null : () => _export(async.valueOrNull),
             icon: _exporting
-                ? const SizedBox(
+                ? SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.primary),
                   )
                 : const Icon(Icons.download_rounded),
           ),
         ],
       ),
-      body: RefreshIndicator(
-        color: AppColors.primary,
+      body: ProPage(
         onRefresh: () async => ref.invalidate(misClientsProvider(q)),
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.fromLTRB(
-              16, 12, 16, MediaQuery.of(context).padding.bottom + 24),
-          children: [
-            _header(async.valueOrNull),
-            const SizedBox(height: 12),
-            _searchBar(),
-            const SizedBox(height: 10),
-            _sortBar(),
-            const SizedBox(height: 12),
-            async.when(
-              loading: () => const AppLoadingBlock(height: 220),
-              error: (e, _) => _errorOrNotice(e),
-              data: (res) => _results(res),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _header(ClientsListResponse? res) {
-    final bits = <String>[
-      widget.scopeLabel,
-      if (res != null && res.asOn.label.isNotEmpty) res.asOn.label,
-      if (widget.bucketAccounts != null && widget.bucketAccounts! > 0)
-        '${misNum(widget.bucketAccounts)} accounts in this bucket',
-    ];
-    return GlassCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        hero: _hero(res),
         children: [
-          Row(
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: MisPalette.risk(widget.bucketKey),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Client details — ${widget.bucketLabel}',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            bits.join(' · '),
-            style: const TextStyle(fontSize: 12, color: AppColors.muted),
+          _sortBar(),
+          async.when(
+            loading: () => const AppLoadingBlock(height: 220),
+            error: (e, _) => _errorOrNotice(e),
+            data: (res) => _results(res),
           ),
         ],
       ),
     );
   }
 
-  Widget _searchBar() {
-    return Row(
+  Widget _hero(ClientsListResponse? res) {
+    final bits = <String>[
+      widget.scopeLabel,
+      if (res != null && res.asOn.label.isNotEmpty) res.asOn.label,
+    ];
+    final total = res?.total;
+    final totalPages =
+        (total != null && total > 0) ? (total / _size).ceil() : 0;
+    final hasBucketAcc =
+        widget.bucketAccounts != null && widget.bucketAccounts! > 0;
+    return ProHero(
+      kicker: 'Customer details',
+      title: 'Client details — ${widget.bucketLabel}',
+      overlap: _searchBar(),
       children: [
-        Expanded(
-          child: TextField(
-            controller: _searchCtrl,
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _applySearch(),
-            decoration: InputDecoration(
-              isDense: true,
-              filled: true,
-              fillColor: AppColors.surface,
-              hintText: 'Client ID, name, mobile, account, group or officer…',
-              hintStyle: const TextStyle(fontSize: 12.5),
-              prefixIcon: const Icon(Icons.search_rounded, size: 19),
-              suffixIcon: _query.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: const Icon(Icons.close_rounded, size: 18),
-                      onPressed: _clearSearch,
-                    ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                borderSide: const BorderSide(color: AppColors.hairline),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                borderSide: const BorderSide(color: AppColors.hairline),
+        ProLiveLine(
+          text: bits.join(' · '),
+          color: MisPalette.risk(widget.bucketKey),
+        ),
+        ProHeroStats(stats: [
+          ProStat(
+            label: 'Accounts',
+            value: hasBucketAcc ? misNum(widget.bucketAccounts) : '—',
+            sub: 'in this bucket',
+            dot: MisPalette.risk(widget.bucketKey),
+          ),
+          ProStat(
+            label: _query.isEmpty ? 'Clients' : 'Matches',
+            value: total == null ? '—' : misNum(total),
+            sub: _query.isEmpty ? 'listed' : '“$_query”',
+            dot: const Color(0xFF7FD3E3),
+          ),
+          ProStat(
+            label: 'Page',
+            value: totalPages == 0 ? '—' : '${_pageIndex + 1}/$totalPages',
+            sub: '$_size per page',
+            dot: AppColors.live,
+          ),
+        ]),
+      ],
+    );
+  }
+
+  /// Raised search over the hero. Search is server-side, so it runs on submit
+  /// (keyboard action or the Search button), not on every keystroke.
+  Widget _searchBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: AppColors.hairline),
+        boxShadow: AppShadows.lifted,
+      ),
+      padding: const EdgeInsets.only(right: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchCtrl,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _applySearch(),
+              style: const TextStyle(fontSize: 15, color: AppColors.ink),
+              decoration: InputDecoration(
+                hintText: 'Client ID, name, mobile, account, group or officer…',
+                prefixIcon: const Icon(Icons.search_rounded, size: 21),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear search',
+                        icon: const Icon(Icons.close_rounded, size: 19),
+                        onPressed: _clearSearch,
+                      ),
+                filled: false,
+                contentPadding: const EdgeInsets.symmetric(vertical: 15),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
               ),
             ),
           ),
-        ),
-        const SizedBox(width: 8),
-        FilledButton(onPressed: _applySearch, child: const Text('Search')),
-      ],
+          FilledButton(
+            onPressed: _applySearch,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 38),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(11)),
+            ),
+            child: const Text('Search'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -329,6 +334,7 @@ class _MisClientsScreenState extends ConsumerState<MisClientsScreen> {
           ),
           style: IconButton.styleFrom(
             backgroundColor: AppColors.surface,
+            foregroundColor: AppColors.ink,
             side: const BorderSide(color: AppColors.hairline),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppRadii.md),
@@ -345,22 +351,7 @@ class _MisClientsScreenState extends ConsumerState<MisClientsScreen> {
   Widget _errorOrNotice(Object e) {
     final notice = _noticeFor(e);
     if (notice != null) {
-      return GlassCard(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(Icons.info_outline_rounded,
-                size: 20, color: AppColors.muted),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                notice,
-                style: const TextStyle(fontSize: 13, color: AppColors.inkSoft),
-              ),
-            ),
-          ],
-        ),
-      );
+      return ProNote(notice, tone: ProNoteTone.info);
     }
     return AppErrorPanel(
       message: e.toString(),
@@ -390,23 +381,25 @@ class _MisClientsScreenState extends ConsumerState<MisClientsScreen> {
     final to = ((_pageIndex + 1) * _size).clamp(0, total);
 
     if (res.rows.isEmpty) {
-      return MisInlineEmpty(
-        _query.isNotEmpty
+      return ProEmpty(
+        icon: Icons.person_search_outlined,
+        title: 'No clients found',
+        message: _query.isNotEmpty
             ? 'No client matches “$_query” in this bucket.'
             : 'No clients in this bucket.',
       );
     }
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _pager(total, totalPages, from, to),
-        const SizedBox(height: 12),
-        for (final r in res.rows) ...[
-          _clientCard(r),
-          const SizedBox(height: 8),
-        ],
-        const SizedBox(height: 4),
+        const SizedBox(height: 10),
+        ProListGroup(
+          dividerIndent: 0,
+          children: [for (final r in res.rows) _clientCard(r)],
+        ),
+        const SizedBox(height: 10),
         _pager(total, totalPages, from, to),
       ],
     );
@@ -415,51 +408,67 @@ class _MisClientsScreenState extends ConsumerState<MisClientsScreen> {
   Widget _pager(int total, int totalPages, int from, int to) {
     final first = _pageIndex == 0;
     final last = totalPages == 0 || _pageIndex >= totalPages - 1;
-    return Column(
-      children: [
-        Row(
-          children: [
-            IconButton(
-              onPressed:
-                  first ? null : () => setState(() => _pageIndex -= 1),
-              icon: const Icon(Icons.chevron_left_rounded),
-              tooltip: 'Previous page',
+    Widget pageBtn(IconData icon, String tip, VoidCallback? onTap) => Tooltip(
+          message: tip,
+          child: Material(
+            color: AppColors.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: const BorderSide(color: AppColors.hairline),
             ),
-            IconButton(
-              onPressed: last ? null : () => setState(() => _pageIndex += 1),
-              icon: const Icon(Icons.chevron_right_rounded),
-              tooltip: 'Next page',
-            ),
-            Expanded(
-              child: Text(
-                total > 0
-                    ? '${misNum(from)}–${misNum(to)} of ${misNum(total)}'
-                        ' · page ${_pageIndex + 1} of $totalPages'
-                    : 'No rows',
-                style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onTap,
+              child: SizedBox(
+                width: 36,
+                height: 36,
+                child: Icon(icon,
+                    size: 20,
+                    color: onTap == null ? AppColors.faint : AppColors.ink),
               ),
             ),
-            const Text('Rows',
-                style: TextStyle(fontSize: 11.5, color: AppColors.muted)),
-            const SizedBox(width: 6),
-            DropdownButton<int>(
-              value: _size,
-              isDense: true,
-              underline: const SizedBox.shrink(),
-              style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.ink),
-              items: [
-                for (final s in _pageSizes)
-                  DropdownMenuItem(value: s, child: Text('$s')),
-              ],
-              onChanged: (v) => setState(() {
-                _size = v ?? _pageSizes.first;
-                _pageIndex = 0;
-              }),
-            ),
+          ),
+        );
+    return Row(
+      children: [
+        pageBtn(Icons.chevron_left_rounded, 'Previous page',
+            first ? null : () => setState(() => _pageIndex -= 1)),
+        const SizedBox(width: 6),
+        pageBtn(Icons.chevron_right_rounded, 'Next page',
+            last ? null : () => setState(() => _pageIndex += 1)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            total > 0
+                ? '${misNum(from)}–${misNum(to)} of ${misNum(total)}'
+                    ' · page ${_pageIndex + 1} of $totalPages'
+                : 'No rows',
+            style: const TextStyle(
+                fontSize: 12.5,
+                color: AppColors.muted,
+                fontFeatures: [FontFeature.tabularFigures()]),
+          ),
+        ),
+        const Text('Rows',
+            style: TextStyle(fontSize: 12.5, color: AppColors.muted)),
+        const SizedBox(width: 6),
+        DropdownButton<int>(
+          value: _size,
+          isDense: true,
+          underline: const SizedBox.shrink(),
+          borderRadius: BorderRadius.circular(12),
+          style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.ink),
+          items: [
+            for (final s in _pageSizes)
+              DropdownMenuItem(value: s, child: Text('$s')),
           ],
+          onChanged: (v) => setState(() {
+            _size = v ?? _pageSizes.first;
+            _pageIndex = 0;
+          }),
         ),
       ],
     );
@@ -467,82 +476,109 @@ class _MisClientsScreenState extends ConsumerState<MisClientsScreen> {
 
   Widget _clientCard(ClientRow r) {
     final bucket = r.bucket ?? widget.bucketKey;
-    return _MisTapCard(
-      onTap: () => _openDetail(r),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    final tone = MisPalette.risk(bucket.toLowerCase());
+    final ids = [
+      if (r.clientId != null) r.clientId,
+      if (r.accountId != null) 'A/c ${r.accountId}',
+      if (r.productName != null) r.productName,
+    ].whereType<String>().join(' · ');
+    final where =
+        [r.branchName, r.officerName].whereType<String>().join(' · ');
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _openDetail(r),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 13),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  color: MisPalette.risk(bucket.toLowerCase()),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  r.clientName ?? r.clientId ?? '—',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
+              Row(
+                children: [
+                  ProIconWell(icon: Icons.person_outline_rounded, color: tone),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          r.clientName ?? r.clientId ?? '—',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            letterSpacing: -0.15,
+                            color: AppColors.ink,
+                          ),
+                        ),
+                        if (ids.isNotEmpty)
+                          Text(
+                            ids,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.caption,
+                          ),
+                        if (where.isNotEmpty)
+                          Text(
+                            where,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.caption,
+                          ),
+                      ],
+                    ),
                   ),
+                  if (r.mobile != null)
+                    Tooltip(
+                      message: 'Call ${r.mobile}',
+                      child: Material(
+                        color: AppColors.successTint,
+                        borderRadius: BorderRadius.circular(12),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => _call(r.mobile!),
+                          child: const SizedBox(
+                            width: 38,
+                            height: 38,
+                            child: Icon(Icons.call_rounded,
+                                size: 18, color: AppColors.success),
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    const Icon(Icons.chevron_right_rounded,
+                        size: 20, color: Color(0xFFB3C0C3)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceAlt,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                        child: _metric('Principal O/S', r.principalOs, true)),
+                    Expanded(
+                        child: _metric('Total Arrear', r.totalArrear, true)),
+                    Expanded(
+                      child: _metric(
+                        'Due Days',
+                        r.dueDays,
+                        false,
+                        tone: (r.dueDays ?? 0) > 0 ? AppColors.danger : null,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              if (r.mobile != null)
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  tooltip: 'Call ${r.mobile}',
-                  onPressed: () => _call(r.mobile!),
-                  icon: const Icon(Icons.call_rounded,
-                      size: 18, color: AppColors.success),
-                ),
             ],
           ),
-          const SizedBox(height: 2),
-          Text(
-            [
-              if (r.clientId != null) r.clientId,
-              if (r.accountId != null) 'A/c ${r.accountId}',
-              if (r.productName != null) r.productName,
-            ].whereType<String>().join(' · '),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11, color: AppColors.muted),
-          ),
-          if (r.branchName != null || r.officerName != null) ...[
-            const SizedBox(height: 1),
-            Text(
-              [r.branchName, r.officerName].whereType<String>().join(' · '),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: AppColors.muted),
-            ),
-          ],
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(child: _metric('Principal O/S', r.principalOs, true)),
-              Expanded(child: _metric('Total Arrear', r.totalArrear, true)),
-              Expanded(
-                child: _metric(
-                  'Due Days',
-                  r.dueDays,
-                  false,
-                  tone: (r.dueDays ?? 0) > 0 ? AppColors.danger : null,
-                ),
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -552,15 +588,17 @@ class _MisClientsScreenState extends ConsumerState<MisClientsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label,
-            style: const TextStyle(fontSize: 10, color: AppColors.muted)),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
         const SizedBox(height: 1),
         Text(
           value == null ? '—' : (money ? misRupees(value) : misNum(value)),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-            fontSize: 12.5,
-            fontWeight: FontWeight.w700,
+            fontSize: 13.5,
+            fontWeight: FontWeight.w600,
             color: tone ?? AppColors.ink,
             fontFeatures: const [FontFeature.tabularFigures()],
           ),
@@ -576,12 +614,16 @@ class _MisClientsScreenState extends ConsumerState<MisClientsScreen> {
 
   /// Every column of one row — the mobile equivalent of the web's wide table.
   void _openDetail(ClientRow r) {
+    final cols = [
+      for (final c in _allColumns)
+        if (r.raw.containsKey(c.$1)) c,
+    ];
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.surface,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => SafeArea(
         child: DraggableScrollableSheet(
@@ -590,58 +632,85 @@ class _MisClientsScreenState extends ConsumerState<MisClientsScreen> {
           maxChildSize: 0.95,
           builder: (ctx, controller) => ListView(
             controller: controller,
-            padding: const EdgeInsets.fromLTRB(18, 12, 18, 20),
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
             children: [
               Center(
                 child: Container(
                   width: 40,
-                  height: 4,
+                  height: 5,
                   decoration: BoxDecoration(
-                    color: AppColors.hairline,
-                    borderRadius: BorderRadius.circular(2),
+                    color: const Color(0xFFC6D3D6),
+                    borderRadius: BorderRadius.circular(3),
                   ),
                 ),
               ),
-              const SizedBox(height: 14),
-              Text(
-                r.clientName ?? r.clientId ?? 'Client',
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.ink,
-                ),
-              ),
-              const SizedBox(height: 14),
-              for (final c in _allColumns)
-                if (r.raw.containsKey(c.$1))
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Row(
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  ProIconWell(
+                    icon: Icons.person_outline_rounded,
+                    color: MisPalette.risk(
+                        (r.bucket ?? widget.bucketKey).toLowerCase()),
+                    size: 42,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SizedBox(
-                          width: 130,
-                          child: Text(
-                            c.$2,
-                            style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.muted),
+                        Text(
+                          r.clientName ?? r.clientId ?? 'Client',
+                          style: const TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.4,
+                            color: AppColors.ink,
                           ),
                         ),
-                        Expanded(
-                          child: Text(
-                            _display(r, c.$1),
-                            style: const TextStyle(
-                              fontSize: 13.5,
-                              color: AppColors.ink,
-                              fontFeatures: [FontFeature.tabularFigures()],
-                            ),
-                          ),
-                        ),
+                        Text(widget.bucketLabel, style: AppText.caption),
                       ],
                     ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              for (var i = 0; i < cols.length; i++)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    border: i == 0
+                        ? null
+                        : const Border(
+                            top: BorderSide(color: AppColors.hairlineSoft)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 130,
+                        child: Text(
+                          cols[i].$2,
+                          style: const TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w500,
+                              color: AppColors.muted),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          _display(r, cols[i].$1),
+                          textAlign: TextAlign.right,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.ink,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
         ),
@@ -716,28 +785,5 @@ class _MisClientsScreenState extends ConsumerState<MisClientsScreen> {
     } finally {
       if (mounted) setState(() => _exporting = false);
     }
-  }
-}
-
-/// A tappable card matching the MIS card styling.
-class _MisTapCard extends StatelessWidget {
-  const _MisTapCard({required this.child, this.onTap});
-  final Widget child;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final content = GlassCard(
-      padding: const EdgeInsets.all(13),
-      shadow: AppShadows.soft,
-      child: child,
-    );
-    if (onTap == null) return content;
-    return Material(
-      color: Colors.transparent,
-      borderRadius: BorderRadius.circular(AppRadii.lg),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(onTap: onTap, child: content),
-    );
   }
 }

@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api_client.dart';
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../auth/auth_controller.dart';
@@ -27,7 +28,7 @@ class MyGoalsScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: AppColors.bg,
-      appBar: AppBar(title: const Text('My Goals')),
+      appBar: AppBar(title: const Text('My goals')),
       body: empId == null
           ? const Padding(
               padding: EdgeInsets.all(16),
@@ -42,6 +43,18 @@ class MyGoalsScreen extends ConsumerWidget {
   }
 }
 
+/// Amber used for "awaiting approval" accents.
+const _amber = Color(0xFFB45309); // amber-700
+
+/// Segment colours for the weightage-by-KPA bar on the deep hero.
+const _kpaColors = [
+  AppColors.live,
+  Color(0xFF7FC8D8),
+  Color(0xFFF2B347),
+  Color(0xFFB9A4F0),
+  Color(0xFFE5E9EA),
+];
+
 class _GoalsBody extends ConsumerWidget {
   const _GoalsBody({required this.employeeId});
   final int employeeId;
@@ -49,169 +62,161 @@ class _GoalsBody extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(myGoalsProvider(employeeId));
+    final goals = async.valueOrNull;
 
-    return RefreshIndicator(
+    // Group by cycle, preserving the order the server returned.
+    final byCycle = <int, List<EmployeeGoal>>{};
+    for (final g in goals ?? const <EmployeeGoal>[]) {
+      byCycle.putIfAbsent(g.cycleId, () => []).add(g);
+    }
+    final pending = goals?.where((g) => g.hasPendingChange).length ?? 0;
+    final single = byCycle.length == 1 ? byCycle.values.first : null;
+    final totalWeight =
+        single?.fold<double>(0, (sum, g) => sum + g.weightage) ?? 0;
+
+    // Weightage split by KPA (single-cycle view only).
+    final byKpa = <String, double>{};
+    for (final g in single ?? const <EmployeeGoal>[]) {
+      final k = g.kpaName.isEmpty ? 'Other' : g.kpaName;
+      byKpa[k] = (byKpa[k] ?? 0) + g.weightage;
+    }
+    final kpas = byKpa.entries.toList();
+
+    final String subtitle;
+    if (goals == null) {
+      subtitle = 'Your targets for the performance cycle';
+    } else if (single != null) {
+      subtitle = 'Performance cycle · ${single.first.cycleName}';
+    } else if (byCycle.isEmpty) {
+      subtitle = 'No goals assigned yet';
+    } else {
+      subtitle = '${byCycle.length} performance cycles';
+    }
+
+    return ProPage(
       onRefresh: () async => ref.invalidate(myGoalsProvider(employeeId)),
-      child: async.when(
-        loading: () => const AppLoadingBlock(),
-        error: (e, _) => ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            AppErrorPanel(
-              message: e is ApiException ? e.message : 'Failed to load your goals.',
-              onRetry: () => ref.invalidate(myGoalsProvider(employeeId)),
+      hero: ProHero(
+        title: 'My goals',
+        subtitle: subtitle,
+        overlap: ProKpiStrip(
+          cells: [
+            ProKpi(
+              value: goals == null ? '—' : '${goals.length}',
+              label: 'Goals assigned',
             ),
+            ProKpi(
+              value: goals == null ? '—' : '$pending',
+              label: 'Awaiting approval',
+              valueColor: pending > 0 ? _amber : null,
+            ),
+            if (single != null)
+              ProKpi(
+                value: '${totalWeight.toStringAsFixed(0)}%',
+                label: 'Total weightage',
+                progress: (totalWeight / 100).clamp(0.0, 1.0),
+              )
+            else
+              ProKpi(
+                value: goals == null ? '—' : '${byCycle.length}',
+                label: 'Cycles',
+              ),
           ],
         ),
+        children: [
+          if (kpas.length > 1) ...[
+            ProStackBar(parts: [
+              for (var i = 0; i < kpas.length; i++)
+                MapEntry(kpas[i].value, _kpaColors[i % _kpaColors.length]),
+            ]),
+            Wrap(
+              spacing: 14,
+              runSpacing: 6,
+              children: [
+                for (var i = 0; i < kpas.length; i++)
+                  _KpaLegend(
+                    color: _kpaColors[i % _kpaColors.length],
+                    label: kpas[i].key,
+                    pct: '${kpas[i].value.toStringAsFixed(0)}%',
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+      children: async.when(
+        loading: () => const [AppLoadingBlock(), AppLoadingBlock()],
+        error: (e, _) => [
+          AppErrorPanel(
+            message: e is ApiException ? e.message : 'Failed to load your goals.',
+            onRetry: () => ref.invalidate(myGoalsProvider(employeeId)),
+          ),
+        ],
         data: (goals) {
           if (goals.isEmpty) {
-            return ListView(
-              padding: const EdgeInsets.all(16),
-              children: const [
-                SizedBox(height: 48),
-                AppEmptyState(
-                  icon: Icons.flag_rounded,
-                  message:
-                      'No goals assigned yet.\nPlease contact HR or your manager.',
-                ),
-              ],
-            );
+            return const [
+              SizedBox(height: 8),
+              AppEmptyState(
+                icon: Icons.flag_rounded,
+                message:
+                    'No goals assigned yet.\nPlease contact HR or your manager.',
+              ),
+            ];
           }
-          return _GoalsList(goals: goals, employeeId: employeeId);
+          return [
+            for (final entry in byCycle.entries) ...[
+              _CycleHeader(
+                name: entry.value.first.cycleName,
+                count: entry.value.length,
+                totalWeightage:
+                    entry.value.fold<double>(0, (sum, g) => sum + g.weightage),
+              ),
+              for (final goal in entry.value)
+                _GoalCard(goal: goal, employeeId: employeeId),
+            ],
+          ];
         },
       ),
     );
   }
 }
 
-class _GoalsList extends StatelessWidget {
-  const _GoalsList({required this.goals, required this.employeeId});
-  final List<EmployeeGoal> goals;
-  final int employeeId;
-
-  @override
-  Widget build(BuildContext context) {
-    // Group by cycle, preserving the order the server returned.
-    final byCycle = <int, List<EmployeeGoal>>{};
-    for (final g in goals) {
-      byCycle.putIfAbsent(g.cycleId, () => []).add(g);
-    }
-    final pending = goals.where((g) => g.hasPendingChange).length;
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-      children: [
-        _SummaryRow(total: goals.length, pending: pending),
-        const SizedBox(height: 16),
-        for (final entry in byCycle.entries) ...[
-          _CycleHeader(
-            name: entry.value.first.cycleName,
-            count: entry.value.length,
-            totalWeightage:
-                entry.value.fold<double>(0, (sum, g) => sum + g.weightage),
-          ),
-          const SizedBox(height: 8),
-          for (final goal in entry.value) ...[
-            _GoalCard(goal: goal, employeeId: employeeId),
-            const SizedBox(height: 10),
-          ],
-          const SizedBox(height: 8),
-        ],
-      ],
-    );
-  }
-}
-
-class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({required this.total, required this.pending});
-  final int total;
-  final int pending;
+class _KpaLegend extends StatelessWidget {
+  const _KpaLegend({required this.color, required this.label, required this.pct});
+  final Color color;
+  final String label;
+  final String pct;
 
   @override
   Widget build(BuildContext context) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Expanded(
-          child: _SummaryTile(
-            icon: Icons.checklist_rounded,
-            label: 'Assigned',
-            value: '$total',
-            color: AppColors.primary,
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 5),
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 180),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12, color: Colors.white70),
           ),
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _SummaryTile(
-            icon: Icons.schedule_rounded,
-            label: 'Awaiting approval',
-            value: '$pending',
-            color: const Color(0xFFB45309), // amber-700
+        const SizedBox(width: 4),
+        Text(
+          pct,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+            fontFeatures: [FontFeature.tabularFigures()],
           ),
         ),
       ],
-    );
-  }
-}
-
-class _SummaryTile extends StatelessWidget {
-  const _SummaryTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, size: 18, color: color),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.muted,
-                  ),
-                ),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.ink,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -233,28 +238,21 @@ class _CycleHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'PERFORMANCE CYCLE',
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.8,
-              color: AppColors.primary,
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 2),
+            child: Text(
+              'Performance cycle',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: AppColors.muted,
+              ),
             ),
           ),
-          const SizedBox(height: 2),
-          Text(
-            name,
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-              color: AppColors.ink,
-            ),
-          ),
-          Text(
-            '$count goal${count == 1 ? '' : 's'} · '
-            '${totalWeightage.toStringAsFixed(0)}% total weightage',
-            style: const TextStyle(fontSize: 12, color: AppColors.muted),
+          ProSectionHeader(
+            title: name,
+            subtitle: '$count goal${count == 1 ? '' : 's'} · '
+                '${totalWeightage.toStringAsFixed(0)}% total weightage',
           ),
         ],
       ),
@@ -313,85 +311,93 @@ class _GoalCardState extends ConsumerState<_GoalCard> {
     final goal = widget.goal;
     final pending = goal.hasPendingChange;
 
-    return Container(
+    return GlassCard(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: pending
-              ? const Color(0xFFFCD34D) // amber-300
-              : Colors.black.withValues(alpha: 0.06),
-        ),
-      ),
+      border: pending
+          ? Border.all(color: const Color(0xFFFCD34D)) // amber-300
+          : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '${goal.kpaName} / ${goal.kraName}',
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.4,
-              color: AppColors.primary,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            goal.kpiName,
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w700,
-              color: AppColors.ink,
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ProIconWell(
+                icon: Icons.flag_rounded,
+                color: pending ? _amber : AppColors.primary,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${goal.kpaName} / ${goal.kraName}',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      goal.kpiName,
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        height: 1.3,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.2,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           Wrap(
             spacing: 6,
             runSpacing: 6,
             children: [
-              _Chip(text: goal.measurementType.label),
-              _Chip(text: frequencyLabel(goal.frequency)),
-              _Chip(text: '${goal.weightage.toStringAsFixed(0)}% weightage'),
+              ProPill.neutral(goal.measurementType.label),
+              ProPill.neutral(frequencyLabel(goal.frequency)),
+              ProPill.neutral('${goal.weightage.toStringAsFixed(0)}% weightage'),
+              if (pending) ProPill.warn('Change requested'),
             ],
           ),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _TargetBlock(
-                  label: 'Approved target',
-                  value: formatTarget(goal.targetValue),
-                  strong: true,
-                ),
-              ),
-              Expanded(
-                child: _TargetBlock(
-                  label: 'Requested',
-                  value: pending ? formatTarget(goal.pendingTargetValue) : '—',
-                  amber: pending,
-                ),
-              ),
-            ],
-          ),
-          if (pending) ...[
-            const SizedBox(height: 8),
-            const Row(
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceAlt,
+              borderRadius: BorderRadius.circular(AppRadii.md),
+            ),
+            child: Row(
               children: [
-                Icon(Icons.schedule_rounded,
-                    size: 14, color: Color(0xFFB45309)),
-                SizedBox(width: 5),
                 Expanded(
-                  child: Text(
-                    'Awaiting your supervisor’s approval.',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFFB45309),
-                    ),
+                  child: _TargetBlock(
+                    label: 'Approved target',
+                    value: formatTarget(goal.targetValue),
+                    strong: true,
+                  ),
+                ),
+                Expanded(
+                  child: _TargetBlock(
+                    label: 'Requested',
+                    value: pending ? formatTarget(goal.pendingTargetValue) : '—',
+                    amber: pending,
                   ),
                 ),
               ],
+            ),
+          ),
+          if (pending) ...[
+            const SizedBox(height: 10),
+            const ProNote(
+              'Awaiting your supervisor’s approval.',
+              tone: ProNoteTone.warn,
+              icon: Icons.schedule_rounded,
             ),
           ],
           const SizedBox(height: 12),
@@ -415,30 +421,6 @@ class _GoalCardState extends ConsumerState<_GoalCard> {
   }
 }
 
-class _Chip extends StatelessWidget {
-  const _Chip({required this.text});
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        text,
-        style: const TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: AppColors.inkSoft,
-        ),
-      ),
-    );
-  }
-}
-
 class _TargetBlock extends StatelessWidget {
   const _TargetBlock({
     required this.label,
@@ -457,21 +439,23 @@ class _TargetBlock extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          label.toUpperCase(),
-          style: const TextStyle(
-            fontSize: 9.5,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.5,
-            color: AppColors.muted,
-          ),
+          label,
+          style: const TextStyle(fontSize: 12.5, color: AppColors.muted),
         ),
         const SizedBox(height: 2),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: strong ? 19 : 17,
-            fontWeight: FontWeight.w800,
-            color: amber ? const Color(0xFFB45309) : AppColors.ink,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: strong ? 20 : 18,
+              height: 1.2,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.4,
+              color: amber ? _amber : AppColors.ink,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
         ),
       ],
@@ -574,119 +558,146 @@ class _TargetSheetState extends State<_TargetSheet> {
       child: Container(
         decoration: const BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        padding: const EdgeInsets.fromLTRB(18, 10, 18, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 38,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(2),
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFC6D3D6),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              goal.kpiName,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: AppColors.ink,
+              const SizedBox(height: 16),
+              const Text(
+                'Request change',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.muted,
+                ),
               ),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              'Approved target ${formatTarget(goal.targetValue)} · '
-              '${goal.measurementType.label}',
-              style: const TextStyle(fontSize: 12, color: AppColors.muted),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 2),
+              Text(
+                goal.kpiName,
+                style: const TextStyle(
+                  fontSize: 19,
+                  height: 1.25,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.4,
+                  color: AppColors.ink,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Approved target ${formatTarget(goal.targetValue)} · '
+                '${goal.measurementType.label}',
+                style: AppText.caption,
+              ),
+              const SizedBox(height: 18),
 
-            if (isRating && goal.ratingOptions.isNotEmpty)
-              DropdownButtonFormField<double>(
-                initialValue: _selectedRating,
-                decoration: const InputDecoration(
-                  labelText: 'Requested rating',
-                  border: OutlineInputBorder(),
-                ),
-                items: [
-                  for (final o in goal.ratingOptions)
-                    DropdownMenuItem(
-                      value: o.score,
-                      child: Text('${o.name} (${formatTarget(o.score)})'),
+              if (isRating && goal.ratingOptions.isNotEmpty)
+                ProField(
+                  label: 'Requested rating',
+                  child: DropdownButtonFormField<double>(
+                    initialValue: _selectedRating,
+                    isExpanded: true,
+                    items: [
+                      for (final o in goal.ratingOptions)
+                        DropdownMenuItem(
+                          value: o.score,
+                          child: Text('${o.name} (${formatTarget(o.score)})'),
+                        ),
+                    ],
+                    onChanged: (v) => setState(() {
+                      _selectedRating = v;
+                      _error = null;
+                    }),
+                  ),
+                )
+              else
+                ProField(
+                  label: 'Requested target',
+                  child: TextField(
+                    controller: _controller,
+                    autofocus: true,
+                    keyboardType: TextInputType.numberWithOptions(
+                      decimal: goal.measurementType != MeasurementType.count,
                     ),
-                ],
-                onChanged: (v) => setState(() {
-                  _selectedRating = v;
-                  _error = null;
-                }),
-              )
-            else
-              TextField(
-                controller: _controller,
-                autofocus: true,
-                keyboardType: TextInputType.numberWithOptions(
-                  decimal: goal.measurementType != MeasurementType.count,
+                    inputFormatters: [
+                      if (goal.measurementType == MeasurementType.count)
+                        FilteringTextInputFormatter.digitsOnly
+                      else
+                        FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+                    ],
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w500,
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                    decoration: InputDecoration(
+                      prefixText: goal.measurementType == MeasurementType.amount
+                          ? '₹ '
+                          : null,
+                      suffixText:
+                          goal.measurementType == MeasurementType.percentage
+                              ? '%'
+                              : null,
+                    ),
+                    onChanged: (_) => setState(() => _error = null),
+                  ),
                 ),
-                inputFormatters: [
-                  if (goal.measurementType == MeasurementType.count)
-                    FilteringTextInputFormatter.digitsOnly
-                  else
-                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
-                ],
-                decoration: const InputDecoration(
-                  labelText: 'Requested target',
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (_) => setState(() => _error = null),
-              ),
 
-            const SizedBox(height: 8),
-            Text(
-              _error ?? riskNote ?? goal.measurementType.hint,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: _error != null || riskNote != null
-                    ? FontWeight.w600
-                    : FontWeight.w400,
-                color: _error != null
-                    ? Colors.red.shade700
-                    : riskNote != null
-                        ? const Color(0xFFB45309)
-                        : AppColors.muted,
+              const SizedBox(height: 8),
+              Text(
+                _error ?? riskNote ?? goal.measurementType.hint,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: _error != null || riskNote != null
+                      ? FontWeight.w600
+                      : FontWeight.w400,
+                  color: _error != null
+                      ? AppColors.danger
+                      : riskNote != null
+                          ? _amber
+                          : AppColors.muted,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
+              const SizedBox(height: 14),
+              const ProNote(
+                'Your supervisor approves the change before it becomes the target '
+                'you are measured against.',
+                tone: ProNoteTone.info,
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: _submit,
-                    child: const Text('Send for approval'),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _submit,
+                      child: const Text('Send for approval'),
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Your supervisor approves the change before it becomes the target '
-              'you are measured against.',
-              style: TextStyle(fontSize: 11, color: AppColors.muted),
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

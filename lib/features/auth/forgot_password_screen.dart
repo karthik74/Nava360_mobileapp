@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/theme.dart';
 import 'auth_repository.dart';
-import 'first_login_screen.dart' show OtpInput, OtpInputState;
+import 'first_login_screen.dart' show OtpInput, OtpInputState, OtpResendRow;
 import 'login_screen.dart';
 import 'sms_otp.dart';
 
@@ -218,38 +218,41 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
 
   Widget _buildUsernameStep() {
     return AuthShell(
+      header: 'Account recovery',
+      steps: _kSteps,
+      step: 0,
+      icon: Icons.person_search_outlined,
       title: 'Forgot password',
       subtitle: const Text(
         'Enter your username and we’ll send a one-time code to the mobile '
         'number on your employee record.',
       ),
       onBack: _back,
+      action: AuthGradientButton(
+        label: 'Send OTP',
+        loading: _loading,
+        done: false,
+        onPressed: _loading ? null : _sendOtp,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const AuthFieldLabel('Username'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           AuthTextField(
             controller: _username,
             hint: 'e.g. EMP-0001',
             prefixIcon: Icons.person_outline_rounded,
             enabled: !_loading,
             textCapitalization: TextCapitalization.characters,
-            inputFormatters: [UpperCaseTextFormatter()],
+            inputFormatters: const [UpperCaseTextFormatter()],
             textInputAction: TextInputAction.done,
             onSubmit: (_) => _sendOtp(),
           ),
           if (_error != null) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             AuthFlashError(message: _error!),
           ],
-          SizedBox(height: _error != null ? 16 : 22),
-          AuthGradientButton(
-            label: 'Send OTP',
-            loading: _loading,
-            done: false,
-            onPressed: _loading ? null : _sendOtp,
-          ),
         ],
       ),
     );
@@ -258,6 +261,10 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   Widget _buildVerifyStep() {
     final minutes = (_expiresIn / 60).round();
     return AuthShell(
+      header: 'Account recovery',
+      steps: _kSteps,
+      step: 1,
+      icon: Icons.password_rounded,
       title: 'Reset password',
       subtitle: Text.rich(
         TextSpan(
@@ -266,8 +273,8 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             TextSpan(
               text: _maskedPhone ?? 'your registered mobile',
               style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
+                color: AppColors.ink,
+                fontWeight: FontWeight.w600,
               ),
             ),
             TextSpan(
@@ -279,50 +286,31 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
         ),
       ),
       onBack: _back,
+      action: AuthGradientButton(
+        label: 'Update password',
+        doneLabel: 'Password updated',
+        loading: _loading,
+        done: _done,
+        onPressed: (_loading || _done) ? null : _reset,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const AuthFieldLabel('Verification code'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           OtpInput(
             key: _otpKey,
             length: 6,
             onChanged: (v) => setState(() => _otp = v),
           ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerRight,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(6),
-              onTap: (_loading || _cooldown > 0) ? null : _resendOtp,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                child: Text.rich(
-                  TextSpan(
-                    style: const TextStyle(
-                        fontSize: 12.5, color: AppColors.muted),
-                    children: [
-                      const TextSpan(text: "Didn't get it? "),
-                      TextSpan(
-                        text: _cooldown > 0
-                            ? 'Resend in ${_cooldown}s'
-                            : 'Resend',
-                        style: TextStyle(
-                          color: _cooldown > 0
-                              ? AppColors.muted
-                              : AppColors.primary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          const SizedBox(height: 4),
+          OtpResendRow(
+            cooldown: _cooldown,
+            onResend: (_loading || _cooldown > 0) ? null : _resendOtp,
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           const AuthFieldLabel('New password'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           AuthTextField(
             controller: _p1,
             hint: 'At least 8 characters',
@@ -331,19 +319,14 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             enabled: !_loading,
             textCapitalization: TextCapitalization.sentences,
             textInputAction: TextInputAction.next,
-            suffix: IconButton(
-              splashRadius: 18,
-              icon: Icon(
-                _o1 ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                color: AppColors.muted,
-                size: 19,
-              ),
+            suffix: AuthVisibilityToggle(
+              obscure: _o1,
               onPressed: () => setState(() => _o1 = !_o1),
             ),
           ),
           const SizedBox(height: 14),
           const AuthFieldLabel('Confirm new password'),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           AuthTextField(
             controller: _p2,
             hint: 'Re-enter new password',
@@ -353,29 +336,31 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
             textCapitalization: TextCapitalization.sentences,
             textInputAction: TextInputAction.done,
             onSubmit: (_) => _reset(),
-            suffix: IconButton(
-              splashRadius: 18,
-              icon: Icon(
-                _o2 ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                color: AppColors.muted,
-                size: 19,
-              ),
+            suffix: AuthVisibilityToggle(
+              obscure: _o2,
               onPressed: () => setState(() => _o2 = !_o2),
             ),
           ),
+          const SizedBox(height: 14),
+          AuthPasswordRules(
+            listenable: Listenable.merge([_p1, _p2]),
+            rules: [
+              ('At least 8 characters', () => _p1.text.length >= 8),
+              (
+                'Both passwords match',
+                () => _p2.text.isNotEmpty && _p1.text == _p2.text
+              ),
+            ],
+          ),
           if (_error != null) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             AuthFlashError(message: _error!),
           ],
-          SizedBox(height: _error != null ? 16 : 22),
-          AuthGradientButton(
-            label: 'Update password',
-            loading: _loading,
-            done: _done,
-            onPressed: (_loading || _done) ? null : _reset,
-          ),
         ],
       ),
     );
   }
 }
+
+/// Wizard step labels (header caption + progress bar).
+const _kSteps = ['Identify', 'Verify & reset'];

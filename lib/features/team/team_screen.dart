@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/approvals.dart';
+import '../../core/pro_ui.dart';
 import '../../core/text_formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -30,98 +31,99 @@ class TeamScreen extends ConsumerStatefulWidget {
 class _TeamScreenState extends ConsumerState<TeamScreen> {
   int _tab = 0; // 0 = Members, 1 = Leaves, 2 = Attendance, 3 = Exits
 
+  static const _tabLabels = ['Members', 'Leaves', 'Attendance', 'Exits'];
+
   @override
   Widget build(BuildContext context) {
-    final mq = MediaQuery.of(context);
-    return Column(
+    // The view switch lives inside every view's hero, so each tab keeps its
+    // own scroll position, filters and search (IndexedStack keeps them alive).
+    final tabs = ProHeroSegmented(
+      labels: _tabLabels,
+      selected: _tab,
+      onChanged: (v) => setState(() => _tab = v),
+    );
+    return IndexedStack(
+      index: _tab,
       children: [
-        SizedBox(height: mq.padding.top + 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _SegmentBar(
-            value: _tab,
-            labels: const ['Members', 'Leaves', 'Attendance', 'Exits'],
-            onChanged: (v) => setState(() => _tab = v),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: IndexedStack(
-            index: _tab,
-            children: const [
-              _MembersView(),
-              _LeavesView(),
-              _AttendanceView(),
-              _ExitsView(),
-            ],
-          ),
-        ),
+        _MembersView(tabs: tabs),
+        _LeavesView(tabs: tabs),
+        _AttendanceView(tabs: tabs),
+        _ExitsView(tabs: tabs),
       ],
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Segmented control
+// Shared page chrome
 // ─────────────────────────────────────────────────────────────────────
 
-class _SegmentBar extends StatelessWidget {
-  const _SegmentBar({
-    required this.value,
-    required this.labels,
-    required this.onChanged,
+/// Tab-screen page: deep "My team" hero (with the view switch) that continues
+/// the shell app bar, then the view's sections.
+class _TeamPage extends StatelessWidget {
+  const _TeamPage({
+    required this.tabs,
+    required this.kicker,
+    required this.subtitle,
+    required this.stats,
+    required this.onRefresh,
+    required this.children,
+    this.overlap,
+    this.extra = const [],
   });
-  final int value;
-  final List<String> labels;
-  final ValueChanged<int> onChanged;
+
+  final Widget tabs;
+  final String kicker;
+  final String subtitle;
+  final List<ProStat> stats;
+  final Future<void> Function() onRefresh;
+  final List<Widget> children;
+  final Widget? overlap;
+
+  /// Extra hero slots between the view switch and the stats.
+  final List<Widget> extra;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceAlt,
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: AppColors.hairline),
-      ),
-      child: Row(
+    return ProPage(
+      topInset: MediaQuery.of(context).padding.top,
+      clearNav: true,
+      onRefresh: onRefresh,
+      hero: ProHero(
+        kicker: kicker,
+        title: 'My team',
+        subtitle: subtitle,
+        overlap: overlap,
         children: [
-          for (var i = 0; i < labels.length; i++)
-            Expanded(
-              child: InkWell(
-                borderRadius: BorderRadius.circular(AppRadii.pill),
-                onTap: () => onChanged(i),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  padding: const EdgeInsets.symmetric(vertical: 9),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: value == i ? AppColors.primary : Colors.transparent,
-                    borderRadius: BorderRadius.circular(AppRadii.pill),
-                  ),
-                  child: Text(
-                    labels[i],
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: value == i ? Colors.white : AppColors.inkSoft,
-                    ),
-                  ),
-                ),
-              ),
-            ),
+          tabs,
+          ...extra,
+          ProHeroStats(stats: stats),
         ],
       ),
+      children: children,
     );
   }
 }
+
+/// Status dots used on the deep hero.
+const _dotIn = AppColors.live;
+const _dotLeave = Color(0xFFF2B347);
+const _dotAbsent = Color(0xFFE5484D);
+const _dotOut = Color(0xFF7FC8D8);
+
+/// "Punched In" → "Punched in" (labels come from the shared status tones).
+String _sentence(String s) =>
+    s.isEmpty ? s : s[0].toUpperCase() + s.substring(1).toLowerCase();
+
+String _today() => DateFormat('EEEE, d MMM').format(DateTime.now());
 
 // ─────────────────────────────────────────────────────────────────────
 // Members tab
 // ─────────────────────────────────────────────────────────────────────
 
 class _MembersView extends ConsumerStatefulWidget {
-  const _MembersView();
+  const _MembersView({required this.tabs});
+  final Widget tabs;
 
   @override
   ConsumerState<_MembersView> createState() => _MembersViewState();
@@ -135,11 +137,11 @@ class _MembersViewState extends ConsumerState<_MembersView> {
   // (state key, label) — order shown in the filter row.
   static const _filters = [
     ('ALL', 'All'),
-    ('PUNCHED_IN', 'Punched In'),
-    ('PUNCHED_OUT', 'Punched Out'),
+    ('PUNCHED_IN', 'Punched in'),
+    ('PUNCHED_OUT', 'Punched out'),
     ('LEAVE', 'Leave'),
     ('ABSENT', 'Absent'),
-    ('NOT_LOGGED_IN', 'Not In'),
+    ('NOT_LOGGED_IN', 'Not in'),
   ];
 
   @override
@@ -161,228 +163,140 @@ class _MembersViewState extends ConsumerState<_MembersView> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(teamMembersProvider);
-    final mq = MediaQuery.of(context);
-    final pad = EdgeInsets.fromLTRB(
-      16,
-      4,
-      16,
-      mq.padding.bottom + AppChrome.bottomNavHeight + 16,
-    );
-    return RefreshIndicator(
-      color: AppColors.primary,
+    final members = async.valueOrNull;
+
+    int countOf(String s) =>
+        members == null ? 0 : members.where((m) => m.state == s).length;
+    final counts = <String, int>{
+      'ALL': members?.length ?? 0,
+      'PUNCHED_IN': countOf('PUNCHED_IN'),
+      'PUNCHED_OUT': countOf('PUNCHED_OUT'),
+      'LEAVE': countOf('LEAVE'),
+      'ABSENT': countOf('ABSENT'),
+      'NOT_LOGGED_IN': countOf('NOT_LOGGED_IN'),
+    };
+    final working = counts['PUNCHED_IN']! + counts['PUNCHED_OUT']!;
+    String val(int n) => members == null ? '—' : '$n';
+
+    return _TeamPage(
+      tabs: widget.tabs,
+      kicker: _today(),
+      subtitle: members == null
+          ? "Today's attendance"
+          : '$working of ${members.length} working today',
       onRefresh: () async => ref.invalidate(teamMembersProvider),
-      child: async.when(
-        loading: () => const _CenterLoader(),
-        error: (e, _) => _ErrorList(
-          message: e.toString(),
-          padding: pad,
-          onRetry: () => ref.invalidate(teamMembersProvider),
+      extra: [
+        if (members != null && members.isNotEmpty)
+          ProStackBar(parts: [
+            MapEntry(counts['PUNCHED_IN']!.toDouble(), _dotIn),
+            MapEntry(counts['PUNCHED_OUT']!.toDouble(), _dotOut),
+            MapEntry(counts['LEAVE']!.toDouble(), _dotLeave),
+            MapEntry(counts['ABSENT']!.toDouble(), _dotAbsent),
+            MapEntry(counts['NOT_LOGGED_IN']!.toDouble(),
+                Colors.white.withValues(alpha: 0.22)),
+          ]),
+      ],
+      stats: [
+        ProStat(
+          label: 'Present',
+          value: val(working),
+          sub: members == null ? null : '${counts['PUNCHED_OUT']} out',
+          dot: _dotIn,
         ),
+        ProStat(label: 'On leave', value: val(counts['LEAVE']!), dot: _dotLeave),
+        ProStat(label: 'Absent', value: val(counts['ABSENT']!), dot: _dotAbsent),
+        ProStat(
+          label: 'Not in',
+          value: val(counts['NOT_LOGGED_IN']!),
+          dot: Colors.white54,
+        ),
+      ],
+      // ── Search across the whole downline (name / code / role / branch) ──
+      overlap: ProSearchField(
+        raised: true,
+        controller: _searchCtrl,
+        hint: 'Search name, code, role or branch',
+        onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+      ),
+      children: async.when(
+        loading: () => const [
+          AppLoadingBlock(height: 72),
+          AppLoadingBlock(height: 220),
+        ],
+        error: (e, _) => [
+          AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(teamMembersProvider),
+          ),
+        ],
         data: (members) {
           if (members.isEmpty) {
-            return ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: pad,
-              children: const [
-                SizedBox(height: 40),
-                AppEmptyState(
-                  icon: Icons.groups_2_rounded,
-                  message: 'No team members report to you yet.',
-                ),
-              ],
-            );
+            return const [
+              SizedBox(height: 8),
+              AppEmptyState(
+                icon: Icons.groups_2_rounded,
+                message: 'No team members report to you yet.',
+              ),
+            ];
           }
 
-          int countOf(String s) => members.where((m) => m.state == s).length;
-          final counts = <String, int>{
-            'ALL': members.length,
-            'PUNCHED_IN': countOf('PUNCHED_IN'),
-            'PUNCHED_OUT': countOf('PUNCHED_OUT'),
-            'LEAVE': countOf('LEAVE'),
-            'ABSENT': countOf('ABSENT'),
-            'NOT_LOGGED_IN': countOf('NOT_LOGGED_IN'),
-          };
           final filtered = (_filter == 'ALL'
                   ? members
                   : members.where((m) => m.state == _filter).toList())
               .where(_matchesQuery)
               .toList();
+          final selected = _filters.indexWhere((f) => f.$1 == _filter);
+          final listTitle = _query.isNotEmpty
+              ? '${filtered.length} ${filtered.length == 1 ? 'member matches' : 'members match'} “${_searchCtrl.text.trim()}”'
+              : '${_filter == 'ALL' ? 'All members' : _filters[selected].$2} · ${filtered.length}';
 
-          return ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: pad,
-            children: [
-              _MembersSummary(
-                total: members.length,
-                punchedIn: counts['PUNCHED_IN']!,
-                punchedOut: counts['PUNCHED_OUT']!,
-                leave: counts['LEAVE']!,
-                absent: counts['ABSENT']!,
+          return [
+            ProChipBar(
+              labels: [for (final f in _filters) f.$2],
+              counts: [for (final f in _filters) counts[f.$1] ?? 0],
+              selected: selected < 0 ? 0 : selected,
+              onSelected: (i) => setState(() => _filter = _filters[i].$1),
+              bleed: 0,
+            ),
+            ProSectionHeader(title: listTitle, small: true),
+            if (filtered.isEmpty)
+              AppEmptyState(
+                icon: Icons.groups_2_rounded,
+                message: _query.isNotEmpty
+                    ? 'No members match your search.'
+                    : 'No members in this status.',
+              )
+            else
+              ProListGroup(
+                dividerIndent: 66,
+                children: [for (final m in filtered) _MemberRow(m: m)],
               ),
-              const SizedBox(height: 16),
-              // ── Search across the whole downline (name / code / role / branch) ──
-              TextField(
-                controller: _searchCtrl,
-                textCapitalization: TextCapitalization.words,
-                inputFormatters: const [TitleCaseTextFormatter()],
-                decoration: InputDecoration(
-                  hintText: 'Search members by name, code, role or branch…',
-                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                  isDense: true,
-                  suffixIcon: _query.isEmpty
-                      ? null
-                      : IconButton(
-                          icon: const Icon(Icons.close_rounded, size: 18),
-                          onPressed: () {
-                            _searchCtrl.clear();
-                            setState(() => _query = '');
-                          },
-                        ),
-                ),
-                onChanged: (v) =>
-                    setState(() => _query = v.trim().toLowerCase()),
-              ),
-              const SizedBox(height: 12),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: Row(
-                  children: [
-                    for (final it in _filters) ...[
-                      _FilterChip(
-                        label: it.$2,
-                        count: counts[it.$1] ?? 0,
-                        selected: _filter == it.$1,
-                        onTap: () => setState(() => _filter = it.$1),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(height: 14),
-              if (filtered.isEmpty)
-                AppEmptyState(
-                  icon: Icons.groups_2_rounded,
-                  message: _query.isNotEmpty
-                      ? 'No members match your search.'
-                      : 'No members in this status.',
-                )
-              else
-                for (final m in filtered)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: _MemberCard(m: m),
-                  ),
-            ],
-          );
+          ];
         },
       ),
     );
   }
 }
 
-/// Today's-attendance hero card for the Members tab (mirrors _TeamSummary).
-class _MembersSummary extends StatelessWidget {
-  const _MembersSummary({
-    required this.total,
-    required this.punchedIn,
-    required this.punchedOut,
-    required this.leave,
-    required this.absent,
-  });
-  final int total;
-  final int punchedIn;
-  final int punchedOut;
-  final int leave;
-  final int absent;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: AppColors.heroGradient,
-        borderRadius: BorderRadius.circular(AppRadii.xl),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withOpacity(0.32),
-            blurRadius: 26,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '$total member${total == 1 ? '' : 's'}',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.3,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              "Today's attendance",
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.85),
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: _MiniStat(
-                    label: 'Punched In',
-                    value: punchedIn,
-                    color: const Color(0xFF34D399),
-                  ),
-                ),
-                _divider(),
-                Expanded(
-                  child: _MiniStat(
-                    label: 'Punched Out',
-                    value: punchedOut,
-                    color: const Color(0xFF60A5FA),
-                  ),
-                ),
-                _divider(),
-                Expanded(
-                  child: _MiniStat(
-                    label: 'Leave',
-                    value: leave,
-                    color: const Color(0xFFFBBF24),
-                  ),
-                ),
-                _divider(),
-                Expanded(
-                  child: _MiniStat(
-                    label: 'Absent',
-                    value: absent,
-                    color: const Color(0xFFF87171),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _divider() =>
-      Container(width: 1, height: 28, color: Colors.white.withOpacity(0.18));
-}
-
-class _MemberCard extends StatelessWidget {
-  const _MemberCard({required this.m});
+class _MemberRow extends StatelessWidget {
+  const _MemberRow({required this.m});
   final TeamMember m;
+
+  ProPill _pill() {
+    final label = _sentence(m.statusTone.label);
+    switch (m.state) {
+      case 'PUNCHED_IN':
+        return ProPill.ok(label);
+      case 'PUNCHED_OUT':
+        return ProPill.info(label);
+      case 'LEAVE':
+        return ProPill.warn(label);
+      case 'ABSENT':
+        return ProPill.bad(label);
+      default:
+        return ProPill.neutral(label);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -391,147 +305,99 @@ class _MemberCard extends StatelessWidget {
       if (m.designation != null && m.designation!.isNotEmpty) m.designation!,
       if (m.department != null && m.department!.isNotEmpty) m.department!,
     ].join(' · ');
-    final tone = m.statusTone;
     final times = <String>[
       if (m.checkInHm != null) 'In ${m.checkInHm}',
       if (m.checkOutHm != null) 'Out ${m.checkOutHm}',
-    ].join('   ');
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) =>
-                EmployeeDetailScreen(employeeId: m.id, name: m.name),
-          ),
-        ),
-        child: GlassCard(
-          padding: const EdgeInsets.all(12),
-          shadow: AppShadows.soft,
-          child: Row(
-            children: [
-              UserAvatar(name: m.name, size: 42, radius: 12),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      m.name,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                    if (meta.isNotEmpty) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        meta,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.muted,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                    if (times.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          const Icon(Icons.schedule_rounded,
-                              size: 12, color: AppColors.muted),
-                          const SizedBox(width: 4),
-                          Text(
-                            times,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: AppColors.inkSoft,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ] else if (m.branchLabel != null &&
-                        m.branchLabel!.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          const Icon(Icons.location_on_outlined,
-                              size: 12, color: AppColors.muted),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              m.branchLabel!,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: AppColors.inkSoft,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              StatusPill(label: tone.label, color: tone.color),
-            ],
-          ),
+    ].join(' · ');
+    final third = times.isNotEmpty
+        ? times
+        : (m.branchLabel != null && m.branchLabel!.isNotEmpty
+            ? m.branchLabel!
+            : null);
+    return ProListRow(
+      leading: ProAvatar(name: m.name, dot: m.statusTone.color),
+      title: m.name,
+      subtitle: meta.isEmpty ? null : meta,
+      meta: third,
+      pill: _pill(),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => EmployeeDetailScreen(employeeId: m.id, name: m.name),
         ),
       ),
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Approval tabs — shared pieces
+// ─────────────────────────────────────────────────────────────────────
+
+const _reviewFilters = [
+  ('ALL', 'All'),
+  ('PENDING', 'Pending'),
+  ('APPROVED', 'Approved'),
+  ('REJECTED', 'Rejected'),
+];
+
+/// Pending / approved / rejected hero tiles; each one toggles the matching
+/// status filter (tap again to clear).
+List<ProStat> _reviewStats({
+  required bool loaded,
+  required int pending,
+  required int approved,
+  required int rejected,
+  required String filter,
+  required ValueChanged<String> onFilter,
+}) {
+  ProStat stat(String key, String label, int n, Color dot) => ProStat(
+        label: label,
+        value: loaded ? '$n' : '—',
+        dot: dot,
+        selected: loaded && filter == key,
+        onTap: loaded ? () => onFilter(filter == key ? 'ALL' : key) : null,
+      );
+  return [
+    stat('PENDING', 'Pending', pending, _dotLeave),
+    stat('APPROVED', 'Approved', approved, _dotIn),
+    stat('REJECTED', 'Rejected', rejected, _dotAbsent),
+  ];
+}
+
+String _reviewSubtitle(int? pending, String what) {
+  if (pending == null) return what;
+  return pending > 0 ? '$pending pending your review' : 'All caught up — nice work';
+}
+
+Widget _reviewChips({
+  required String value,
+  required Map<String, int> counts,
+  required ValueChanged<String> onChanged,
+}) {
+  final selected = _reviewFilters.indexWhere((f) => f.$1 == value);
+  return ProChipBar(
+    labels: [for (final f in _reviewFilters) f.$2],
+    counts: [for (final f in _reviewFilters) counts[f.$1] ?? 0],
+    selected: selected < 0 ? 0 : selected,
+    onSelected: (i) => onChanged(_reviewFilters[i].$1),
+    bleed: 0,
+  );
+}
+
+String _reviewListTitle(String filter, int n) {
+  final label = _reviewFilters
+      .firstWhere((f) => f.$1 == filter, orElse: () => _reviewFilters.first)
+      .$2;
+  return '${filter == 'ALL' ? 'All requests' : label} · $n';
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // Leaves tab (approve / reject)
 // ─────────────────────────────────────────────────────────────────────
 
-/// Employee-name search box shared by the Leaves and Attendance approval tabs.
-/// Filters the loaded page in place, exactly as the Members tab does.
-class _EmployeeSearchField extends StatelessWidget {
-  const _EmployeeSearchField({
-    required this.controller,
-    required this.query,
-    required this.onChanged,
-    required this.onClear,
-  });
-  final TextEditingController controller;
-  final String query;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      textCapitalization: TextCapitalization.words,
-      inputFormatters: const [TitleCaseTextFormatter()],
-      decoration: InputDecoration(
-        hintText: 'Search by employee name…',
-        prefixIcon: const Icon(Icons.search_rounded, size: 20),
-        isDense: true,
-        suffixIcon: query.isEmpty
-            ? null
-            : IconButton(
-                icon: const Icon(Icons.close_rounded, size: 18),
-                onPressed: onClear,
-              ),
-      ),
-      onChanged: onChanged,
-    );
-  }
-}
-
 class _LeavesView extends ConsumerStatefulWidget {
-  const _LeavesView();
+  const _LeavesView({required this.tabs});
+  final Widget tabs;
 
   @override
   ConsumerState<_LeavesView> createState() => _LeavesViewState();
@@ -567,99 +433,97 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
           data: (rows) => rows,
           orElse: () => const <LeaveRequest>[],
         );
-    final mq = MediaQuery.of(context);
-    final pad = EdgeInsets.fromLTRB(
-      16,
-      4,
-      16,
-      mq.padding.bottom + AppChrome.bottomNavHeight + 16,
-    );
 
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: () async {
-        ref.invalidate(_teamLeavesProvider);
-        ref.invalidate(leavesPendingMyApprovalProvider);
-      },
-      child: leaves.when(
-        loading: () => const _CenterLoader(),
-        error: (e, _) => _ErrorList(
-          message: e.toString(),
-          padding: pad,
-          onRetry: () => ref.invalidate(_teamLeavesProvider),
-        ),
+    List<LeaveRequest> merge(List<LeaveRequest> allRows) {
+      // Cancelled leaves are not relevant to a reviewer — hide them.
+      final rows = allRows.where((r) => r.status != 'CANCELLED').toList();
+      for (final q in chainQueue) {
+        if (!rows.any((r) => r.id == q.id)) rows.add(q);
+      }
+      return rows;
+    }
+
+    final loaded = leaves.valueOrNull;
+    final rows = loaded == null ? null : merge(loaded);
+    final pending = rows?.where((r) => r.status == 'PENDING').length ?? 0;
+    final approved = rows?.where((r) => r.status == 'APPROVED').length ?? 0;
+    final rejected = rows?.where((r) => r.status == 'REJECTED').length ?? 0;
+
+    void onRefreshed() {
+      ref.invalidate(_teamLeavesProvider);
+      ref.invalidate(leavesPendingMyApprovalProvider);
+    }
+
+    return _TeamPage(
+      tabs: widget.tabs,
+      kicker: 'Leave requests',
+      subtitle: _reviewSubtitle(rows == null ? null : pending, 'Leave requests'),
+      onRefresh: () async => onRefreshed(),
+      stats: _reviewStats(
+        loaded: rows != null,
+        pending: pending,
+        approved: approved,
+        rejected: rejected,
+        filter: _filter,
+        onFilter: (v) => setState(() => _filter = v),
+      ),
+      overlap: ProSearchField(
+        raised: true,
+        controller: _searchCtrl,
+        hint: 'Search by employee name',
+        onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+      ),
+      children: leaves.when(
+        loading: () => const [AppLoadingBlock(height: 160)],
+        error: (e, _) => [
+          AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(_teamLeavesProvider),
+          ),
+        ],
         data: (allRows) {
-          // Cancelled leaves are not relevant to a reviewer — hide them.
-          final rows =
-              allRows.where((r) => r.status != 'CANCELLED').toList();
-          for (final q in chainQueue) {
-            if (!rows.any((r) => r.id == q.id)) rows.add(q);
-          }
-          final pending = rows.where((r) => r.status == 'PENDING').length;
-          final approved = rows.where((r) => r.status == 'APPROVED').length;
-          final rejected = rows.where((r) => r.status == 'REJECTED').length;
+          final all = merge(allRows);
           final filtered = (_filter == 'ALL'
-                  ? rows
-                  : rows.where((r) => r.status == _filter).toList())
+                  ? all
+                  : all.where((r) => r.status == _filter).toList())
               .where(_matchesQuery)
               .toList();
+          final anyReviewable =
+              canReview && filtered.any((r) => r.status == 'PENDING');
 
-          return ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: pad,
-            children: [
-              _TeamSummary(
-                total: rows.length,
-                pending: pending,
-                approved: approved,
-                rejected: rejected,
-              ),
-              const SizedBox(height: 16),
-              _EmployeeSearchField(
-                controller: _searchCtrl,
-                query: _query,
-                onChanged: (v) =>
-                    setState(() => _query = v.trim().toLowerCase()),
-                onClear: () {
-                  _searchCtrl.clear();
-                  setState(() => _query = '');
-                },
-              ),
-              const SizedBox(height: 12),
-              _FilterBar(
-                value: _filter,
-                onChanged: (v) => setState(() => _filter = v),
-                counts: {
-                  'ALL': rows.length,
-                  'PENDING': pending,
-                  'APPROVED': approved,
-                  'REJECTED': rejected,
-                },
-              ),
-              const SizedBox(height: 14),
-              if (filtered.isEmpty)
-                AppEmptyState(
-                  icon: Icons.event_available_rounded,
-                  message: _query.isNotEmpty
-                      ? 'No leave requests match your search.'
-                      : 'Nothing here right now.',
-                )
-              else
-                for (final r in filtered)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _TeamLeaveCard(
-                      r: r,
-                      canReview: canReview && r.status == 'PENDING',
-                      reviewerEmployeeId: user?.employeeId,
-                      onReviewed: () {
-                        ref.invalidate(_teamLeavesProvider);
-                        ref.invalidate(leavesPendingMyApprovalProvider);
-                      },
-                    ),
-                  ),
+          return [
+            _reviewChips(
+              value: _filter,
+              onChanged: (v) => setState(() => _filter = v),
+              counts: {
+                'ALL': all.length,
+                'PENDING': pending,
+                'APPROVED': approved,
+                'REJECTED': rejected,
+              },
+            ),
+            ProSectionHeader(
+              title: _reviewListTitle(_filter, filtered.length),
+              small: true,
+            ),
+            if (filtered.isEmpty)
+              AppEmptyState(
+                icon: Icons.event_available_rounded,
+                message: _query.isNotEmpty
+                    ? 'No leave requests match your search.'
+                    : 'Nothing here right now.',
+              )
+            else ...[
+              if (anyReviewable) const ProSwipeHint(),
+              for (final r in filtered)
+                _TeamLeaveCard(
+                  r: r,
+                  canReview: canReview && r.status == 'PENDING',
+                  reviewerEmployeeId: user?.employeeId,
+                  onReviewed: onRefreshed,
+                ),
             ],
-          );
+          ];
         },
       ),
     );
@@ -671,7 +535,8 @@ class _LeavesViewState extends ConsumerState<_LeavesView> {
 // ─────────────────────────────────────────────────────────────────────
 
 class _AttendanceView extends ConsumerStatefulWidget {
-  const _AttendanceView();
+  const _AttendanceView({required this.tabs});
+  final Widget tabs;
 
   @override
   ConsumerState<_AttendanceView> createState() => _AttendanceViewState();
@@ -702,38 +567,59 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
               data: (rows) => rows,
               orElse: () => const <RegularizationRequest>[],
             );
-    final mq = MediaQuery.of(context);
-    final pad = EdgeInsets.fromLTRB(
-      16,
-      4,
-      16,
-      mq.padding.bottom + AppChrome.bottomNavHeight + 16,
-    );
 
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: () async {
-        ref.invalidate(teamRegularizationsProvider);
-        ref.invalidate(regularizationsPendingMyApprovalProvider);
-      },
-      child: async.when(
-        loading: () => const _CenterLoader(),
-        error: (e, _) => _ErrorList(
-          message: e.toString(),
-          padding: pad,
-          onRetry: () => ref.invalidate(teamRegularizationsProvider),
-        ),
+    List<RegularizationRequest> merge(List<RegularizationRequest> teamRows) {
+      final rows = [...teamRows];
+      for (final q in chainQueue) {
+        if (!rows.any((r) => r.id == q.id)) rows.add(q);
+      }
+      return rows;
+    }
+
+    final loaded = async.valueOrNull;
+    final rows = loaded == null ? null : merge(loaded);
+    final pending = rows?.where((r) => r.status == 'PENDING').length ?? 0;
+    final approved = rows?.where((r) => r.status == 'APPROVED').length ?? 0;
+    final rejected = rows?.where((r) => r.status == 'REJECTED').length ?? 0;
+
+    void onRefreshed() {
+      ref.invalidate(teamRegularizationsProvider);
+      ref.invalidate(regularizationsPendingMyApprovalProvider);
+    }
+
+    return _TeamPage(
+      tabs: widget.tabs,
+      kicker: 'Regularizations',
+      subtitle:
+          _reviewSubtitle(rows == null ? null : pending, 'Regularization requests'),
+      onRefresh: () async => onRefreshed(),
+      stats: _reviewStats(
+        loaded: rows != null,
+        pending: pending,
+        approved: approved,
+        rejected: rejected,
+        filter: _filter,
+        onFilter: (v) => setState(() => _filter = v),
+      ),
+      overlap: ProSearchField(
+        raised: true,
+        controller: _searchCtrl,
+        hint: 'Search by employee name',
+        onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+      ),
+      children: async.when(
+        loading: () => const [AppLoadingBlock(height: 160)],
+        error: (e, _) => [
+          AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(teamRegularizationsProvider),
+          ),
+        ],
         data: (teamRows) {
-          final rows = [...teamRows];
-          for (final q in chainQueue) {
-            if (!rows.any((r) => r.id == q.id)) rows.add(q);
-          }
-          final pending = rows.where((r) => r.status == 'PENDING').length;
-          final approved = rows.where((r) => r.status == 'APPROVED').length;
-          final rejected = rows.where((r) => r.status == 'REJECTED').length;
+          final all = merge(teamRows);
           final filtered = (_filter == 'ALL'
-                  ? rows
-                  : rows.where((r) => r.status == _filter).toList())
+                  ? all
+                  : all.where((r) => r.status == _filter).toList())
               .where(_matchesQuery)
               .toList();
           // Pending first within the current filter.
@@ -742,62 +628,38 @@ class _AttendanceViewState extends ConsumerState<_AttendanceView> {
             ...filtered.where((r) => !r.isPending),
           ];
 
-          return ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: pad,
-            children: [
-              _TeamSummary(
-                total: rows.length,
-                pending: pending,
-                approved: approved,
-                rejected: rejected,
-              ),
-              const SizedBox(height: 16),
-              _EmployeeSearchField(
-                controller: _searchCtrl,
-                query: _query,
-                onChanged: (v) =>
-                    setState(() => _query = v.trim().toLowerCase()),
-                onClear: () {
-                  _searchCtrl.clear();
-                  setState(() => _query = '');
-                },
-              ),
-              const SizedBox(height: 12),
-              _FilterBar(
-                value: _filter,
-                onChanged: (v) => setState(() => _filter = v),
-                counts: {
-                  'ALL': rows.length,
-                  'PENDING': pending,
-                  'APPROVED': approved,
-                  'REJECTED': rejected,
-                },
-              ),
-              const SizedBox(height: 14),
-              if (sorted.isEmpty)
-                AppEmptyState(
-                  icon: Icons.fact_check_outlined,
-                  message: _query.isNotEmpty
-                      ? 'No requests match your search.'
-                      : 'Nothing here right now.',
-                )
-              else
-                for (final r in sorted)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _RegularizationCard(
-                      r: r,
-                      reviewerEmployeeId: user?.employeeId,
-                      onReviewed: () {
-                        ref.invalidate(teamRegularizationsProvider);
-                        ref.invalidate(
-                            regularizationsPendingMyApprovalProvider);
-                      },
-                    ),
-                  ),
+          return [
+            _reviewChips(
+              value: _filter,
+              onChanged: (v) => setState(() => _filter = v),
+              counts: {
+                'ALL': all.length,
+                'PENDING': pending,
+                'APPROVED': approved,
+                'REJECTED': rejected,
+              },
+            ),
+            ProSectionHeader(
+              title: _reviewListTitle(_filter, sorted.length),
+              small: true,
+            ),
+            if (sorted.isEmpty)
+              AppEmptyState(
+                icon: Icons.fact_check_outlined,
+                message: _query.isNotEmpty
+                    ? 'No requests match your search.'
+                    : 'Nothing here right now.',
+              )
+            else ...[
+              if (sorted.any((r) => r.isPending)) const ProSwipeHint(),
+              for (final r in sorted)
+                _RegularizationCard(
+                  r: r,
+                  reviewerEmployeeId: user?.employeeId,
+                  onReviewed: onRefreshed,
+                ),
             ],
-          );
+          ];
         },
       ),
     );
@@ -864,9 +726,7 @@ class _RegularizationCardState extends ConsumerState<_RegularizationCard> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: isApprove ? AppColors.success : AppColors.danger,
-            ),
+            style: isApprove ? null : _destructiveStyle(),
             onPressed: () => Navigator.pop(ctx, c.text),
             child: Text(isApprove ? 'Approve' : 'Reject'),
           ),
@@ -878,426 +738,218 @@ class _RegularizationCardState extends ConsumerState<_RegularizationCard> {
   @override
   Widget build(BuildContext context) {
     final r = widget.r;
-    final tone = r.statusTone;
-    return GlassCard(
+    return _ApprovalCard(
+      name: r.employeeName ?? 'Employee',
+      line: [
+        if (r.date != null) r.date!,
+        if (r.requestedStatus != null) r.requestedStatus!,
+      ].join(' · '),
+      tone: r.statusTone,
+      busy: _busy,
+      actionable: r.isPending,
+      onApprove: () => _review('APPROVED'),
+      onReject: () => _review('REJECTED'),
+      body: [
+        if (r.timeSummary.isNotEmpty)
+          _InfoStrip(icon: Icons.schedule_rounded, text: r.timeSummary),
+        if (r.reason != null && r.reason!.isNotEmpty) _Reason(r.reason!),
+        // Configured approval chain (Wave 4b engine); empty = default
+        // direct-manager flow → renders nothing.
+        if (r.isPending)
+          ref.watch(regularizationApprovalStepsProvider(r.id)).maybeWhen(
+                data: (s) => s.isEmpty
+                    ? const SizedBox.shrink()
+                    : ApprovalChainInline(steps: s),
+                orElse: () => const SizedBox.shrink(),
+              ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Shared approval card
+// ─────────────────────────────────────────────────────────────────────
+
+ButtonStyle _destructiveStyle() => FilledButton.styleFrom(
+      backgroundColor: AppColors.dangerTint,
+      foregroundColor: AppColors.danger,
+    );
+
+ProPill _tonePill(StatusTone tone) {
+  if (tone.color == AppColors.success) return ProPill.ok(tone.label);
+  if (tone.color == AppColors.danger) return ProPill.bad(tone.label);
+  if (tone.color == AppColors.warning) return ProPill.warn(tone.label);
+  if (tone.color == AppColors.info) return ProPill.info(tone.label);
+  return ProPill.neutral(tone.label);
+}
+
+/// One approval request: avatar + name + status, detail lines, and (while
+/// actionable) Reject / Approve buttons. Actionable cards can also be swiped
+/// right to approve or left to reject — both run the same handlers.
+class _ApprovalCard extends StatelessWidget {
+  const _ApprovalCard({
+    required this.name,
+    required this.line,
+    required this.tone,
+    required this.body,
+    required this.actionable,
+    required this.busy,
+    required this.onApprove,
+    required this.onReject,
+  });
+
+  final String name;
+  final String line;
+  final StatusTone tone;
+  final List<Widget> body;
+  final bool actionable;
+  final bool busy;
+  final Future<void> Function() onApprove;
+  final Future<void> Function() onReject;
+
+  @override
+  Widget build(BuildContext context) {
+    final card = GlassCard(
       padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              UserAvatar(name: r.employeeName ?? '?', size: 36, radius: 11),
-              const SizedBox(width: 10),
+              ProAvatar(name: name, size: 40),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      r.employeeName ?? 'Employee',
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.15,
                         color: AppColors.ink,
                       ),
                     ),
-                    const SizedBox(height: 1),
-                    Text(
-                      [
-                        if (r.date != null) r.date!,
-                        if (r.requestedStatus != null) r.requestedStatus!,
-                      ].join(' · '),
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.muted,
-                        fontWeight: FontWeight.w600,
+                    if (line.isNotEmpty)
+                      Text(
+                        line,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.caption.copyWith(
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
-              StatusPill(label: tone.label, color: tone.color),
+              const SizedBox(width: 8),
+              _tonePill(tone),
             ],
           ),
-          if (r.timeSummary.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceAlt,
-                borderRadius: BorderRadius.circular(AppRadii.md),
-                border: Border.all(color: AppColors.hairline),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.schedule_rounded,
-                      size: 13, color: AppColors.primary),
-                  const SizedBox(width: 6),
-                  Text(
-                    r.timeSummary,
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.ink,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          if (r.reason != null && r.reason!.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.format_quote_rounded,
-                    size: 13, color: AppColors.muted),
-                const SizedBox(width: 5),
-                Expanded(
-                  child: Text(
-                    r.reason!,
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      color: AppColors.inkSoft,
-                      fontStyle: FontStyle.italic,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          // Configured approval chain (Wave 4b engine); empty = default
-          // direct-manager flow → renders nothing.
-          if (r.isPending)
-            ref.watch(regularizationApprovalStepsProvider(r.id)).maybeWhen(
-                  data: (s) => s.isEmpty
-                      ? const SizedBox.shrink()
-                      : Padding(
-                          padding: const EdgeInsets.only(top: 10),
-                          child: ApprovalChainInline(steps: s),
-                        ),
-                  orElse: () => const SizedBox.shrink(),
-                ),
-          if (r.isPending) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _ActionButton(
-                    icon: Icons.check_rounded,
-                    label: 'Approve',
-                    color: AppColors.success,
-                    onTap: _busy ? null : () => _review('APPROVED'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _ActionButton(
-                    icon: Icons.close_rounded,
-                    label: 'Reject',
-                    color: AppColors.danger,
-                    outlined: true,
-                    onTap: _busy ? null : () => _review('REJECTED'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Shared small widgets
-// ─────────────────────────────────────────────────────────────────────
-
-class _CenterLoader extends StatelessWidget {
-  const _CenterLoader();
-  @override
-  Widget build(BuildContext context) {
-    // Wrapped so RefreshIndicator's pull-to-refresh still works while loading.
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      children: const [
-        SizedBox(height: 140),
-        Center(
-          child: SizedBox(
-            width: 28,
-            height: 28,
-            child: CircularProgressIndicator(strokeWidth: 2.5),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ErrorList extends StatelessWidget {
-  const _ErrorList({
-    required this.message,
-    required this.padding,
-    required this.onRetry,
-  });
-  final String message;
-  final EdgeInsets padding;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: padding,
-      children: [
-        const SizedBox(height: 8),
-        AppErrorPanel(message: message, onRetry: onRetry),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Leaves summary + filter + card (unchanged behaviour)
-// ─────────────────────────────────────────────────────────────────────
-
-class _TeamSummary extends StatelessWidget {
-  const _TeamSummary({
-    required this.total,
-    required this.pending,
-    required this.approved,
-    required this.rejected,
-  });
-  final int total;
-  final int pending;
-  final int approved;
-  final int rejected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: AppColors.heroGradient,
-        borderRadius: BorderRadius.circular(AppRadii.xl),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withOpacity(0.32),
-            blurRadius: 26,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '$total request${total == 1 ? '' : 's'}',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.3,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              pending > 0
-                  ? '$pending pending your review'
-                  : 'All caught up — nice work',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.85),
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+          for (final b in body) ...[const SizedBox(height: 10), b],
+          if (actionable) ...[
             const SizedBox(height: 14),
             Row(
               children: [
                 Expanded(
-                  child: _MiniStat(
-                    label: 'Pending',
-                    value: pending,
-                    color: const Color(0xFFFBBF24),
+                  child: FilledButton.icon(
+                    onPressed: busy ? null : onReject,
+                    style: _destructiveStyle().copyWith(
+                      minimumSize: const WidgetStatePropertyAll(Size(0, 44)),
+                    ),
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    label: const Text('Reject'),
                   ),
                 ),
-                Container(
-                    width: 1, height: 28, color: Colors.white.withOpacity(0.18)),
+                const SizedBox(width: 10),
                 Expanded(
-                  child: _MiniStat(
-                    label: 'Approved',
-                    value: approved,
-                    color: const Color(0xFF34D399),
-                  ),
-                ),
-                Container(
-                    width: 1, height: 28, color: Colors.white.withOpacity(0.18)),
-                Expanded(
-                  child: _MiniStat(
-                    label: 'Rejected',
-                    value: rejected,
-                    color: const Color(0xFFF87171),
+                  child: FilledButton.icon(
+                    onPressed: busy ? null : onApprove,
+                    style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
+                    icon: busy
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.check_rounded, size: 18),
+                    label: const Text('Approve'),
                   ),
                 ),
               ],
             ),
           ],
-        ),
+        ],
+      ),
+    );
+    if (!actionable) return card;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.lg),
+      child: ProSwipeDecision(
+        onApprove: () async {
+          if (!busy) await onApprove();
+        },
+        onReject: () async {
+          if (!busy) await onReject();
+        },
+        child: card,
       ),
     );
   }
 }
 
-class _MiniStat extends StatelessWidget {
-  const _MiniStat({
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-  final String label;
-  final int value;
-  final Color color;
+/// Tinted one-line detail (dates / times) inside an approval card.
+class _InfoStrip extends StatelessWidget {
+  const _InfoStrip({required this.icon, required this.text});
+  final IconData icon;
+  final String text;
 
   @override
   Widget build(BuildContext context) {
-    // Left-aligned so the first stat lines up under the card's title/subtitle
-    // (which use CrossAxisAlignment.start) instead of sitting indented.
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.start,
-          children: [
-            Container(
-              width: 5,
-              height: 5,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 5),
-            Text(
-              value.toString(),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 1),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.75),
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.2,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _FilterBar extends StatelessWidget {
-  const _FilterBar({
-    required this.value,
-    required this.onChanged,
-    required this.counts,
-  });
-  final String value;
-  final ValueChanged<String> onChanged;
-  final Map<String, int> counts;
-
-  static const _items = [
-    ('ALL', 'All'),
-    ('PENDING', 'Pending'),
-    ('APPROVED', 'Approved'),
-    ('REJECTED', 'Rejected'),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      physics: const BouncingScrollPhysics(),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceAlt,
+        borderRadius: BorderRadius.circular(AppRadii.md),
+      ),
       child: Row(
         children: [
-          for (final it in _items) ...[
-            _FilterChip(
-              label: it.$2,
-              count: counts[it.$1] ?? 0,
-              selected: value == it.$1,
-              onTap: () => onChanged(it.$1),
+          Icon(icon, size: 16, color: AppColors.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
+                color: AppColors.ink,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
-            const SizedBox(width: 8),
-          ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
-    required this.label,
-    required this.count,
-    required this.selected,
-    required this.onTap,
-  });
-  final String label;
-  final int count;
-  final bool selected;
-  final VoidCallback onTap;
+class _Reason extends StatelessWidget {
+  const _Reason(this.text);
+  final String text;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadii.pill),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.ink : AppColors.surfaceAlt,
-          borderRadius: BorderRadius.circular(AppRadii.pill),
-          border: Border.all(
-            color: selected ? AppColors.ink : AppColors.hairline,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700,
-                color: selected ? Colors.white : AppColors.inkSoft,
-              ),
-            ),
-            const SizedBox(width: 5),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: selected
-                    ? Colors.white.withOpacity(0.18)
-                    : AppColors.surface,
-                borderRadius: BorderRadius.circular(AppRadii.pill),
-              ),
-              child: Text(
-                count.toString(),
-                style: TextStyle(
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w800,
-                  color: selected ? Colors.white : AppColors.muted,
-                ),
-              ),
-            ),
-          ],
-        ),
+    return Text(
+      '“$text”',
+      style: const TextStyle(
+        fontSize: 13.5,
+        height: 1.45,
+        color: AppColors.inkSoft,
       ),
     );
   }
@@ -1367,9 +1019,7 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: isApprove ? AppColors.success : AppColors.danger,
-            ),
+            style: isApprove ? null : _destructiveStyle(),
             onPressed: () => Navigator.pop(ctx, c.text),
             child: Text(isApprove ? 'Approve' : 'Reject'),
           ),
@@ -1381,192 +1031,33 @@ class _TeamLeaveCardState extends ConsumerState<_TeamLeaveCard> {
   @override
   Widget build(BuildContext context) {
     final r = widget.r;
-    final tone = StatusTone.forLeave(r.status);
-
-    return GlassCard(
-      padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              UserAvatar(name: r.employeeName ?? '?', size: 36, radius: 11),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      r.employeeName ?? 'Employee',
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      '${r.leaveType} · ${r.numberOfDays ?? "?"} day(s)',
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.muted,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              StatusPill(label: tone.label, color: tone.color),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceAlt,
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              border: Border.all(color: AppColors.hairline),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.calendar_today_rounded,
-                    size: 13, color: AppColors.primary),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    '${r.fromDate}  →  ${r.toDate}',
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.ink,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (r.reason != null && r.reason!.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.format_quote_rounded,
-                    size: 13, color: AppColors.muted),
-                const SizedBox(width: 5),
-                Expanded(
-                  child: Text(
-                    r.reason!,
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      color: AppColors.inkSoft,
-                      fontStyle: FontStyle.italic,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          // Configured approval chain (Wave 4b engine); empty = default
-          // direct-manager flow → renders nothing.
-          if (r.status == 'PENDING')
-            ref.watch(leaveApprovalStepsProvider(r.id)).maybeWhen(
-                  data: (s) => s.isEmpty
-                      ? const SizedBox.shrink()
-                      : Padding(
-                          padding: const EdgeInsets.only(top: 10),
-                          child: ApprovalChainInline(steps: s),
-                        ),
-                  orElse: () => const SizedBox.shrink(),
-                ),
-          if (widget.canReview) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _ActionButton(
-                    icon: Icons.check_rounded,
-                    label: 'Approve',
-                    color: AppColors.success,
-                    onTap: _busy ? null : () => _review('APPROVED'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _ActionButton(
-                    icon: Icons.close_rounded,
-                    label: 'Reject',
-                    color: AppColors.danger,
-                    outlined: true,
-                    onTap: _busy ? null : () => _review('REJECTED'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _ActionButton extends StatelessWidget {
-  const _ActionButton({
-    required this.icon,
-    required this.label,
-    required this.color,
-    required this.onTap,
-    this.outlined = false,
-  });
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback? onTap;
-  final bool outlined;
-
-  @override
-  Widget build(BuildContext context) {
-    final disabled = onTap == null;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(AppRadii.md),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: outlined
-                ? Colors.transparent
-                : (disabled ? color.withOpacity(0.4) : color),
-            border: outlined
-                ? Border.all(color: color.withOpacity(0.5), width: 1.3)
-                : null,
-            borderRadius: BorderRadius.circular(AppRadii.md),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 15, color: outlined ? color : Colors.white),
-              const SizedBox(width: 5),
-              Text(
-                label,
-                style: TextStyle(
-                  color: outlined ? color : Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12.5,
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ],
-          ),
+    return _ApprovalCard(
+      name: r.employeeName ?? 'Employee',
+      line: '${_humanLeaveType(r.leaveType)} · ${r.numberOfDays ?? "?"} day(s)',
+      tone: StatusTone.forLeave(r.status),
+      busy: _busy,
+      actionable: widget.canReview,
+      onApprove: () => _review('APPROVED'),
+      onReject: () => _review('REJECTED'),
+      body: [
+        _InfoStrip(
+          icon: Icons.calendar_today_rounded,
+          text: '${r.fromDate}  →  ${r.toDate}',
         ),
-      ),
+        if (r.reason != null && r.reason!.isNotEmpty) _Reason(r.reason!),
+        // Configured approval chain (Wave 4b engine); empty = default
+        // direct-manager flow → renders nothing.
+        if (r.status == 'PENDING')
+          ref.watch(leaveApprovalStepsProvider(r.id)).maybeWhen(
+                data: (s) => s.isEmpty
+                    ? const SizedBox.shrink()
+                    : ApprovalChainInline(steps: s),
+                orElse: () => const SizedBox.shrink(),
+              ),
+      ],
     );
   }
 }
-
 
 // -------------------------------------------------------------------
 // Exits tab - resignation approvals assigned to this manager
@@ -1576,7 +1067,8 @@ class _ActionButton extends StatelessWidget {
 /// resignation approval workflow (Reporting Manager level N), so this needs no
 /// HR resignation permission - only the steps assigned to this user are listed.
 class _ExitsView extends ConsumerStatefulWidget {
-  const _ExitsView();
+  const _ExitsView({required this.tabs});
+  final Widget tabs;
 
   @override
   ConsumerState<_ExitsView> createState() => _ExitsViewState();
@@ -1588,73 +1080,70 @@ class _ExitsViewState extends ConsumerState<_ExitsView> {
   @override
   Widget build(BuildContext context) {
     final approvals = ref.watch(myResignationApprovalsProvider);
-    final mq = MediaQuery.of(context);
-    final pad = EdgeInsets.fromLTRB(
-      16,
-      4,
-      16,
-      mq.padding.bottom + AppChrome.bottomNavHeight + 16,
-    );
+    final rows = approvals.valueOrNull;
+    final pending = rows?.where((r) => r.step.isPending).length ?? 0;
+    final approved =
+        rows?.where((r) => r.step.stepStatus == 'APPROVED').length ?? 0;
+    final rejected =
+        rows?.where((r) => r.step.stepStatus == 'REJECTED').length ?? 0;
 
-    return RefreshIndicator(
-      color: AppColors.primary,
+    return _TeamPage(
+      tabs: widget.tabs,
+      kicker: 'Resignations',
+      subtitle:
+          _reviewSubtitle(rows == null ? null : pending, 'Resignation approvals'),
       onRefresh: () async => ref.invalidate(myResignationApprovalsProvider),
-      child: approvals.when(
-        loading: () => const _CenterLoader(),
-        error: (e, _) => _ErrorList(
-          message: e.toString(),
-          padding: pad,
-          onRetry: () => ref.invalidate(myResignationApprovalsProvider),
-        ),
+      stats: _reviewStats(
+        loaded: rows != null,
+        pending: pending,
+        approved: approved,
+        rejected: rejected,
+        filter: _filter,
+        onFilter: (v) => setState(() => _filter = v),
+      ),
+      children: approvals.when(
+        loading: () => const [AppLoadingBlock(height: 160)],
+        error: (e, _) => [
+          AppErrorPanel(
+            message: e.toString(),
+            onRetry: () => ref.invalidate(myResignationApprovalsProvider),
+          ),
+        ],
         data: (rows) {
-          final pending = rows.where((r) => r.step.isPending).length;
-          final approved =
-              rows.where((r) => r.step.stepStatus == 'APPROVED').length;
-          final rejected =
-              rows.where((r) => r.step.stepStatus == 'REJECTED').length;
           final filtered = _filter == 'ALL'
               ? rows
               : rows.where((r) => r.step.stepStatus == _filter).toList();
 
-          return ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: pad,
-            children: [
-              _TeamSummary(
-                total: rows.length,
-                pending: pending,
-                approved: approved,
-                rejected: rejected,
-              ),
-              const SizedBox(height: 16),
-              _FilterBar(
-                value: _filter,
-                onChanged: (v) => setState(() => _filter = v),
-                counts: {
-                  'ALL': rows.length,
-                  'PENDING': pending,
-                  'APPROVED': approved,
-                  'REJECTED': rejected,
-                },
-              ),
-              const SizedBox(height: 14),
-              if (filtered.isEmpty)
-                const AppEmptyState(
-                  icon: Icons.logout_rounded,
-                  message: 'No resignation approvals are assigned to you.',
-                )
-              else
-                for (final a in filtered)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: _ResignationApprovalCard(
-                      a: a,
-                      onReviewed: () =>
-                          ref.invalidate(myResignationApprovalsProvider),
-                    ),
-                  ),
+          return [
+            _reviewChips(
+              value: _filter,
+              onChanged: (v) => setState(() => _filter = v),
+              counts: {
+                'ALL': rows.length,
+                'PENDING': pending,
+                'APPROVED': approved,
+                'REJECTED': rejected,
+              },
+            ),
+            ProSectionHeader(
+              title: _reviewListTitle(_filter, filtered.length),
+              small: true,
+            ),
+            if (filtered.isEmpty)
+              const AppEmptyState(
+                icon: Icons.logout_rounded,
+                message: 'No resignation approvals are assigned to you.',
+              )
+            else ...[
+              if (filtered.any((a) => a.step.isPending)) const ProSwipeHint(),
+              for (final a in filtered)
+                _ResignationApprovalCard(
+                  a: a,
+                  onReviewed: () =>
+                      ref.invalidate(myResignationApprovalsProvider),
+                ),
             ],
-          );
+          ];
         },
       ),
     );
@@ -1721,9 +1210,7 @@ class _ResignationApprovalCardState
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: approve ? AppColors.success : AppColors.danger,
-            ),
+            style: approve ? null : _destructiveStyle(),
             onPressed: () => Navigator.pop(ctx, c.text),
             child: Text(approve ? 'Approve' : 'Reject'),
           ),
@@ -1736,138 +1223,47 @@ class _ResignationApprovalCardState
   Widget build(BuildContext context) {
     final r = widget.a.resignation;
     final step = widget.a.step;
-    final tone = StatusTone.forLeave(step.stepStatus);
     final name = r.employeeName ?? 'Employee';
 
-    return GlassCard(
-      padding: const EdgeInsets.all(14),
-      shadow: AppShadows.soft,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              UserAvatar(name: name, size: 36, radius: 11),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 1),
-                    Text(
-                      [
-                        if (r.employeeCode != null) r.employeeCode!,
-                        if (r.designation != null) r.designation!,
-                        step.levelName,
-                      ].join(' \u00b7 '),
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppColors.muted,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              StatusPill(label: tone.label, color: tone.color),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceAlt,
-              borderRadius: BorderRadius.circular(AppRadii.md),
-              border: Border.all(color: AppColors.hairline),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.event_busy_rounded,
-                    size: 13, color: AppColors.primary),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'Resigned ${_fmt(r.resignationDate)}   Last day ${_fmt(r.lastWorkingDay)}',
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.ink,
-                    ),
-                  ),
-                ),
-              ],
+    return _ApprovalCard(
+      name: name,
+      line: [
+        if (r.employeeCode != null) r.employeeCode!,
+        if (r.designation != null) r.designation!,
+        step.levelName,
+      ].join(' · '),
+      tone: StatusTone.forLeave(step.stepStatus),
+      busy: _busy,
+      actionable: step.isPending,
+      onApprove: () => _act(true),
+      onReject: () => _act(false),
+      body: [
+        _InfoStrip(
+          icon: Icons.event_busy_rounded,
+          text:
+              'Resigned ${_fmt(r.resignationDate)} · Last day ${_fmt(r.lastWorkingDay)}',
+        ),
+        if (r.reason != null && r.reason!.isNotEmpty) _Reason(r.reason!),
+        if (!step.isPending &&
+            step.remarks != null &&
+            step.remarks!.isNotEmpty)
+          Text(
+            'Your remarks: ${step.remarks!}',
+            style: const TextStyle(
+              fontSize: 13,
+              color: AppColors.inkSoft,
+              height: 1.4,
             ),
           ),
-          if (r.reason != null && r.reason!.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.format_quote_rounded,
-                    size: 13, color: AppColors.muted),
-                const SizedBox(width: 5),
-                Expanded(
-                  child: Text(
-                    r.reason!,
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      color: AppColors.inkSoft,
-                      fontStyle: FontStyle.italic,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if (!step.isPending &&
-              step.remarks != null &&
-              step.remarks!.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Your remarks: ${step.remarks!}',
-              style: const TextStyle(
-                fontSize: 11.5,
-                color: AppColors.inkSoft,
-                height: 1.4,
-              ),
-            ),
-          ],
-          if (step.isPending) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _ActionButton(
-                    icon: Icons.check_rounded,
-                    label: 'Approve',
-                    color: AppColors.success,
-                    onTap: _busy ? null : () => _act(true),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _ActionButton(
-                    icon: Icons.close_rounded,
-                    label: 'Reject',
-                    color: AppColors.danger,
-                    outlined: true,
-                    onTap: _busy ? null : () => _act(false),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
+      ],
     );
   }
+}
+
+/// "SICK" → "Sick leave" — leave-type codes are DB-driven, so humanize
+/// generically (same rule as the Leaves screen).
+String _humanLeaveType(String t) {
+  if (t.isEmpty) return t;
+  final s = t.toLowerCase().replaceAll('_', ' ');
+  return '${s[0].toUpperCase()}${s.substring(1)} leave';
 }

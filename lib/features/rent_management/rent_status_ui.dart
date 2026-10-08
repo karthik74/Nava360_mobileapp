@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import 'rent_models.dart';
 
@@ -88,3 +89,14 @@ StatusTone rentAuditActionTone(String action) {
 
 /// Icon for a rent branch's list-card thumbnail / detail header.
 const IconData rentBranchIcon = Icons.home_work_rounded;
+
+/// [ProPill] in the tone family of a [StatusTone] colour (ok / warn / bad /
+/// info / neutral), so rent statuses read the same everywhere.
+ProPill rentTonePill(StatusTone tone) {
+  final c = tone.color;
+  if (c == AppColors.success) return ProPill.ok(tone.label);
+  if (c == AppColors.danger) return ProPill.bad(tone.label);
+  if (c == AppColors.warning) return ProPill.warn(tone.label);
+  if (c == AppColors.info) return ProPill.info(tone.label);
+  return ProPill.neutral(tone.label);
+}

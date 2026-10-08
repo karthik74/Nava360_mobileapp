@@ -10,7 +10,8 @@ import 'mis_charts.dart';
 import 'mis_format.dart';
 import 'mis_hourly_series.dart';
 
-/// "Live snapshot" badge for the Hourly header. The hero is the snapshot's HOUR
+/// "Live snapshot" badge for the Hourly hero (drawn for the deep brand
+/// surface). The hero is the snapshot's HOUR
 /// SLOT (e.g. 6 PM) — the hour the data represents — on an odometer reel that
 /// rolls up from 0 and lands on the current hour. The date is omitted (it's
 /// already in the picker). Re-key on the hour so the roll replays whenever a
@@ -96,15 +97,13 @@ class _MisSnapshotClockState extends State<MisSnapshotClock>
       label:
           '${widget.live ? 'Live' : 'Replayed'} hourly snapshot for $_hero $_ampm',
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(AppRadii.md),
-          border: Border.all(color: AppColors.hairline),
-          boxShadow: AppShadows.soft,
+          color: Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
             _liveChip(),
             const SizedBox(width: 12),
@@ -136,13 +135,13 @@ class _MisSnapshotClockState extends State<MisSnapshotClock>
                               child: Center(
                                 child: Text(
                                   '$n',
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                     fontSize: 26,
                                     height: 1,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white,
                                     letterSpacing: -0.5,
-                                    fontFeatures: const [
+                                    fontFeatures: [
                                       FontFeature.tabularFigures()
                                     ],
                                   ),
@@ -161,15 +160,15 @@ class _MisSnapshotClockState extends State<MisSnapshotClock>
               padding: const EdgeInsets.only(top: 6),
               child: Text(
                 _ampm,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.primary,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white70,
                 ),
               ),
             ),
             const SizedBox(width: 12),
-            Flexible(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -177,9 +176,9 @@ class _MisSnapshotClockState extends State<MisSnapshotClock>
                   Text(
                     widget.live ? 'Hourly snapshot' : 'Snapshot replay',
                     style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.inkSoft,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
                     ),
                   ),
                   if (_asOfPretty != null)
@@ -188,9 +187,7 @@ class _MisSnapshotClockState extends State<MisSnapshotClock>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.muted),
+                          fontSize: 12, color: Colors.white70),
                     ),
                 ],
               ),
@@ -202,18 +199,20 @@ class _MisSnapshotClockState extends State<MisSnapshotClock>
   }
 
   Widget _liveChip() {
-    final color = widget.live ? AppColors.success : AppColors.warning;
+    final color = widget.live ? AppColors.live : const Color(0xFFF2B347);
+    final fg = widget.live ? const Color(0xFFCDEE9E) : const Color(0xFFFFD690);
     final dot = Container(
       width: 7,
       height: 7,
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      height: 24,
+      padding: const EdgeInsets.symmetric(horizontal: 9),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color: color.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: color.withValues(alpha: 0.28)),
+        border: Border.all(color: color.withValues(alpha: 0.42)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -228,12 +227,11 @@ class _MisSnapshotClockState extends State<MisSnapshotClock>
             dot,
           const SizedBox(width: 5),
           Text(
-            widget.live ? 'LIVE' : 'REPLAY',
+            widget.live ? 'Live' : 'Replay',
             style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.6,
-              color: color,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: fg,
             ),
           ),
         ],
@@ -267,7 +265,7 @@ class MisSparkline extends StatelessWidget {
       child: CustomPaint(
         painter: _SparklinePainter(
           values: values,
-          color: color,
+          color: MisPalette.resolve(color),
           strokeWidth: strokeWidth,
         ),
       ),
@@ -374,20 +372,18 @@ class MisHourKpi extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GlassCard(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-      shadow: AppShadows.soft,
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            label.toUpperCase(),
+            label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.5,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
               color: AppColors.muted,
             ),
           ),
@@ -399,9 +395,10 @@ class MisHourKpi extends StatelessWidget {
               value,
               style: const TextStyle(
                 fontSize: 19,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w600,
                 color: AppColors.ink,
-                letterSpacing: -0.3,
+                letterSpacing: -0.4,
+                fontFeatures: [FontFeature.tabularFigures()],
               ),
             ),
           ),
@@ -410,7 +407,7 @@ class MisHourKpi extends StatelessWidget {
               sub!,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 10.5, color: AppColors.muted),
+              style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
             ),
         ],
       ),
@@ -460,8 +457,11 @@ class MisHourlyHeatTable extends StatefulWidget {
 class _MisHourlyHeatTableState extends State<MisHourlyHeatTable> {
   static const double _unitW = 138;
   static const double _hourW = 58;
-  static const double _rowH = 42;
-  static const Color _teal = MisPalette.teal;
+  static const double _rowH = 44;
+  static const double _headH = 34;
+
+  /// Heat tint — the brand colour, so the grid follows the deployment.
+  static Color get _teal => AppColors.primary;
 
   /// Heat scale is global across every hour cell, so intensity is comparable
   /// across the whole grid (one busy branch-hour reads as the hottest cell).
@@ -479,11 +479,9 @@ class _MisHourlyHeatTableState extends State<MisHourlyHeatTable> {
   Color _heatBg(double t) =>
       t <= 0 ? Colors.transparent : _teal.withValues(alpha: 0.08 + 0.78 * t);
 
-  Color _heatText(double t) =>
-      t > 0.62 ? const Color(0xFF04201D) : AppColors.ink;
+  Color _heatText(double t) => t > 0.62 ? Colors.white : AppColors.ink;
 
-  Color _bandColor(int index) =>
-      index.isOdd ? AppColors.surfaceAlt : AppColors.surface;
+  Color _bandColor(int index) => AppColors.surface;
 
   @override
   Widget build(BuildContext context) {
@@ -504,20 +502,23 @@ class _MisHourlyHeatTableState extends State<MisHourlyHeatTable> {
     // out of sync (a controller shared across scroll views would throw).
     return GlassCard(
       padding: EdgeInsets.zero,
-      shadow: AppShadows.soft,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppRadii.lg),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
+            Container(
               width: _unitW,
+              decoration: const BoxDecoration(
+                border: Border(right: BorderSide(color: AppColors.hairline)),
+              ),
               child: Column(
                 children: [
                   _unitCell(
                     widget.unitHeader,
-                    background: AppColors.primary,
-                    color: Colors.white,
+                    background: AppColors.surfaceAlt,
+                    color: AppColors.muted,
+                    header: true,
                   ),
                   for (var i = 0; i < rows.length; i++)
                     _unitCell(
@@ -544,11 +545,14 @@ class _MisHourlyHeatTableState extends State<MisHourlyHeatTable> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _hourBand(
-                      background: AppColors.primary,
+                      background: AppColors.surfaceAlt,
+                      header: true,
                       cells: [
                         for (final h in hours)
                           _plainCell(h.label,
-                              color: Colors.white, weight: FontWeight.w700),
+                              color: AppColors.muted,
+                              weight: FontWeight.w600,
+                              size: 11),
                       ],
                     ),
                     for (var i = 0; i < rows.length; i++)
@@ -570,7 +574,7 @@ class _MisHourlyHeatTableState extends State<MisHourlyHeatTable> {
                               (totalByHour[h.hour] ?? 0) > 0
                                   ? misNum(totalByHour[h.hour])
                                   : '·',
-                              weight: FontWeight.w800,
+                              weight: FontWeight.w600,
                             ),
                         ],
                       ),
@@ -594,16 +598,19 @@ class _MisHourlyHeatTableState extends State<MisHourlyHeatTable> {
     required Color background,
     bool topBorder = false,
     bool bold = false,
+    bool header = false,
     VoidCallback? onTap,
   }) {
     final cell = Container(
-      height: _rowH,
+      height: header ? _headH : _rowH,
       decoration: BoxDecoration(
         color: background,
-        border: topBorder
-            ? const Border(
-                top: BorderSide(color: AppColors.hairline, width: 1.4))
-            : null,
+        border: Border(
+          top: topBorder
+              ? const BorderSide(color: AppColors.hairline)
+              : BorderSide.none,
+          bottom: const BorderSide(color: AppColors.hairlineSoft),
+        ),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(
@@ -618,8 +625,10 @@ class _MisHourlyHeatTableState extends State<MisHourlyHeatTable> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: bold ? FontWeight.w800 : FontWeight.w700,
+                    fontSize: header ? 11 : 12.5,
+                    fontWeight: header || bold
+                        ? FontWeight.w600
+                        : FontWeight.w500,
                     color: color,
                   ),
                 ),
@@ -629,7 +638,7 @@ class _MisHourlyHeatTableState extends State<MisHourlyHeatTable> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 9.5,
+                      fontSize: 10.5,
                       color: AppColors.muted,
                       fontFeatures: [FontFeature.tabularFigures()],
                     ),
@@ -639,7 +648,7 @@ class _MisHourlyHeatTableState extends State<MisHourlyHeatTable> {
           ),
           if (onTap != null)
             const Icon(Icons.chevron_right_rounded,
-                size: 15, color: AppColors.muted),
+                size: 16, color: Color(0xFFB3C0C3)),
         ],
       ),
     );
@@ -651,16 +660,19 @@ class _MisHourlyHeatTableState extends State<MisHourlyHeatTable> {
     required List<Widget> cells,
     required Color background,
     bool topBorder = false,
+    bool header = false,
     VoidCallback? onTap,
   }) {
     final band = Container(
-      height: _rowH,
+      height: header ? _headH : _rowH,
       decoration: BoxDecoration(
         color: background,
-        border: topBorder
-            ? const Border(
-                top: BorderSide(color: AppColors.hairline, width: 1.4))
-            : null,
+        border: Border(
+          top: topBorder
+              ? const BorderSide(color: AppColors.hairline)
+              : BorderSide.none,
+          bottom: const BorderSide(color: AppColors.hairlineSoft),
+        ),
       ),
       child: Row(children: cells),
     );
@@ -669,14 +681,16 @@ class _MisHourlyHeatTableState extends State<MisHourlyHeatTable> {
   }
 
   Widget _plainCell(String text,
-      {Color color = AppColors.ink, FontWeight weight = FontWeight.w500}) {
+      {Color color = AppColors.ink,
+      FontWeight weight = FontWeight.w500,
+      double size = 12}) {
     return SizedBox(
       width: _hourW,
       child: Center(
         child: Text(
           text,
           style: TextStyle(
-            fontSize: 11.5,
+            fontSize: size,
             fontWeight: weight,
             color: color,
             fontFeatures: const [FontFeature.tabularFigures()],
@@ -690,14 +704,14 @@ class _MisHourlyHeatTableState extends State<MisHourlyHeatTable> {
     final t = (v / scale).clamp(0.0, 1.0);
     return Container(
       width: _hourW,
-      height: _rowH,
+      height: _rowH - 1,
       alignment: Alignment.center,
       color: _heatBg(t),
       child: Text(
         v > 0 ? misNum(v) : '·',
         style: TextStyle(
-          fontSize: 11.5,
-          fontWeight: t > 0.62 ? FontWeight.w800 : FontWeight.w500,
+          fontSize: 12,
+          fontWeight: t > 0.62 ? FontWeight.w600 : FontWeight.w500,
           color: _heatText(t),
           fontFeatures: const [FontFeature.tabularFigures()],
         ),

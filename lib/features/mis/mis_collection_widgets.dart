@@ -5,18 +5,374 @@
 //  Both metrics come from the SAME /collection/summary payload — counts from
 //  demand_count / collection_count, rupees from demand_amt / collection_amt — so
 //  the Accounts/Amount switch never costs an extra request.
+//
+//  Also hosts the small "deep hero" helpers the MIS drill screens (Collection,
+//  Hourly, Disbursement, Portfolio) share: title + drill path, typed segmented
+//  switch, chips, the lifted picker shell and the Regular headline stats.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../../core/pro_ui.dart';
 import '../../core/theme.dart';
 import 'mis_charts.dart';
 import 'mis_format.dart';
 import 'mis_matrix_table.dart';
 import 'mis_models.dart';
+import 'mis_widgets.dart';
 
 String _fmt(MisMetric m, double v) =>
     m == MisMetric.amount ? misRupees(v) : misNum(v);
+
+/// Collection-% tone for the deep hero (lime / amber / soft red), using the
+/// same 99 / 95 thresholds as [misPctColor].
+Color _deepTone(double collection, double demand) {
+  if (demand == 0) return Colors.white54;
+  final p = collection / demand * 100;
+  return p >= 99
+      ? AppColors.live
+      : p >= 95
+          ? const Color(0xFFF2B347)
+          : const Color(0xFFFF8A80);
+}
+
+// ── Deep hero helpers ────────────────────────────────────────────────────────
+
+/// Hero title block for the MIS drill screens: large title, optional subtitle
+/// and the tappable drill path underneath. Pass as `ProHero(titleWidget: …)`.
+class MisDeepTitle extends StatelessWidget {
+  const MisDeepTitle({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.crumbs = const [],
+  });
+
+  final String title;
+  final String? subtitle;
+  final List<MisCrumb> crumbs;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 24,
+            height: 1.2,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.65,
+            color: Colors.white,
+          ),
+        ),
+        if (subtitle != null && subtitle!.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              subtitle!,
+              style: const TextStyle(
+                fontSize: 12.5,
+                height: 1.35,
+                color: Colors.white70,
+              ),
+            ),
+          ),
+        if (crumbs.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: MisDeepCrumbs(crumbs: crumbs),
+          ),
+      ],
+    );
+  }
+}
+
+/// Drill breadcrumb on a deep surface: earlier levels are underlined links,
+/// the current level is plain white.
+class MisDeepCrumbs extends StatelessWidget {
+  const MisDeepCrumbs({super.key, required this.crumbs});
+  final List<MisCrumb> crumbs;
+
+  @override
+  Widget build(BuildContext context) {
+    final children = <Widget>[];
+    for (var i = 0; i < crumbs.length; i++) {
+      final c = crumbs[i];
+      final last = i == crumbs.length - 1;
+      if (i > 0) {
+        children.add(const Icon(Icons.chevron_right_rounded,
+            size: 14, color: Colors.white38));
+      }
+      if (last || c.onTap == null) {
+        children.add(Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+          child: Text(
+            c.label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: last ? FontWeight.w600 : FontWeight.w500,
+              color: last ? Colors.white : Colors.white70,
+            ),
+          ),
+        ));
+      } else {
+        children.add(GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            HapticFeedback.selectionClick();
+            c.onTap!();
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+            child: Text(
+              c.label,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: Color(0xC2FFFFFF),
+                decoration: TextDecoration.underline,
+                decorationColor: Color(0x47FFFFFF),
+              ),
+            ),
+          ),
+        ));
+      }
+    }
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: children,
+    );
+  }
+}
+
+/// [ProHeroSegmented] over typed `(value, label)` options.
+class MisDeepSegmented<T> extends StatelessWidget {
+  const MisDeepSegmented({
+    super.key,
+    required this.options,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final List<(T, String)> options;
+  final T value;
+  final ValueChanged<T> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final i = options.indexWhere((o) => o.$1 == value);
+    return ProHeroSegmented(
+      labels: [for (final o in options) o.$2],
+      selected: i < 0 ? 0 : i,
+      onChanged: (i) => onChanged(options[i].$1),
+    );
+  }
+}
+
+/// A pill for chip rows on the deep hero (hours, quick dates). White when
+/// selected; an optional lime dot marks a live item.
+class MisDeepChip extends StatelessWidget {
+  const MisDeepChip({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.live = false,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final bool live;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        height: 34,
+        padding: const EdgeInsets.symmetric(horizontal: 13),
+        decoration: BoxDecoration(
+          color: selected ? Colors.white : Colors.white.withValues(alpha: 0.07),
+          borderRadius: BorderRadius.circular(AppRadii.pill),
+          border: Border.all(
+            color:
+                selected ? Colors.white : Colors.white.withValues(alpha: 0.14),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (live) ...[
+              Container(
+                width: 7,
+                height: 7,
+                decoration: const BoxDecoration(
+                    color: AppColors.live, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 6),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: selected ? AppColors.deep : const Color(0xCCFFFFFF),
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Gives a light picker field the floating shadow it needs when it is passed
+/// as `ProHero(overlap: …)`.
+class MisLiftedField extends StatelessWidget {
+  const MisLiftedField({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+        boxShadow: AppShadows.lifted,
+      ),
+      child: child,
+    );
+  }
+}
+
+/// Small label row on the deep hero, e.g. "Regular demand vs collection".
+class MisDeepLabel extends StatelessWidget {
+  const MisDeepLabel(this.text, {super.key, this.trailing});
+  final String text;
+  final String? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: Color(0xBDFFFFFF),
+            ),
+          ),
+        ),
+        if (trailing != null)
+          Text(
+            trailing!,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+              color: Color(0x94FFFFFF),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// The Regular headline for the deep hero: Demand / Collection / FTOD /
+/// Collection % with a progress track. Same figures as
+/// [MisRegularCollectionCard] — the REGULAR bucket only, FTOD floored at zero.
+/// [summary] may be null while it loads (values read "—").
+class MisRegularHeroStats extends StatelessWidget {
+  const MisRegularHeroStats({
+    super.key,
+    required this.summary,
+    required this.metric,
+    this.titleLabel,
+  });
+
+  final CollectionSummary? summary;
+  final MisMetric metric;
+
+  /// Title prefix. Null → 'Regular'; '' drops the prefix (Hourly).
+  final String? titleLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final has = summary != null;
+    final reg = summary?.bucket('regular');
+    final dem = reg?.demand(metric) ?? 0;
+    final col = reg?.collection(metric) ?? 0;
+    final ftod = (dem - col) < 0 ? 0.0 : dem - col;
+    final ratio = dem > 0 ? (col / dem).clamp(0.0, 1.0) : 0.0;
+    final tone = has ? _deepTone(col, dem) : Colors.white54;
+    String v(double x) => has ? _fmt(metric, x) : '—';
+
+    final prefix = titleLabel ?? 'Regular';
+    final title = prefix.isEmpty
+        ? 'Demand vs collection'
+        : '$prefix demand vs collection';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        MisDeepLabel(title,
+            trailing: metric == MisMetric.amount ? 'Amount' : 'Accounts'),
+        const SizedBox(height: 8),
+        ProHeroStats(stats: [
+          ProStat(
+            label: 'Demand',
+            value: v(dem),
+            sub: 'Regular bucket',
+            dot: const Color(0xFFB8DDE5),
+          ),
+          ProStat(
+            label: 'Collection',
+            value: v(col),
+            sub: 'Against demand',
+            dot: const Color(0xFF6CBCCB),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        ProHeroStats(stats: [
+          ProStat(
+            label: 'FTOD',
+            value: v(ftod),
+            sub: 'Demand still unpaid',
+            dot: const Color(0xFFF2B347),
+          ),
+          ProStat(
+            label: 'Collection %',
+            value: has ? misPct2(col, dem) : '—',
+            sub: 'of demand',
+            dot: tone,
+          ),
+        ]),
+        const SizedBox(height: 12),
+        ProBar(
+          value: ratio,
+          color: tone,
+          height: 5,
+          track: Colors.white.withValues(alpha: 0.12),
+        ),
+      ],
+    );
+  }
+}
 
 // ── Regular Demand vs Collection ─────────────────────────────────────────────
 
@@ -54,51 +410,40 @@ class MisRegularCollectionCard extends StatelessWidget {
     final ftod = (dem - col) < 0 ? 0.0 : dem - col;
     final tone = misPctColor(col, dem);
     final ratio = dem > 0 ? (col / dem).clamp(0.0, 1.0) : 0.0;
+    final prefix = titleLabel ?? 'Regular';
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        MisCcTitle(
-          [
-            titleLabel ?? 'Regular',
-            'Demand vs Collection',
-            metric == MisMetric.amount ? '(Amount)' : '(Accounts)',
-          ].where((s) => s.isNotEmpty).join(' '),
-        ),
-        GlassCard(
-          child: Column(
+    return GlassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ProSectionHeader(
+            title: prefix.isEmpty
+                ? 'Demand vs collection'
+                : '$prefix demand vs collection',
+            subtitle: metric == MisMetric.amount ? 'Amount' : 'Accounts',
+          ),
+          const SizedBox(height: 14),
+          Row(
             children: [
-              Row(
-                children: [
-                  Expanded(child: _stat('Demand', _fmt(metric, dem))),
-                  Expanded(
-                    child: _stat('Collection', _fmt(metric, col),
-                        color: const Color(0xFF059669)),
-                  ),
-                  Expanded(
-                    child: _stat('FTOD', _fmt(metric, ftod),
-                        color: const Color(0xFFFB923C)),
-                  ),
-                  Expanded(
-                    child: _stat('Collection %', misPct2(col, dem),
-                        color: tone),
-                  ),
-                ],
+              Expanded(child: _stat('Demand', _fmt(metric, dem))),
+              Expanded(
+                child: _stat('Collection', _fmt(metric, col),
+                    color: AppColors.success),
               ),
-              const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadii.pill),
-                child: LinearProgressIndicator(
-                  value: ratio,
-                  minHeight: 7,
-                  backgroundColor: AppColors.hairline,
-                  valueColor: AlwaysStoppedAnimation(tone),
-                ),
+              Expanded(
+                child: _stat('FTOD', _fmt(metric, ftod),
+                    color: AppColors.warning),
+              ),
+              Expanded(
+                child:
+                    _stat('Collection %', misPct2(col, dem), color: tone),
               ),
             ],
           ),
-        ),
-      ],
+          const SizedBox(height: 12),
+          ProBar(value: ratio, color: tone, height: 6),
+        ],
+      ),
     );
   }
 
@@ -113,7 +458,7 @@ class MisRegularCollectionCard extends StatelessWidget {
             value,
             style: TextStyle(
               fontSize: 16,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
               color: color ?? AppColors.ink,
               letterSpacing: -0.3,
               fontFeatures: const [FontFeature.tabularFigures()],
@@ -124,10 +469,28 @@ class MisRegularCollectionCard extends StatelessWidget {
         Text(label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 10.5, color: AppColors.muted)),
+            style: const TextStyle(fontSize: 11.5, color: AppColors.muted)),
       ],
     );
   }
+}
+
+// ── Shared section chrome ────────────────────────────────────────────────────
+
+/// Grey explanatory line under a table.
+class _Foot extends StatelessWidget {
+  const _Foot(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(2, 8, 2, 0),
+        child: Text(
+          text,
+          style: const TextStyle(
+              fontSize: 12, height: 1.45, color: AppColors.muted),
+        ),
+      );
 }
 
 // ── DPD bucket matrix ────────────────────────────────────────────────────────
@@ -199,24 +562,31 @@ class MisBucketMatrix extends StatelessWidget {
     ));
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        MisCcTitle('DPD Buckets ${isAmount ? "(Amount)" : "(Accounts)"}'),
-        if (isAmount && !summary.hasAmounts)
-          const MisWarnBanner(
+        ProSectionHeader(
+          title: 'DPD buckets',
+          subtitle: isAmount ? 'Amount' : 'Accounts',
+        ),
+        const SizedBox(height: 10),
+        if (isAmount && !summary.hasAmounts) ...[
+          const ProNote(
             'No rupee amounts are stored for this date — every demand_amt / '
             'collection_amt is zero, so the figures below are blank for that '
             'reason, not because nothing was collected. The Daily Collection '
             "Report's OverAll sheet carries Demand/Collection as account counts "
             'only. Use Accounts for this date, or re-sync it from a report that '
             'includes the amount columns.',
+            tone: ProNoteTone.warn,
           ),
+          const SizedBox(height: 12),
+        ],
         MisMatrixTable(
           stubHeader: 'Bucket',
           headers: const ['Demand', 'Collection', 'Pending', 'Collection %'],
           rows: rows,
         ),
-        MisFootNote(
+        _Foot(
           isAmount
               ? 'NPA row shows recovered rupees only — the schema has no NPA '
                   'demand amount. Activation ${misRupees(act?.amount ?? 0)} · '
@@ -250,15 +620,18 @@ class MisBucketMatrix extends StatelessWidget {
       kind: accent ? MisRowKind.accent : MisRowKind.normal,
       lead: MisLead(label, note: note, chip: MisPalette.risk(key)),
       cells: [
-        demand == null ? const MisCell.dash(bgColor: Color(0xFFFCE4D6)) : MisCell(_fmt(metric, demand), bgColor: const Color(0xFFFCE4D6)),
+        demand == null
+            ? const MisCell.dash()
+            : MisCell(_fmt(metric, demand)),
         MisCell(_fmt(metric, collection),
-            color: const Color(0xFF059669), weight: FontWeight.w700, bgColor: const Color(0xFFE2EFDA)),
-        pending == null ? const MisCell.dash(bgColor: Color(0xFFFCE4D6)) : MisCell(_fmt(metric, pending), bgColor: const Color(0xFFFCE4D6)),
+            color: AppColors.success, weight: FontWeight.w600),
+        pending == null
+            ? const MisCell.dash()
+            : MisCell(_fmt(metric, pending)),
         MisCell(
           hasPct ? misPct2(collection, demand) : '—',
           color: tone,
-          bgColor: const Color(0xFFFFFFCC),
-          weight: FontWeight.w800,
+          weight: FontWeight.w600,
           track: hasPct ? (collection / demand).clamp(0.0, 1.0) : null,
           trackColor: tone,
         ),
@@ -294,9 +667,9 @@ const Map<String, String> _channelLabel = {
 };
 
 const List<(String, String, Color)> _categoryMeta = [
-  ('cash', 'Cash', Color(0xFF059669)),
-  ('digital', 'Digital', Color(0xFF6366F1)),
-  ('autopay', 'Autopay', Color(0xFFF59E0B)),
+  ('cash', 'Cash', AppColors.success),
+  ('digital', 'Digital', AppColors.info),
+  ('autopay', 'Autopay', AppColors.warning),
 ];
 
 /// Share as a percentage. 1 dp normally; a small-but-real share gets a second
@@ -367,7 +740,7 @@ class MisCollectionModeTable extends StatelessWidget {
       rows.add(
         MisMatrixRow(
           kind: MisRowKind.category,
-          bgColor: c.color.withValues(alpha: 0.20),
+          bgColor: c.color.withValues(alpha: 0.07),
           lead: MisLead(c.label, chip: c.color),
           cells: [
             MisCell(misNum(cAcc)),
@@ -375,7 +748,7 @@ class MisCollectionModeTable extends StatelessWidget {
             MisCell(
               _share(cAmt, totalAmt),
               color: c.color,
-              weight: FontWeight.w800,
+              weight: FontWeight.w600,
               track: cAmt > 0 ? (cAmt / totalAmt).clamp(0.0, 1.0) : 0,
               trackColor: c.color,
             ),
@@ -386,7 +759,6 @@ class MisCollectionModeTable extends StatelessWidget {
       for (final m in c.modes) {
         rows.add(MisMatrixRow(
           kind: MisRowKind.child,
-          bgColor: c.color.withValues(alpha: 0.08),
           lead: MisLead(_channelLabel[m.channel] ?? m.channel, indent: true),
           cells: [
             MisCell(misNum(m.accounts)),
@@ -414,13 +786,17 @@ class MisCollectionModeTable extends StatelessWidget {
     ));
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const MisCcTitle('Mode of Collection'),
+        const ProSectionHeader(
+          title: 'Mode of collection',
+          subtitle: 'Share of the day’s collected amount',
+        ),
+        const SizedBox(height: 10),
         // The cash-vs-digital split is the headline question this panel answers,
         // and reading it off three table rows is slower than seeing it. One
         // segmented bar carries the whole answer; the table below is the detail.
-        _splitBar(cats, catAmt, totalAmt),
+        GlassCard(child: _splitBar(cats, catAmt, totalAmt)),
         const SizedBox(height: 12),
         MisMatrixTable(
           stubHeader: 'Mode',
@@ -428,7 +804,7 @@ class MisCollectionModeTable extends StatelessWidget {
           rows: rows,
           stubWidth: 128,
         ),
-        MisFootNote(
+        _Foot(
           'Share is by amount: a category is shown against the day’s total, '
           'a channel against its own category — so Digital’s channels add to '
           '100% of Digital, not of the day. Accounts are distinct loan accounts '
@@ -447,74 +823,55 @@ class MisCollectionModeTable extends StatelessWidget {
     double totalAmt,
   ) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(AppRadii.pill),
-          child: SizedBox(
-            height: 20,
-            child: Row(
-              children: [
-                for (final c in cats)
-                  Expanded(
-                    flex: totalAmt > 0
-                        ? (catAmt(c.modes) / totalAmt * 1000).round().clamp(1, 1000)
-                        : 1,
-                    child: Container(
-                      color: c.color,
-                      alignment: Alignment.center,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          _share(catAmt(c.modes), totalAmt),
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 14,
-          runSpacing: 6,
-          children: [
+        ProStackBar(
+          height: 10,
+          parts: [
             for (final c in cats)
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 9,
-                    height: 9,
-                    decoration:
-                        BoxDecoration(color: c.color, shape: BoxShape.circle),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(c.label,
-                      style: const TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.inkSoft)),
-                  const SizedBox(width: 6),
-                  Text(_share(catAmt(c.modes), totalAmt),
-                      style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w800,
-                          color: c.color)),
-                  const SizedBox(width: 4),
-                  Text(misRupees(catAmt(c.modes)),
-                      style: const TextStyle(
-                          fontSize: 10.5, color: AppColors.muted)),
-                ],
-              ),
+              MapEntry(totalAmt > 0 ? catAmt(c.modes) : 1.0, c.color),
           ],
         ),
+        const SizedBox(height: 12),
+        for (var i = 0; i < cats.length; i++) ...[
+          if (i > 0) const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                    color: cats[i].color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(cats[i].label,
+                    style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.inkSoft)),
+              ),
+              Text(misRupees(catAmt(cats[i].modes)),
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      color: AppColors.muted,
+                      fontFeatures: [FontFeature.tabularFigures()])),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 54,
+                child: Text(
+                  _share(catAmt(cats[i].modes), totalAmt),
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: cats[i].color,
+                      fontFeatures: const [FontFeature.tabularFigures()]),
+                ),
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }
@@ -571,10 +928,10 @@ class MisCollectionUnitTable extends StatelessWidget {
             kind: MisRowKind.total,
             lead: const MisLead('Total'),
             cells: [
-              MisCell(_fmt(metric, totDem), bgColor: const Color(0xFFFCE4D6)),
-              MisCell(_fmt(metric, totCol), bgColor: const Color(0xFFE2EFDA)),
-              MisCell(_fmt(metric, _short(totDem, totCol)), bgColor: const Color(0xFFFCE4D6)),
-              MisCell(misPct2(totCol, totDem), bgColor: const Color(0xFFFFFFCC)),
+              MisCell(_fmt(metric, totDem)),
+              MisCell(_fmt(metric, totCol)),
+              MisCell(_fmt(metric, _short(totDem, totCol))),
+              MisCell(misPct2(totCol, totDem)),
             ],
           ),
       ],
@@ -588,16 +945,15 @@ class MisCollectionUnitTable extends StatelessWidget {
       lead: MisLead(unitOf(r), note: subOf?.call(r)),
       onTap: onRowTap == null ? null : () => onRowTap!(r),
       cells: [
-        MisCell(_fmt(metric, d), bgColor: const Color(0xFFFCE4D6)),
+        MisCell(_fmt(metric, d)),
         MisCell(_fmt(metric, c),
-            color: const Color(0xFF059669), weight: FontWeight.w700, bgColor: const Color(0xFFE2EFDA)),
-        MisCell(_fmt(metric, _short(d, c)), bgColor: const Color(0xFFFCE4D6)),
+            color: AppColors.success, weight: FontWeight.w600),
+        MisCell(_fmt(metric, _short(d, c))),
         MisCell(
           misPct2(c, d),
-          weight: FontWeight.w700,
-          bgColor: const Color(0xFFFFFFCC),
+          weight: FontWeight.w600,
           track: d > 0 ? (c / d).clamp(0.0, 1.0) : 0,
-          trackColor: const Color(0xFF059669),
+          trackColor: AppColors.primary,
         ),
       ],
     );
@@ -606,38 +962,20 @@ class MisCollectionUnitTable extends StatelessWidget {
 
 // ── Scope chip ───────────────────────────────────────────────────────────────
 
-/// "Regional Manager view" lock chip. Every /collection/* query is auto-scoped
-/// to the signed-in user's tier, so a region-tier user sees ~1/5 of the
-/// all-India figures — which looks like wrong data next to an unscoped screen.
-/// Say so plainly instead of leaving the reader to guess.
+/// "Regional Manager view" lock tag (for the deep hero). Every /collection/*
+/// query is auto-scoped to the signed-in user's tier, so a region-tier user
+/// sees ~1/5 of the all-India figures — which looks like wrong data next to an
+/// unscoped screen. Say so plainly instead of leaving the reader to guess.
 class MisScopeChip extends StatelessWidget {
   const MisScopeChip({super.key, required this.tier});
   final String tier;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-      decoration: BoxDecoration(
-        color: AppColors.warning.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(AppRadii.pill),
-        border: Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.lock_rounded, size: 11, color: AppColors.warning),
-          const SizedBox(width: 4),
-          Text(
-            '${misTierLabel(tier)} view',
-            style: const TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-              color: AppColors.warning,
-            ),
-          ),
-        ],
-      ),
+    return ProHeroTag(
+      '${misTierLabel(tier)} view',
+      tone: ProTagTone.warn,
+      icon: Icons.lock_rounded,
     );
   }
 }
