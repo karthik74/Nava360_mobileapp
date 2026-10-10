@@ -277,6 +277,7 @@ class TrackingEngine {
   int _droppedCount = 0;
   int _flushChunk = _flushChunkMax;
   int? _battery;
+  bool? _charging;
   final Stopwatch _clock = Stopwatch();
   final Battery _batteryPlugin = Battery();
   final List<LocationPing> _buffer = [];
@@ -627,6 +628,7 @@ class TrackingEngine {
       trackingState: tag,
       appVersion: appVersion,
       elapsedRealtimeMs: _clock.elapsedMilliseconds,
+      charging: _charging,
     );
     _buffer.add(ping);
     // Durable first: an offline ping is never lost if the OS kills the process
@@ -794,6 +796,8 @@ class TrackingEngine {
     _lastBatteryReadAt = DateTime.now();
     try {
       _battery = await _batteryPlugin.batteryLevel;
+      final state = await _batteryPlugin.batteryState;
+      _charging = state == BatteryState.charging || state == BatteryState.full;
     } catch (_) {
       // Plugin unavailable on this platform — battery stays unknown.
     }
@@ -835,6 +839,7 @@ class TrackingEngine {
           serviceRunning: tracking && serviceHosted,
           appVersion: appVersion,
           poorFixesDiscarded: _poorFixes,
+          charging: _charging,
         ),
       );
       _statusDirty = false;

@@ -18,6 +18,7 @@ class HeartbeatDiagnostics {
     this.serviceRunning,
     this.appVersion,
     this.poorFixesDiscarded,
+    this.charging,
   });
 
   final DateTime? fixAt;
@@ -30,6 +31,7 @@ class HeartbeatDiagnostics {
   final bool? serviceRunning;
   final String? appVersion;
   final int? poorFixesDiscarded;
+  final bool? charging;
 
   Map<String, dynamic> toJson() => {
         if (fixAt != null) 'fixAt': fixAt!.toUtc().toIso8601String(),
@@ -45,6 +47,7 @@ class HeartbeatDiagnostics {
         if (serviceRunning != null) 'serviceRunning': serviceRunning,
         if (appVersion != null) 'appVersion': appVersion,
         if (poorFixesDiscarded != null) 'poorFixesDiscarded': poorFixesDiscarded,
+        if (charging != null) 'charging': charging,
       };
 }
 

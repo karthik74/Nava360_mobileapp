@@ -26,6 +26,8 @@ class LocationPing {
   /// Process-monotonic milliseconds at capture (a Stopwatch started with the
   /// tracking session) — unaffected by wall-clock changes.
   final int? elapsedRealtimeMs;
+  /// The phone was charging at capture (battery rises then are not tracking cost).
+  final bool? charging;
 
   LocationPing({
     required this.recordedAt,
@@ -42,6 +44,7 @@ class LocationPing {
     this.trackingState,
     this.appVersion,
     this.elapsedRealtimeMs,
+    this.charging,
   });
 
   Map<String, dynamic> toJson() => {
@@ -59,6 +62,7 @@ class LocationPing {
         if (trackingState != null) 'trackingState': trackingState,
         if (appVersion != null) 'appVersion': appVersion,
         if (elapsedRealtimeMs != null) 'elapsedRealtimeMs': elapsedRealtimeMs,
+        if (charging != null) 'charging': charging,
       };
 
   /// Rebuilds a ping from its persisted [toJson] form (offline queue).
@@ -78,6 +82,7 @@ class LocationPing {
         trackingState: json['trackingState'] as String?,
         appVersion: json['appVersion'] as String?,
         elapsedRealtimeMs: (json['elapsedRealtimeMs'] as num?)?.toInt(),
+        charging: json['charging'] as bool?,
       );
 }
 
