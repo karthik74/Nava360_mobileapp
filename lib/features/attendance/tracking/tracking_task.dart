@@ -20,6 +20,7 @@ abstract final class TrackingKeys {
   static const startedAt = 'tracking.startedAt';
   static const config = 'tracking.config';
   static const productName = 'tracking.productName';
+  static const appVersion = 'tracking.appVersion';
 
   /// Android foreground-service id (any stable non-zero int).
   static const serviceId = 7100;
@@ -71,7 +72,11 @@ void trackingServiceStart() {
 /// the launcher killing the UI process, or a reboot (the plugin re-starts the
 /// service on BOOT_COMPLETED) all leave the engine running or bring it back.
 /// The plugin registers the app's plugins in the service engine, so geolocator,
-/// secure storage (for the token) and the file queue all work here.
+/// secure storage (for the token), battery and the file queue all work here.
+///
+/// What it cannot survive, and does not claim to: a force-stop from app
+/// settings, a revoked location permission, or location switched off. Those
+/// end up on the server as status, so the resulting gap is explained there.
 class TrackingTaskHandler extends TaskHandler {
   TrackingEngine? _engine;
   String _productName = 'Nava360';
@@ -91,6 +96,8 @@ class TrackingTaskHandler extends TaskHandler {
             _productName;
     final deviceId =
         await FlutterForegroundTask.getData<String>(key: TrackingKeys.deviceId);
+    final appVersion =
+        await FlutterForegroundTask.getData<String>(key: TrackingKeys.appVersion);
     final startedRaw =
         await FlutterForegroundTask.getData<String>(key: TrackingKeys.startedAt);
     final startedAt = startedRaw == null ? null : DateTime.tryParse(startedRaw)?.toLocal();
@@ -110,6 +117,8 @@ class TrackingTaskHandler extends TaskHandler {
       repo: LocationRepository(ApiClient.instance),
       store: LocationPingStore.instance,
       deviceId: deviceId,
+      appVersion: appVersion,
+      serviceHosted: true,
       config: cfg,
       onSnapshot: _publish,
       onSessionExpired: _onSessionExpired,
@@ -167,13 +176,15 @@ class TrackingTaskHandler extends TaskHandler {
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
     // Reached on an orderly stop (already handled) or when the system tears the
-    // service down. Captured pings are already on disk; try a quick upload.
+    // service down. Captured pings are already on disk; try a quick upload but
+    // do NOT tell the server tracking stopped — auto-restart brings the session
+    // back, and a false "not tracking" would mislabel the gap.
     final engine = _engine;
     _engine = null;
     if (engine != null && engine.active) {
       try {
         await engine
-            .stop(flush: true, flushTimeout: const Duration(seconds: 5))
+            .stop(flush: true, announce: false, flushTimeout: const Duration(seconds: 5))
             .timeout(const Duration(seconds: 8));
       } catch (_) {}
     }
@@ -193,7 +204,7 @@ class TrackingTaskHandler extends TaskHandler {
     _engine = null;
     try {
       if (engine != null) {
-        await engine.stop(flush: flush).timeout(const Duration(seconds: 20));
+        await engine.stop(flush: flush, announce: true).timeout(const Duration(seconds: 20));
       }
     } catch (_) {
     } finally {
@@ -233,7 +244,9 @@ class TrackingTaskHandler extends TaskHandler {
         ? 'Location is OFF — turn it on to keep tracking'
         : s.authExpired
             ? 'Open the app to sign in again — points are saved on this phone'
-            : 'Recording your route while checked in · $time$queued';
+            : s.gpsWeak
+                ? 'GPS signal weak — move to open sky · $time$queued'
+                : 'Recording your route while checked in · $time$queued';
     unawaited(FlutterForegroundTask.updateService(
       notificationTitle: '$_productName attendance',
       notificationText: status,

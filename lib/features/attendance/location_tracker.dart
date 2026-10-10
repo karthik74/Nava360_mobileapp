@@ -8,6 +8,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/api_client.dart';
@@ -132,6 +133,16 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
   Completer<void>? _stopAck;
   bool _serviceInitialised = false;
   TrackingConfig _cfg = TrackingConfig.fallback;
+  String? _appVersion;
+
+  Future<String?> _resolveAppVersion() async {
+    if (_appVersion != null) return _appVersion;
+    try {
+      final info = await PackageInfo.fromPlatform();
+      _appVersion = '${info.version}+${info.buildNumber}';
+    } catch (_) {}
+    return _appVersion;
+  }
 
   // ── Public API ───────────────────────────────────────────────────────────
 
@@ -153,6 +164,7 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
 
     // Best-effort server cadence, bounded so a slow network can't delay check-in.
     await _loadConfig().timeout(const Duration(seconds: 4), onTimeout: () {});
+    await _resolveAppVersion();
 
     state = state.copyWith(
       active: true,
@@ -242,8 +254,9 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
         for (var i = 0; i < pings.length; i += 200) {
           final slice = pings.sublist(i, (i + 200).clamp(0, pings.length));
           try {
-            await _repo.uploadBatch(LocationPingBatch(employeeId: empId, pings: slice));
-            await _store.removeConfirmed(empId, slice);
+            final r = await _repo.uploadBatchAcked(LocationPingBatch(employeeId: empId, pings: slice));
+            await _store.removeByIds(empId, {...r.acceptedClientIds, ...r.duplicateClientIds, ...r.rejectedRefs.where((x) => !x.startsWith('#'))},
+                withoutId: slice.where((p) => p.clientPingId == null).length);
           } on ApiException catch (e) {
             // Not ours to upload with this login (400/403) or offline: leave
             // them for the owner's next login; stale ones age out above.
@@ -354,6 +367,9 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
           key: TrackingKeys.productName, value: Branding.current.productName);
       await FlutterForegroundTask.saveData(
           key: TrackingKeys.config, value: jsonEncode(_cfg.toJson()));
+      if (_appVersion != null) {
+        await FlutterForegroundTask.saveData(key: TrackingKeys.appVersion, value: _appVersion!);
+      }
       if (deviceId != null) {
         await FlutterForegroundTask.saveData(key: TrackingKeys.deviceId, value: deviceId);
       } else {
@@ -458,6 +474,7 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
       repo: _repo,
       store: _store,
       deviceId: deviceId,
+      appVersion: _appVersion,
       config: _cfg,
       onSnapshot: (s) {
         if (_localEngine != null && s.employeeId == state.employeeId) {
@@ -499,8 +516,9 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
       final pings = await _store.load(employeeId);
       for (var i = 0; i < pings.length; i += 200) {
         final slice = pings.sublist(i, (i + 200).clamp(0, pings.length));
-        await _repo.uploadBatch(LocationPingBatch(employeeId: employeeId, pings: slice));
-        await _store.removeConfirmed(employeeId, slice);
+        final r = await _repo.uploadBatchAcked(LocationPingBatch(employeeId: employeeId, pings: slice));
+        await _store.removeByIds(employeeId, {...r.acceptedClientIds, ...r.duplicateClientIds, ...r.rejectedRefs.where((x) => !x.startsWith('#'))},
+            withoutId: slice.where((p) => p.clientPingId == null).length);
       }
     } catch (_) {}
   }
@@ -514,6 +532,11 @@ class LocationTracker extends StateNotifier<LocationTrackerState>
         permissionGranted: perm == LocationPermission.always ||
             perm == LocationPermission.whileInUse,
         tracking: false,
+        diagnostics: HeartbeatDiagnostics(
+          backgroundLocationGranted: perm == LocationPermission.always,
+          appVersion: _appVersion,
+          serviceRunning: false,
+        ),
       );
     } catch (_) {}
   }

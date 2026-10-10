@@ -2861,14 +2861,21 @@ bool _isOverdue(Task t) {
 ///    the two error radii cannot explain). One stray fix hundreds of km away
 ///    used to count as travel there and back.
 /// The thresholds mirror the backend defaults (Settings → Field Visits).
+/// VERIFIED km only — the backend's fold rules (EmployeeDayStatsService):
+/// the accuracy/speed gate, a cumulative accuracy-aware jitter floor, and a hop
+/// of 10 minutes or more is a tracking gap whose straight line is NOT counted.
 double? _routeDistanceKm(List<TrackPing> pings) {
   if (pings.length < 2) return null;
   const minSegmentMeters = 15.0;
+  const maxFloorMeters = 100.0;
   const maxAccuracyMeters = 250.0;
   const maxKmph = 150.0;
+  const gapSeconds = 600;
   var meters = 0.0;
   TrackPing? prev;
-  for (final p in pings) {
+  TrackPing? anchor;
+  final sorted = [...pings]..sort((a, b) => a.recordedAt.compareTo(b.recordedAt));
+  for (final p in sorted) {
     if (p.latitude == 0.0 && p.longitude == 0.0) continue;
     if (p.latitude.abs() > 90 || p.longitude.abs() > 180) continue;
     final acc = p.accuracyMeters ?? 0.0;
@@ -2884,7 +2891,22 @@ double? _routeDistanceKm(List<TrackPing> pings) {
       final unexplained = m - (prev.accuracyMeters ?? 0.0) - acc;
       final kmph = dt > 0 && unexplained > 0 ? (unexplained / dt) * 3.6 : 0.0;
       if (kmph > maxKmph || (dt <= 0 && unexplained > 0)) continue;
-      if (m >= minSegmentMeters) meters += m;
+      if (dt >= gapSeconds) {
+        anchor = p; // a gap: the chord is an estimate, not verified distance
+      } else {
+        final a = anchor ?? prev;
+        final fromAnchor = _haversineMeters(a.latitude, a.longitude, p.latitude, p.longitude);
+        final better = (a.accuracyMeters == null || acc == 0)
+            ? minSegmentMeters
+            : (a.accuracyMeters! < acc ? a.accuracyMeters! : acc);
+        final floor = better.clamp(minSegmentMeters, maxFloorMeters);
+        if (fromAnchor >= floor) {
+          meters += fromAnchor;
+          anchor = p;
+        }
+      }
+    } else {
+      anchor = p;
     }
     prev = p;
   }

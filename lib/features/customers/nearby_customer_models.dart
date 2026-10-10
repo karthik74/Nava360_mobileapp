@@ -223,11 +223,11 @@ class FieldVisitConfig {
     this.radiusOptions = const [1000, 2000, 5000, 10000, 20000],
     this.maxResults = 300,
     this.cacheMinutes = 30,
-    this.trackIntervalMovingSeconds = 60,
+    this.trackIntervalMovingSeconds = 5,
     this.trackIntervalStationarySeconds = 300,
     this.trackIntervalNearCustomerSeconds = 30,
     this.trackNearCustomerRadiusMeters = 200,
-    this.trackMinDisplacementMeters = 25,
+    this.trackMinDisplacementMeters = 10,
     this.visitEntryRadiusMeters = 50,
     this.visitMinDwellSeconds = 120,
   });

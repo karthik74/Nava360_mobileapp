@@ -1,7 +1,9 @@
 import 'dart:async';
-import 'dart:math' as math;
+import 'dart:io';
 
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../../../core/api_client.dart';
@@ -9,17 +11,18 @@ import '../../customers/nearby_customer_models.dart';
 import '../location_ping_models.dart';
 import '../location_ping_store.dart';
 import '../location_repository.dart';
+import 'capture_policy.dart';
 
 /// Server-tunable capture cadence. Mirrors the tracking fields of
 /// `/api/customers/nearby/config`; every value has a compiled-in fallback so
 /// tracking never depends on a reachable server.
 class TrackingConfig {
   const TrackingConfig({
-    this.movingSeconds = 60,
+    this.movingSeconds = 5,
     this.stationarySeconds = 300,
-    this.nearCustomerSeconds = 30,
+    this.nearCustomerSeconds = 5,
     this.nearCustomerRadiusMeters = 200,
-    this.minDisplacementMeters = 25,
+    this.minDisplacementMeters = 10,
   });
 
   final int movingSeconds;
@@ -53,11 +56,11 @@ class TrackingConfig {
     }
 
     return TrackingConfig(
-      movingSeconds: pick('movingSeconds', 60),
+      movingSeconds: pick('movingSeconds', 5),
       stationarySeconds: pick('stationarySeconds', 300),
-      nearCustomerSeconds: pick('nearCustomerSeconds', 30),
+      nearCustomerSeconds: pick('nearCustomerSeconds', 5),
       nearCustomerRadiusMeters: pick('nearCustomerRadiusMeters', 200),
-      minDisplacementMeters: pick('minDisplacementMeters', 25),
+      minDisplacementMeters: pick('minDisplacementMeters', 10),
     );
   }
 
@@ -95,6 +98,10 @@ class TrackingSnapshot {
     this.lastError,
     this.locationEnabled = true,
     this.authExpired = false,
+    this.poorFixes = 0,
+    this.droppedCount = 0,
+    this.trackingState,
+    this.gpsWeak = false,
   });
 
   final bool active;
@@ -110,6 +117,14 @@ class TrackingSnapshot {
   /// Uploads are failing with 401: the stored token is no longer valid. Pings
   /// keep queueing; they upload after the next login.
   final bool authExpired;
+  /// Fixes discarded this session because the OS reported them wider than 500 m.
+  final int poorFixes;
+  /// Samples the server refused outright (can never be stored) and were dropped.
+  final int droppedCount;
+  /// MOVING / STATIONARY / NEAR_CUSTOMER of the last capture.
+  final String? trackingState;
+  /// The OS is delivering only unusable fixes right now (indoors, no sky view).
+  final bool gpsWeak;
 
   Map<String, dynamic> toJson() => {
         'active': active,
@@ -122,6 +137,10 @@ class TrackingSnapshot {
         'lastError': lastError,
         'locationEnabled': locationEnabled,
         'authExpired': authExpired,
+        'poorFixes': poorFixes,
+        'droppedCount': droppedCount,
+        'trackingState': trackingState,
+        'gpsWeak': gpsWeak,
       };
 
   static TrackingSnapshot fromJson(Map<String, dynamic> j) {
@@ -141,6 +160,10 @@ class TrackingSnapshot {
       lastError: j['lastError'] as String?,
       locationEnabled: j['locationEnabled'] != false,
       authExpired: j['authExpired'] == true,
+      poorFixes: (j['poorFixes'] as num?)?.toInt() ?? 0,
+      droppedCount: (j['droppedCount'] as num?)?.toInt() ?? 0,
+      trackingState: j['trackingState'] as String?,
+      gpsWeak: j['gpsWeak'] == true,
     );
   }
 }
@@ -152,21 +175,29 @@ class TrackingSnapshot {
 /// owns the clock — it calls [tick] every ~15 s — and the engine does
 /// everything else:
 ///
-///  * subscribes to the OS position stream (and the location on/off stream),
-///  * decides which fixes become route pings (time- and distance-based, faster
-///    while moving or near a customer, never more than one per [_minCaptureGap]),
-///  * persists each ping to the durable queue before anything else,
-///  * uploads in chunks with exponential back-off, dropping confirmed pings
-///    from the queue by id,
-///  * sends the location on/off heartbeat,
+///  * subscribes to the OS position stream at 5 s while moving and 30 s once
+///    the phone has been still for a while (adaptive sampling),
+///  * decides which fixes become route pings ([CapturePolicy]: time- and
+///    distance-based, faster while moving or near a customer),
+///  * persists each ping to the durable queue BEFORE it is counted as captured,
+///  * uploads in chunks with exponential back-off and per-sample server
+///    acknowledgements, forgetting exactly what the server holds,
+///  * sends the location on/off heartbeat with device diagnostics (pending
+///    count, battery, background permission, battery-optimisation exemption),
 ///  * self-heals: a silent stream is re-subscribed, a location toggle is
 ///    reacted to immediately, and the server cadence is re-fetched periodically.
+///
+/// What it cannot do, and does not pretend to: keep recording after the user
+/// force-stops the app, revokes the location permission, or turns location
+/// off. Those are reported to the server as status, so the gap is explained.
 class TrackingEngine {
   TrackingEngine({
     required this.employeeId,
     required this.repo,
     required this.store,
     this.deviceId,
+    this.appVersion,
+    this.serviceHosted = false,
     TrackingConfig? config,
     this.onSnapshot,
     this.onSessionExpired,
@@ -176,40 +207,42 @@ class TrackingEngine {
   final LocationRepository repo;
   final LocationPingStore store;
   final String? deviceId;
+  final String? appVersion;
+  /// True when the engine runs inside the Android foreground service.
+  final bool serviceHosted;
   final void Function(TrackingSnapshot snapshot)? onSnapshot;
   /// Fired once when a session has outlived [maxSessionLength] — the employee
   /// forgot to check out. The host should stop the engine and the service.
   final void Function()? onSessionExpired;
 
   // ── Tunables (compiled-in; cadence itself comes from [TrackingConfig]) ──
-  /// Below this speed the device is treated as stationary unless displacement
-  /// says otherwise.
-  static const double _movingSpeedMps = 1.5;
-  /// Never two route pings closer together than this.
-  static const Duration _minCaptureGap = Duration(seconds: 15);
-  /// Fixes worse than this are not worth a row — the server would reject them.
-  static const double _maxCaptureAccuracyMeters = 500;
   /// Upload when the buffer reaches this many pings …
-  static const int _flushAtCount = 5;
+  static const int _flushAtCount = 20;
   /// … or this long after the last successful upload, whichever comes first.
   static const Duration _flushInterval = Duration(seconds: 60);
   /// Largest batch per request — a long offline stretch is drained in slices.
-  static const int _flushChunk = 200;
+  static const int _flushChunkMax = 200;
   static const Duration _backoffMin = Duration(seconds: 30);
   static const Duration _backoffMax = Duration(minutes: 10);
   /// A 401 is not a transient network error; wait longer before retrying.
   static const Duration _authBackoff = Duration(minutes: 10);
   static const Duration _heartbeatInterval = Duration(minutes: 3);
   static const Duration _heartbeatMinGap = Duration(seconds: 90);
-  /// No fix for this long while location is on = the stream has died; rebuild it.
-  static const Duration _streamSilenceLimit = Duration(minutes: 3);
+  /// No RAW fix (usable or not) for this long while location is on = the
+  /// stream has died; rebuild it.
+  static const Duration _streamSilenceLimit = Duration(minutes: 2);
   static const Duration _configRefreshInterval = Duration(minutes: 30);
-  /// OS stream cadence. Fine-grained on purpose: the engine decides what to
-  /// keep, and frequent fixes are what make displacement-triggered capture
-  /// follow a road instead of cutting corners.
-  static const Duration _streamInterval = Duration(seconds: 20);
+  /// OS stream cadence while moving. Fine-grained on purpose: 5 s at 40 km/h is
+  /// a fix every 55 m, which keeps the recorded line on the road instead of
+  /// cutting corners (a 60 s cadence lost 20–35 % of a winding road's length).
+  static const Duration _streamIntervalMoving = Duration(seconds: 5);
+  /// OS stream cadence once the phone has been still for [_stationaryAfter].
+  static const Duration _streamIntervalStationary = Duration(seconds: 30);
+  static const Duration _stationaryAfter = Duration(minutes: 2);
   /// A session this old without a check-out is a forgotten one.
   static const Duration maxSessionLength = Duration(hours: 20);
+  /// Only unusable fixes for this long = "GPS weak" on the notification.
+  static const Duration _weakAfter = Duration(seconds: 90);
 
   // ── Runtime ──
   TrackingConfig _cfg;
@@ -218,37 +251,64 @@ class TrackingEngine {
   StreamSubscription<ServiceStatus>? _serviceSub;
   Position? _lastPosition;
   Position? _lastCapturedPosition;
-  DateTime? _lastFixAt;
+  DateTime? _lastRawFixAt;
+  DateTime? _lastUsableFixAt;
   DateTime? _lastCaptureAt;
+  DateTime? _lastMovementAt;
   DateTime? _lastFlushedAt;
   DateTime? _lastFlushAttemptAt;
   DateTime? _lastHeartbeatAt;
   DateTime? _lastConfigRefreshAt;
+  DateTime? _lastBatteryReadAt;
   DateTime? _startedAt;
   Duration _backoff = _backoffMin;
   bool _authExpired = false;
   bool _locationEnabled = true;
   bool _active = false;
   bool _expiredFired = false;
+  bool _streamFast = true;
+  bool _firstCapture = true;
+  bool _statusDirty = false;
   String? _lastError;
+  String? _trackingState;
   int _sentCount = 0;
   int _pingSeq = 0;
+  int _poorFixes = 0;
+  int _droppedCount = 0;
+  int _flushChunk = _flushChunkMax;
+  int? _battery;
+  final Stopwatch _clock = Stopwatch();
+  final Battery _batteryPlugin = Battery();
   final List<LocationPing> _buffer = [];
   Future<void>? _flushInFlight;
   Future<void>? _resubscribeInFlight;
 
   bool get active => _active;
+  bool get _gpsWeak {
+    final raw = _lastRawFixAt;
+    final usable = _lastUsableFixAt;
+    if (raw == null) return false;
+    if (usable == null) {
+      return DateTime.now().difference(raw) < _streamSilenceLimit && _poorFixes > 0;
+    }
+    return raw.difference(usable) > _weakAfter;
+  }
+
   TrackingSnapshot get snapshot => TrackingSnapshot(
         active: _active,
         employeeId: employeeId,
         lastCapturedAt: _lastCaptureAt,
         lastFlushedAt: _lastFlushedAt,
-        lastFixAt: _lastFixAt,
+        lastFixAt: _lastRawFixAt,
         bufferedCount: _buffer.length,
         sentCount: _sentCount,
         lastError: _lastError,
         locationEnabled: _locationEnabled,
         authExpired: _authExpired,
+        poorFixes: _poorFixes,
+        droppedCount: _droppedCount,
+        trackingState: _trackingState,
+        gpsWeak: _gpsWeak,
       );
 
   /// Starts capturing. [sessionStartedAt] is the check-in time persisted by the
@@ -262,8 +322,10 @@ class TrackingEngine {
   }) async {
     if (_active) return;
     _active = true;
+    _clock.start();
     _startedAt = sessionStartedAt ?? DateTime.now();
     _androidForegroundNotification = androidForegroundNotification;
+    _firstCapture = true;
 
     // Whatever an earlier process left in the durable queue goes first.
     try {
@@ -275,12 +337,14 @@ class TrackingEngine {
       // A read failure must not block tracking.
     }
 
+    _streamFast = true;
     await _subscribe();
     _serviceSub = Geolocator.getServiceStatusStream().listen(
       _onServiceStatus,
       onError: (_) {},
     );
 
+    unawaited(_readBattery());
     _lastHeartbeatAt = DateTime.now();
     unawaited(_sendHeartbeat(tracking: true));
     _emit();
@@ -295,9 +359,12 @@ class TrackingEngine {
   ForegroundNotificationConfig? _androidForegroundNotification;
 
   /// Stops capturing. With [flush] the remaining buffer is uploaded (bounded by
-  /// [flushTimeout]) and the server is told tracking is off.
+  /// [flushTimeout]). With [announce] the server is told tracking is off —
+  /// false when the OS is tearing the service down and auto-restart will bring
+  /// the session back, so the server does not record a false "not tracking".
   Future<void> stop({
     bool flush = true,
+    bool announce = true,
     Duration flushTimeout = const Duration(seconds: 10),
   }) async {
     if (!_active) return;
@@ -314,12 +381,15 @@ class TrackingEngine {
         // Still queued on disk; the next session or app start drains it.
       }
     }
-    try {
-      await _sendHeartbeat(tracking: false).timeout(const Duration(seconds: 5));
-    } catch (_) {}
+    if (announce) {
+      try {
+        await _sendHeartbeat(tracking: false).timeout(const Duration(seconds: 5));
+      } catch (_) {}
+    }
     _buffer.clear();
     _lastPosition = null;
     _lastCapturedPosition = null;
+    _clock.stop();
     _emit();
   }
 
@@ -338,21 +408,29 @@ class TrackingEngine {
 
     _maybeCapture();
     _maybeAutoFlush();
+    _maybeSwitchStreamRate(now);
 
-    if (_lastHeartbeatAt == null ||
+    if (_statusDirty ||
+        _lastHeartbeatAt == null ||
         now.difference(_lastHeartbeatAt!) >= _heartbeatInterval) {
       _lastHeartbeatAt = now;
       unawaited(_sendHeartbeat(tracking: true));
     }
 
     // Watchdog: location is on but the stream has gone quiet — rebuild it.
-    final lastFix = _lastFixAt ?? _startedAt ?? now;
-    if (_locationEnabled && now.difference(lastFix) > _streamSilenceLimit) {
-      _lastFixAt = now; // don't re-trigger every tick while recovering
+    // Measured on RAW fixes, so a stream that only delivers unusable fixes is
+    // left alone (it is alive; the sky is the problem) and reported as weak.
+    final lastRaw = _lastRawFixAt ?? _startedAt ?? now;
+    if (_locationEnabled && now.difference(lastRaw) > _streamSilenceLimit) {
+      _lastRawFixAt = now; // don't re-trigger every tick while recovering
       unawaited(_resubscribe());
       unawaited(_primeWithCurrentPosition());
     }
 
+    if (_lastBatteryReadAt == null ||
+        now.difference(_lastBatteryReadAt!) > const Duration(minutes: 1)) {
+      unawaited(_readBattery());
+    }
     unawaited(_maybeRefreshConfig());
   }
 
@@ -371,11 +449,12 @@ class TrackingEngine {
   // ── Position stream ──────────────────────────────────────────────────────
 
   LocationSettings _settings() {
+    final interval = _streamFast ? _streamIntervalMoving : _streamIntervalStationary;
     if (defaultTargetPlatform == TargetPlatform.android) {
       return AndroidSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 0,
-        intervalDuration: _streamInterval,
+        intervalDuration: interval,
         foregroundNotificationConfig: _androidForegroundNotification,
       );
     }
@@ -387,7 +466,7 @@ class TrackingEngine {
         // background mode (guideline 2.5.4), and enabling background updates
         // without it crashes CoreLocation.
         allowBackgroundLocationUpdates: false,
-        activityType: ActivityType.other,
+        activityType: ActivityType.automotiveNavigation,
       );
     }
     return const LocationSettings(
@@ -414,6 +493,18 @@ class TrackingEngine {
     }();
   }
 
+  /// Adaptive sampling: 5 s while there has been movement in the last two
+  /// minutes, 30 s once parked. The first fix after the slow stream shows a
+  /// displacement switches straight back to the fast one.
+  void _maybeSwitchStreamRate(DateTime now) {
+    final movedRecently = _lastMovementAt != null &&
+        now.difference(_lastMovementAt!) < _stationaryAfter;
+    final wantFast = movedRecently || _lastCapturedPosition == null;
+    if (wantFast == _streamFast) return;
+    _streamFast = wantFast;
+    unawaited(_resubscribe());
+  }
+
   Future<void> _primeWithCurrentPosition() async {
     try {
       final pos = await Geolocator.getCurrentPosition(
@@ -428,11 +519,17 @@ class TrackingEngine {
 
   void _onPosition(Position p) {
     if (!_active) return;
-    _lastFixAt = DateTime.now();
+    _lastRawFixAt = DateTime.now();
     _locationEnabled = true;
-    // Ignore wild fixes entirely (a cell-tower guess 2 km wide tells us
-    // nothing); everything else is kept and the server grades it.
-    if (p.accuracy > _maxCaptureAccuracyMeters) return;
+    // Wild fixes (a cell-tower guess 2 km wide) tell us nothing about the
+    // route; they are counted so the heartbeat can say "GPS weak" rather than
+    // letting the server see a silent phone.
+    if (p.accuracy > CapturePolicy.maxCaptureAccuracyMeters) {
+      _poorFixes++;
+      _emit();
+      return;
+    }
+    _lastUsableFixAt = _lastRawFixAt;
     _lastPosition = p;
     _maybeCapture();
   }
@@ -441,6 +538,7 @@ class TrackingEngine {
     _lastError = e.toString();
     if (e is LocationServiceDisabledException) {
       _locationEnabled = false;
+      _statusDirty = true;
       _lastHeartbeatAt = DateTime.now();
       unawaited(_sendHeartbeat(tracking: true));
     }
@@ -451,7 +549,9 @@ class TrackingEngine {
     final enabled = status == ServiceStatus.enabled;
     if (enabled == _locationEnabled) return;
     _locationEnabled = enabled;
-    // Tell HR right away — this is the "location turned off" signal.
+    // Tell HR right away — this is the "location turned off" signal. If the
+    // phone is offline the heartbeat fails and stays dirty until it gets out.
+    _statusDirty = true;
     _lastHeartbeatAt = DateTime.now();
     unawaited(_sendHeartbeat(tracking: true));
     if (enabled) {
@@ -474,55 +574,38 @@ class TrackingEngine {
     return false;
   }
 
-  bool _isMoving(Position p) {
-    if (p.speed > _movingSpeedMps) return true;
-    final last = _lastCapturedPosition;
-    if (last == null) return false;
-    // Speed is often 0 on a phone in a pocket; displacement since the last
-    // captured point is the second opinion.
-    final d = Geolocator.distanceBetween(
-        last.latitude, last.longitude, p.latitude, p.longitude);
-    return d >= _cfg.minDisplacementMeters * 2;
-  }
-
-  Duration _intervalFor(Position p) {
-    if (_nearCustomer(p)) return Duration(seconds: _cfg.nearCustomerSeconds);
-    if (_isMoving(p)) return Duration(seconds: _cfg.movingSeconds);
-    return Duration(seconds: _cfg.stationarySeconds);
-  }
-
   void _maybeCapture() {
     final p = _lastPosition;
     if (!_active || p == null) return;
     final now = DateTime.now();
-
-    if (_lastCaptureAt != null &&
-        now.difference(_lastCaptureAt!) < _minCaptureGap) {
-      return;
-    }
-
-    final dueByTime = _lastCaptureAt == null ||
-        now.difference(_lastCaptureAt!) >= _intervalFor(p);
-
-    var movedFar = _lastCapturedPosition == null;
-    if (!movedFar) {
-      final d = Geolocator.distanceBetween(
-          _lastCapturedPosition!.latitude,
-          _lastCapturedPosition!.longitude,
-          p.latitude,
-          p.longitude);
-      // The jump has to clear the configured displacement AND the fix's own
-      // error radius, so a noisy fix while parked isn't travel.
-      final threshold = math.max(_cfg.minDisplacementMeters.toDouble(),
-          math.min(p.accuracy, _maxCaptureAccuracyMeters));
-      movedFar = d >= threshold;
-    }
-
-    if (!dueByTime && !movedFar) return;
-    _capture(p);
+    final last = _lastCapturedPosition;
+    final d = CapturePolicy.decide(
+      fixAt: p.timestamp,
+      lat: p.latitude,
+      lng: p.longitude,
+      accuracyMeters: p.accuracy,
+      speedMps: p.speed,
+      now: now,
+      lastCaptureAt: _lastCaptureAt,
+      lastCapturedFixAt: last?.timestamp,
+      lastCapturedLat: last?.latitude,
+      lastCapturedLng: last?.longitude,
+      nearCustomer: _nearCustomer(p),
+      movingSeconds: _cfg.movingSeconds,
+      stationarySeconds: _cfg.stationarySeconds,
+      nearCustomerSeconds: _cfg.nearCustomerSeconds,
+      minDisplacementMeters: _cfg.minDisplacementMeters,
+      distanceMeters: Geolocator.distanceBetween,
+    );
+    if (d.state == 'MOVING' || d.state == 'NEAR_CUSTOMER') _lastMovementAt = now;
+    if (!d.capture) return;
+    _capture(p, d.state);
   }
 
-  void _capture(Position p) {
+  void _capture(Position p, String state) {
+    final tag = _firstCapture ? 'START' : state;
+    _firstCapture = false;
+    _trackingState = state;
     final ping = LocationPing(
       // Idempotency key: employee + capture time + a counter. Travels with the
       // ping through the durable queue, so a batch retried after a timeout is
@@ -539,11 +622,19 @@ class TrackingEngine {
       // Android reports spoofed positions; iOS has no equivalent signal, so
       // null there means "unknown", not "genuine".
       mockLocation: p.isMocked,
+      batteryLevel: _battery,
+      provider: Platform.isIOS ? 'IOS' : 'FUSED',
+      trackingState: tag,
+      appVersion: appVersion,
+      elapsedRealtimeMs: _clock.elapsedMilliseconds,
     );
     _buffer.add(ping);
     // Durable first: an offline ping is never lost if the OS kills the process
-    // before it can be uploaded.
-    unawaited(store.append(employeeId, [ping]).catchError((_) {}));
+    // before it can be uploaded. A write failure is surfaced, not swallowed.
+    unawaited(store.append(employeeId, [ping]).catchError((Object e) {
+      _lastError = 'Could not save a GPS point on the phone: $e';
+      _emit();
+    }));
     _lastCaptureAt = DateTime.now();
     _lastCapturedPosition = p;
     _emit();
@@ -589,16 +680,17 @@ class TrackingEngine {
       final slice = _buffer.take(_flushChunk).toList(growable: false);
       _lastFlushAttemptAt = DateTime.now();
       try {
-        final saved = await repo.uploadBatch(
+        final result = await repo.uploadBatchAcked(
           LocationPingBatch(employeeId: employeeId, pings: slice),
         );
-        _buffer.removeRange(0, slice.length);
-        await store.removeConfirmed(employeeId, slice);
-        _sentCount += saved;
+        await _applyAcks(slice, result);
         _lastFlushedAt = DateTime.now();
         _lastError = null;
         _authExpired = false;
         _backoff = _backoffMin;
+        if (_flushChunk < _flushChunkMax) {
+          _flushChunk = (_flushChunk * 2).clamp(1, _flushChunkMax);
+        }
         _emit();
       } on ApiException catch (e) {
         if (e.statusCode == 401 || e.statusCode == 403) {
@@ -606,14 +698,25 @@ class TrackingEngine {
           // next login drains it. Never log the user out from here.
           _authExpired = e.statusCode == 401;
           _lastError = e.statusCode == 401
-              ? 'Session expired — pings are being saved on the device'
+              ? 'Session expired — points are being saved on this phone'
               : e.message;
-        } else if (e.statusCode == 400) {
-          // The server refused this slice outright (e.g. the payload shape). It
-          // will refuse it forever; drop it rather than wedge the queue.
-          _buffer.removeRange(0, slice.length);
-          await store.removeConfirmed(employeeId, slice);
+        } else if (e.statusCode == 413) {
+          // Too large for the server: send smaller slices from now on.
+          _flushChunk = (_flushChunk ~/ 2).clamp(1, _flushChunkMax);
           _lastError = e.message;
+          continue;
+        } else if (e.statusCode == 400 || e.statusCode == 422) {
+          // The server refused the slice outright. Never drop 200 points for one
+          // bad one: split and retry; a single refused point is dropped and counted.
+          if (slice.length > 1) {
+            _flushChunk = (slice.length ~/ 2).clamp(1, _flushChunkMax);
+            _lastError = e.message;
+            continue;
+          }
+          _buffer.removeRange(0, 1);
+          await store.removeConfirmed(employeeId, slice);
+          _droppedCount++;
+          _lastError = 'Server refused a GPS point: ${e.message}';
           continue;
         } else {
           _lastError = e.message;
@@ -632,11 +735,51 @@ class TrackingEngine {
     // keeps pace with the trail.
     if (_active) {
       final n = DateTime.now();
-      if (_lastHeartbeatAt == null ||
+      if (_statusDirty ||
+          _lastHeartbeatAt == null ||
           n.difference(_lastHeartbeatAt!) >= _heartbeatMinGap) {
         _lastHeartbeatAt = n;
         unawaited(_sendHeartbeat(tracking: true));
       }
+    }
+  }
+
+  /// Forgets exactly what the server acknowledged. Accepted and duplicate ids
+  /// leave the queue; samples the server can never store are dropped and
+  /// counted; anything unacknowledged (should not happen) is retried later.
+  Future<void> _applyAcks(List<LocationPing> slice, LocationPingBatchResult r) async {
+    final done = <String>{...r.acceptedClientIds, ...r.duplicateClientIds};
+    final dropped = <String>{};
+    for (final ref in r.rejectedRefs) {
+      if (ref.startsWith('#')) {
+        final idx = int.tryParse(ref.substring(1));
+        if (idx != null && idx >= 0 && idx < slice.length) {
+          final id = slice[idx].clientPingId;
+          if (id != null) dropped.add(id);
+        }
+      } else {
+        dropped.add(ref);
+      }
+    }
+    final forget = <String>{...done, ...dropped};
+    var legacyWithoutId = 0;
+    _buffer.removeWhere((p) {
+      final id = p.clientPingId;
+      if (id == null) {
+        // Pre-id pings cannot be matched; treat the uploaded ones as done.
+        if (slice.contains(p)) {
+          legacyWithoutId++;
+          return true;
+        }
+        return false;
+      }
+      return forget.contains(id);
+    });
+    _droppedCount += dropped.length;
+    _sentCount += r.saved;
+    await store.removeByIds(employeeId, forget, withoutId: legacyWithoutId);
+    if (dropped.isNotEmpty) {
+      _lastError = '${dropped.length} GPS point(s) refused by the server and dropped';
     }
   }
 
@@ -646,6 +789,15 @@ class TrackingEngine {
   }
 
   // ── Heartbeat & config ───────────────────────────────────────────────────
+
+  Future<void> _readBattery() async {
+    _lastBatteryReadAt = DateTime.now();
+    try {
+      _battery = await _batteryPlugin.batteryLevel;
+    } catch (_) {
+      // Plugin unavailable on this platform — battery stays unknown.
+    }
+  }
 
   Future<void> _sendHeartbeat({required bool tracking}) async {
     try {
@@ -659,15 +811,36 @@ class TrackingEngine {
       final perm = await Geolocator.checkPermission();
       final granted = perm == LocationPermission.always ||
           perm == LocationPermission.whileInUse;
+      bool? batteryExempt;
+      if (!kIsWeb && Platform.isAndroid) {
+        try {
+          batteryExempt = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
+        } catch (_) {}
+      }
+      final pos = _lastPosition;
       await repo.sendStatus(
         locationEnabled: enabled,
         permissionGranted: granted,
         tracking: tracking,
-        latitude: _lastPosition?.latitude,
-        longitude: _lastPosition?.longitude,
+        latitude: pos?.latitude,
+        longitude: pos?.longitude,
+        diagnostics: HeartbeatDiagnostics(
+          fixAt: pos?.timestamp.toUtc(),
+          accuracyMeters: pos?.accuracy,
+          pendingPings: _buffer.length,
+          lastCaptureAt: _lastCapturedPosition?.timestamp.toUtc(),
+          batteryLevel: _battery,
+          batteryOptimisationIgnored: batteryExempt,
+          backgroundLocationGranted: perm == LocationPermission.always,
+          serviceRunning: tracking && serviceHosted,
+          appVersion: appVersion,
+          poorFixesDiscarded: _poorFixes,
+        ),
       );
+      _statusDirty = false;
     } catch (_) {
-      // Best-effort — the ping queue carries the trail regardless.
+      // Best-effort — the ping queue carries the trail regardless. A status
+      // CHANGE that failed to send stays dirty and is retried on the next tick.
     }
   }
 
